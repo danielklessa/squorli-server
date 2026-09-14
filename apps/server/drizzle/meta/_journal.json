@@ -71,6 +71,13 @@
       "when": 1789376302071,
       "tag": "0009_lucky_prima",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789392016759,
+      "tag": "0010_milky_micromacro",
+      "breakpoints": true
     }
   ]
 }

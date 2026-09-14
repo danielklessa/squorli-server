@@ -37,6 +37,8 @@ export const serverSettings = pgTable("server_settings", {
   /** Server-Icon (Verwaltung): Datei liegt unter DATA_DIR/server-icon, hier MIME-Typ und Zeitpunkt (Cache-Version). */
   iconMime: text("icon_mime"),
   iconUpdatedAt: ts("icon_updated_at"),
+  /** Ed25519-Seed (hex) des Servers fuer die Registrierung beim Verzeichnis (M6); beim ersten Start erzeugt, bleibt danach gleich. */
+  directoryPrivateKey: text("directory_private_key"),
 });
 
 /** Mitgliedschaft. Wer hier fehlt, sieht nichts und kann nichts. */

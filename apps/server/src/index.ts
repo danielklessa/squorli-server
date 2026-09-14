@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
-import { PROTOCOL_VERSION } from "@squorli/protocol";
+import { DirectoryNotifyRequest, PROTOCOL_VERSION } from "@squorli/protocol";
 import Fastify from "fastify";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -23,6 +23,7 @@ import { registerMessageRoutes } from "./routes/messages";
 import { registerRoleRoutes } from "./routes/roles";
 import { registerSettingsRoutes } from "./routes/settings";
 import { registerUserRoutes } from "./users/routes";
+import { DirectoryClient, SYNC_INTERVAL_MS } from "./directory";
 import { broadcastStructure, loadSettings } from "./state";
 import { VoicePresence } from "./voice/presence";
 import { registerWs } from "./ws/handler";
@@ -58,9 +59,22 @@ async function main() {
   await app.register(cors, { origin: config.NODE_ENV !== "production" });
   await app.register(websocket);
 
+  // Verzeichnis-Anbindung (M6): Server-Schluessel + Token; init() nach bootstrap (Einstellungen), register() nach app.listen.
+  let directory: DirectoryClient | null = null;
+  // Push vom Verzeichnis nach einer Namensaenderung (DirectoryNotifyRequest): Nutzer neu laden. Gesetzt, sobald der Abgleich laeuft.
+  let notifyHandler: ((publicKey: string) => Promise<void>) | null = null;
+  app.post("/api/directory/notify", async (req, reply) => {
+    const body = DirectoryNotifyRequest.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    if (!notifyHandler) return reply.code(404).send({ error: "no_directory" });
+    void notifyHandler(body.data.publicKey).catch((err) => req.log.warn({ err }, "Verzeichnis-Push"));
+    return reply.code(204).send();
+  });
   app.get("/api/health", async () => ({
     ok: true,
     proxyMode: config.PROXY_MODE,
+    /** Oeffentlicher Server-Schluessel; das Verzeichnis prueft ihn bei der Server-Registrierung (Host-Nachweis). */
+    serverKey: directory?.serverKey ?? null,
     /** Servername und Icon fuer Seitentitel und Favicon schon vor dem Login (beides ist auch in der Einladungsvorschau sichtbar). */
     ...(await loadSettings(db).then((st) => ({ serverName: st.name, iconUrl: st.iconUrl })).catch(() => ({ serverName: null, iconUrl: null }))),
     /** Verzeichnisdienst (M6), den dieser Server anerkennt; der Client registriert Handles dort. null = keiner. */
@@ -72,6 +86,8 @@ async function main() {
   }));
 
   await bootstrap(db, config, app.log);
+  directory = new DirectoryClient(db, config, app.log);
+  await directory.init();
 
   const hub = new Hub();
   const presence = new VoicePresence<WebSocket>();
@@ -80,8 +96,8 @@ async function main() {
 
   // Uploads (Anhaenge, Server-Icon): eine Datei je Anfrage, Groesse nach MAX_UPLOAD_MB.
   await app.register(multipart, { limits: { fileSize: Math.round(config.MAX_UPLOAD_MB * 1024 * 1024), files: 1 } });
-  await registerAuthRoutes(app, db, config, hub);
-  await registerUserRoutes(app, db, hub, presence);
+  await registerAuthRoutes(app, db, config, hub, directory);
+  await registerUserRoutes(app, db, directory, hub, presence);
   await registerSettingsRoutes(app, db, hub, config);
   await registerChannelRoutes(app, db, hub, presence);
   await registerRoleRoutes(app, db, hub);
@@ -147,6 +163,20 @@ async function main() {
 
   await app.listen({ port: config.PORT, host: "0.0.0.0" });
   app.log.info({ proxyMode: config.PROXY_MODE, domain: config.PUBLIC_DOMAIN }, "app-server up");
+  if (directory.enabled) {
+    // Registrieren, dann alle 5 Minuten die Namen aller Nutzer abgleichen (Aenderungen auf der Kontoseite kommen so ohne Neuladen an).
+    const sync = async () => {
+      const changed = await directory!.syncAll((u) => presence.rename(u.userId, { displayName: u.displayName, publicKey: u.publicKey, handle: u.handle }));
+      if (changed) await broadcastStructure(db, hub, ["members"]);
+    };
+    void directory.register().then(() => sync()).catch((err) => app.log.warn({ err }, "Verzeichnis-Abgleich"));
+    notifyHandler = async (publicKey) => {
+      const changed = await directory!.syncOne(publicKey, (u) => presence.rename(u.userId, { displayName: u.displayName, publicKey: u.publicKey, handle: u.handle }));
+      if (changed) await broadcastStructure(db, hub, ["members"]);
+    };
+    const timer = setInterval(() => { void sync().catch((err) => app.log.warn({ err }, "Verzeichnis-Abgleich")); }, SYNC_INTERVAL_MS);
+    timer.unref(); // haelt den Prozess nicht am Leben (nach app.listen sind keine Hooks mehr moeglich)
+  }
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });

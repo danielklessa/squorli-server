@@ -33,9 +33,14 @@ const Env = z.object({
    * Schluessel -> Handle auf und gibt die URL an Clients weiter (Registrierung im Browser). Leer = ohne Verzeichnis.
    */
   DIRECTORY_URL: z.string().url().optional(),
+  /**
+   * URL, unter der das Verzeichnis die /api/health dieses Servers erreicht (Host-Nachweis bei der Server-Registrierung).
+   * Standard: https://PUBLIC_DOMAIN/api/health; bei PUBLIC_DOMAIN=localhost http://localhost:PORT/api/health (Dev).
+   */
+  DIRECTORY_PROOF_URL: z.string().url().optional(),
 });
 
-export type Config = z.infer<typeof Env> & { trustedProxies: string[]; livekitPublicUrl: string };
+export type Config = z.infer<typeof Env> & { trustedProxies: string[]; livekitPublicUrl: string; directoryProofUrl: string };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const cleaned = Object.fromEntries(Object.entries(env).filter(([, v]) => v !== ""));
@@ -50,5 +55,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     trustedProxies: c.TRUSTED_PROXIES.split(",").map((s) => s.trim()).filter(Boolean),
     livekitPublicUrl: (c.LIVEKIT_PUBLIC_URL ?? `wss://${c.PUBLIC_DOMAIN}`).replace(/\/+$/, ""),
     ...(c.DIRECTORY_URL ? { DIRECTORY_URL: c.DIRECTORY_URL.replace(/\/+$/, "") } : {}),
+    directoryProofUrl: c.DIRECTORY_PROOF_URL ?? (c.PUBLIC_DOMAIN === "localhost" ? `http://localhost:${c.PORT}/api/health` : `https://${c.PUBLIC_DOMAIN}/api/health`),
   };
 }

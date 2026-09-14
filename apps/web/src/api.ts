@@ -1,6 +1,7 @@
 import {
   Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
-  BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryBackupMessage, directoryRegisterMessage, openBackup,
+  BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryActionMessage, directoryBackupMessage, directoryProfilePayload,
+  directoryRegisterMessage, openBackup,
   type Attachment, type Category, type Channel, type Role,
 } from "@squorli/protocol";
 import { z } from "zod";
@@ -111,6 +112,13 @@ export async function directoryRestore(dirUrl: string, rawHandle: string, passwo
   if (id.publicKey !== blob.publicKey) throw new Error("Das Backup passt nicht zum registrierten Schlüssel.");
   return id;
 }
+/** Anzeigename im Verzeichnis: server = null -> global (alle Server), sonst nur fuer diesen Chat-Server (Host = dessen PUBLIC_DOMAIN). */
+export async function directorySetDisplayName(dirUrl: string, id: Identity, server: string | null, displayName: string | null): Promise<void> {
+  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
+  const signature = await sign(id, directoryActionMessage(health.host, "profile-update", ch.nonce, directoryProfilePayload(server, displayName)));
+  await directoryFetch(dirUrl, "POST", "/api/profile", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, server, displayName });
+}
 export function explainDirectoryError(err: unknown): string {
   if (err instanceof ApiError) {
     switch (err.code) {
@@ -128,6 +136,7 @@ export function explainDirectoryError(err: unknown): string {
       case "totp_required": return "Dieses Konto ist mit einem Authenticator geschützt. Bitte den Code aus der App oder einen Wiederherstellungscode eingeben.";
       case "totp_invalid": return "Code ungültig.";
       case "totp_reused": return "Dieser Code wurde schon verwendet. Bitte den nächsten aus der App abwarten.";
+      case "server_unknown": return "Dieser Server ist beim Verzeichnis nicht registriert; ein Name nur für diesen Server lässt sich deshalb nicht speichern.";
       case "totp_unavailable": return "Der Verzeichnisdienst kann den Authenticator gerade nicht prüfen.";
       default: return err.message;
     }

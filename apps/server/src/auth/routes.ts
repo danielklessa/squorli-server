@@ -8,12 +8,12 @@ import type { Db } from "../db";
 import { bans, invites, memberRoles, members, roles, serverSettings, sessions, users } from "../db/schema";
 import type { Hub } from "../hub";
 import { SETTINGS_ID, broadcastStructure, loadSettings } from "../state";
-import { refreshHandle } from "../directory";
+import type { DirectoryClient } from "../directory";
 import { ChallengeStore } from "./challenges";
 
 const hexToBytes = (h: string) => Uint8Array.from(Buffer.from(h, "hex"));
 
-export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: Config, hub: Hub) {
+export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: Config, hub: Hub, directory: DirectoryClient) {
   const challenges = new ChallengeStore();
   const sweeper = setInterval(() => challenges.sweep(), 30_000);
   app.addHook("onClose", async () => clearInterval(sweeper));
@@ -47,8 +47,8 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: C
     const [ban] = await db.select().from(bans).where(eq(bans.userId, user.id)).limit(1);
     if (ban) return reply.code(403).send({ error: "banned", reason: ban.reason });
 
-    // Verifiziertes Handle aus dem Verzeichnis (M6) nachschlagen; Ausfall des Dienstes ist kein Login-Fehler.
-    await refreshHandle(db, config, req.log, user.id, publicKey);
+    // Verifiziertes Handle und Anzeigename aus dem Verzeichnis (M6) nachschlagen; Ausfall des Dienstes ist kein Login-Fehler.
+    await directory.refresh({ id: user.id, publicKey, displayName: user.displayName });
 
     // Mitgliedschaft: bestehendes Mitglied, offener Server, oder gueltige Einladung.
     const [member] = await db.select().from(members).where(eq(members.userId, user.id)).limit(1);

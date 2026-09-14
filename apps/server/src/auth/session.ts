@@ -5,7 +5,7 @@ import type { Db } from "../db";
 import { sessions, users } from "../db/schema";
 import { actorOf } from "../state";
 
-export type SessionUser = { userId: string; sessionId: string; publicKey: string; displayName: string | null; handle: string | null };
+export type SessionUser = { userId: string; sessionId: string; publicKey: string; displayName: string | null; handle: string | null; handleCheckedAt: Date | null };
 
 /** last_used_at hoechstens alle 5 Minuten schreiben (Geraeteliste, M6c); nicht auf jeder Anfrage. */
 const TOUCH_INTERVAL_MS = 5 * 60_000;
@@ -13,7 +13,7 @@ const TOUCH_INTERVAL_MS = 5 * 60_000;
 /** Wird von WS-Handshake und geschuetzten Routen genutzt. Liefert den Nutzer hinter einem Session-Token. */
 export async function resolveSession(db: Db, token: string): Promise<SessionUser | null> {
   const [row] = await db
-    .select({ userId: sessions.userId, sessionId: sessions.id, expiresAt: sessions.expiresAt, lastUsedAt: sessions.lastUsedAt, publicKey: users.publicKey, displayName: users.displayName, handle: users.handle })
+    .select({ userId: sessions.userId, sessionId: sessions.id, expiresAt: sessions.expiresAt, lastUsedAt: sessions.lastUsedAt, publicKey: users.publicKey, displayName: users.displayName, handle: users.handle, handleCheckedAt: users.handleCheckedAt })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
     .where(eq(sessions.token, token))
@@ -22,7 +22,7 @@ export async function resolveSession(db: Db, token: string): Promise<SessionUser
   if (!row.lastUsedAt || Date.now() - row.lastUsedAt.getTime() > TOUCH_INTERVAL_MS) {
     void db.update(sessions).set({ lastUsedAt: new Date() }).where(eq(sessions.token, token)).catch(() => { /* nur Anzeige, kein Grund zum Abbruch */ });
   }
-  return { userId: row.userId, sessionId: row.sessionId, publicKey: row.publicKey, displayName: row.displayName, handle: row.handle };
+  return { userId: row.userId, sessionId: row.sessionId, publicKey: row.publicKey, displayName: row.displayName, handle: row.handle, handleCheckedAt: row.handleCheckedAt };
 }
 
 function bearer(req: FastifyRequest): string | null {

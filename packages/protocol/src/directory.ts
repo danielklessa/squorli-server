@@ -44,12 +44,21 @@ export const DirectoryRegisterRequest = z.object({
   signature: Signature,
 });
 
+/** Anzeigename (Chat-Server: pro Server, PLAN 3.2; Verzeichnis: global und je Server). Leer = Handle bzw. Kurzform des Schluessels. */
+export const DisplayName = z.string().trim().min(1).max(32);
+/** Host eines Chat-Servers (PUBLIC_DOMAIN, ggf. mit Port), Schluessel der Anzeigenamen je Server im Verzeichnis. */
+export const ServerHost = z.string().trim().toLowerCase().min(1).max(253).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d{1,5})?$/, "Hostname, optional mit Port");
+
 export const DirectoryAccount = z.object({
   handle: Handle,
   publicKey: PublicKey,
   createdAt: Iso,
   /** M6b: Passwort-Backup vorhanden (Anmeldung auf anderen Geraeten moeglich). */
   hasBackup: z.boolean().default(false),
+  /** Globaler Anzeigename; nur fuer registrierte Chat-Server (Server-Token, `?server=<host>`), oeffentlich immer null. */
+  displayName: DisplayName.nullable().default(null),
+  /** Anzeigename fuer genau den Server aus `?server=<host>` (nur mit dessen Token); null ohne Eintrag. Gilt vor `displayName`. */
+  serverDisplayName: DisplayName.nullable().default(null),
 });
 
 // ---- M6b: passwortverschluesseltes Schluessel-Backup (Krypto in backup.ts)
@@ -90,13 +99,52 @@ export const BackupBlob = z.object({ handle: Handle, publicKey: PublicKey, ciphe
 
 // ---- M6c: signierte Kontoaktionen (Authenticator, Wiederherstellungscodes, Kontostatus). Gleiches Muster wie Registrierung
 // und Backup: Challenge + Signatur ueber Host, Nonce und Nutzlast (bei Aktionen mit Code ist der Code die Nutzlast).
-export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status"]);
+export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update"]);
 export type DirectoryAction = z.infer<typeof DirectoryAction>;
 export function directoryActionMessage(directoryHost: string, action: DirectoryAction, nonce: string, payload = ""): string {
   return `community-directory-${action}\n${directoryHost}\n${nonce}\n${payload}`;
 }
 export const SignedActionRequest = z.object({ publicKey: PublicKey, challengeId: Uuid, signature: Signature });
 export const CodeActionRequest = SignedActionRequest.extend({ code: SecondFactorCode });
+
+// ---- Anzeigenamen im Verzeichnis: global (server = null) oder je Chat-Server (server = dessen Host). Registrierte Chat-Server
+// holen beim Login `GET /api/keys/<key>?server=<host>` (mit ihrem Server-Token) und uebernehmen serverDisplayName ?? displayName.
+// Die Nutzlast der Signatur ist "<server|leer>\n<name|leer>", damit weder Server noch Name ausgetauscht werden koennen.
+export function directoryProfilePayload(server: string | null, displayName: string | null): string {
+  return `${server ?? ""}\n${displayName ?? ""}`;
+}
+export const ProfileUpdateRequest = SignedActionRequest.extend({ server: ServerHost.nullable(), displayName: DisplayName.nullable() });
+/** Ein Chat-Server, der den Schluessel nachgeschlagen hat (Login dort), mit dem dort geltenden Anzeigenamen (Kontoseite). `verified` = beim Verzeichnis registriert. */
+export const AccountServer = z.object({ host: ServerHost, name: z.string().nullable(), displayName: DisplayName.nullable(), lastSeenAt: Iso, verified: z.boolean().default(false) });
+
+// ---- Server-Registrierung: ein Chat-Server weist seinen Schluessel nach (Signatur ueber Host + Nonce) und die Kontrolle ueber
+// seinen Host (das Verzeichnis liest `proofUrl`, die /api/health des Servers, und vergleicht `serverKey`). Danach darf er mit dem
+// Token (Bearer, 24 h, bei 401 neu registrieren) Handle und Anzeigenamen seiner Nutzer lesen; ohne Token gibt es nur Handle + Schluessel.
+export function directoryServerRegisterMessage(directoryHost: string, host: string, nonce: string): string {
+  return `community-directory-server-register\n${directoryHost}\n${host}\n${nonce}`;
+}
+export const ServerRegisterRequest = z.object({
+  host: ServerHost,
+  name: z.string().trim().max(80).nullable().default(null),
+  publicKey: PublicKey,
+  challengeId: Uuid,
+  signature: Signature,
+  /** /api/health des Chat-Servers; muss auf `host` zeigen (https; http nur fuer localhost/127.0.0.1) und `serverKey` = publicKey liefern. */
+  proofUrl: z.string().url(),
+});
+export const ServerRegisterResponse = z.object({ host: ServerHost, token: z.string().regex(/^[0-9a-f]{64}$/), expiresAt: Iso });
+/** Sammelabfrage eines registrierten Servers (Bearer-Token): Handle + Namen fuer viele Schluessel auf einmal (periodischer Abgleich). Unbekannte Schluessel fehlen in der Antwort. */
+export const ServerResolveRequest = z.object({ publicKeys: z.array(PublicKey).min(1).max(200) });
+export const ServerResolveResponse = z.array(DirectoryAccount);
+/**
+ * Push vom Verzeichnis an einen registrierten Chat-Server (POST <proofUrl-Basis>/api/directory/notify) nach einer Namensaenderung:
+ * nur der Schluessel, keine Daten. Der Server holt den Stand selbst mit seinem Token (deshalb braucht der Push keine Signatur;
+ * ein Fremder kann hoechstens einen ueberfluessigen Abruf ausloesen).
+ */
+export const DirectoryNotifyRequest = z.object({ publicKey: PublicKey });
+export type ServerResolveRequest = z.infer<typeof ServerResolveRequest>;
+export type ServerRegisterRequest = z.infer<typeof ServerRegisterRequest>;
+export type ServerRegisterResponse = z.infer<typeof ServerRegisterResponse>;
 
 /** Antwort auf totp-setup: Geheimnis (base32, 20 Byte) fuer QR-Code und Abtippen; aktiv wird es erst mit totp-enable. */
 export const TotpSetupResponse = z.object({ secret: z.string().regex(/^[A-Z2-7]{32}$/), otpauth: z.string().url(), issuer: z.string() });
@@ -115,6 +163,7 @@ export const AccountStatus = DirectoryAccount.extend({
   totpPending: z.boolean(),
   recoveryCodesLeft: z.number().int().min(0),
   fetches: z.array(KeyFetch),
+  servers: z.array(AccountServer),
 });
 
 export const DirectoryHealth = z.object({
@@ -136,3 +185,4 @@ export type TotpSetupResponse = z.infer<typeof TotpSetupResponse>;
 export type RecoveryCodesResponse = z.infer<typeof RecoveryCodesResponse>;
 export type KeyFetch = z.infer<typeof KeyFetch>;
 export type AccountStatus = z.infer<typeof AccountStatus>;
+export type AccountServer = z.infer<typeof AccountServer>;

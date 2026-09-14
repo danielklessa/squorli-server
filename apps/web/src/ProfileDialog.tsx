@@ -1,4 +1,4 @@
-import type { Me, SessionInfo } from "@squorli/protocol";
+import type { DirectoryAccount, Me, SessionInfo } from "@squorli/protocol";
 import { useCallback, useEffect, useState } from "react";
 import { getSessions, revokeOtherSessions, revokeSession, updateMe } from "./api";
 import { askConfirm } from "./dialogs";
@@ -15,12 +15,20 @@ const fmt = (iso: string) => new Date(iso).toLocaleString("de-DE", { dateStyle: 
 
 /**
  * Profil-Dialog als kategorisiertes Modal (Kategorien links, wie Einstellungen und Verwaltung):
- * Profil (Anzeigename), Geraete (Sitzungen auf diesem Server mit Fernabmeldung, M6c), Konto (Handle, Schluessel,
- * Link zur Kontoseite des Verzeichnisses, Abmelden, Identitaet verwerfen).
+ * Profil (Anzeigename auf diesem Server; mit Verzeichniskonto zusaetzlich der globale Name, beide werden dort signiert
+ * hinterlegt), Geraete (Sitzungen auf diesem Server mit Fernabmeldung, M6c), Konto (Handle, Schluessel, Link zur Kontoseite
+ * des Verzeichnisses, Abmelden, Identitaet verwerfen).
  */
-export function ProfileDialog({ me, directoryUrl, onClose, onLogout, onForget }: { me: Me; directoryUrl: string | null; onClose: () => void; onLogout: () => void; onForget: () => void }) {
+export function ProfileDialog({ me, directoryUrl, directoryAccount, serverDomain, onSaveDirectoryName, onClose, onLogout, onForget }: {
+  me: Me; directoryUrl: string | null; directoryAccount: DirectoryAccount | null | undefined; serverDomain: string | null;
+  onSaveDirectoryName: (server: string | null, displayName: string | null) => Promise<void>;
+  onClose: () => void; onLogout: () => void; onForget: () => void;
+}) {
   const [tab, setTab] = useState<Tab>("profile");
   const [name, setName] = useState(me.displayName ?? "");
+  const [globalName, setGlobalName] = useState(directoryAccount?.displayName ?? "");
+  // Mit Verzeichniskonto: der lokale Name ist der Server-Eintrag im Verzeichnis, leer = globaler Name.
+  const withDirectory = !!directoryAccount && !!serverDomain;
   const [err, setErr] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -38,7 +46,18 @@ export function ProfileDialog({ me, directoryUrl, onClose, onLogout, onForget }:
   useEffect(() => { if (tab === "devices") void loadSessions(); }, [tab, loadSessions]);
 
   async function save() {
-    try { await updateMe(name.trim() || null); onClose(); } catch (e) { setErr(String(e)); }
+    const local = name.trim() || null;
+    const global = globalName.trim() || null;
+    setBusy(true);
+    try {
+      if (withDirectory) {
+        // Server-Name nur als Abweichung vom globalen speichern; identisch = Eintrag leeren.
+        await onSaveDirectoryName(serverDomain, local === global ? null : local);
+        if (global !== (directoryAccount?.displayName ?? null)) await onSaveDirectoryName(null, global);
+      }
+      await updateMe(local ?? global);
+      onClose();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   }
   async function revoke(s: SessionInfo) {
     const ok = await askConfirm({ title: "Gerät abmelden?", text: `${s.label ?? "Dieses Gerät"} (angemeldet am ${fmt(s.createdAt)}) wird sofort abgemeldet.`, confirmLabel: "Abmelden", danger: true });
@@ -78,8 +97,15 @@ export function ProfileDialog({ me, directoryUrl, onClose, onLogout, onForget }:
               <>
                 <h3>Anzeigename auf diesem Server</h3>
                 <input value={name} maxLength={32} autoFocus onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void save(); }} />
-                <span className="muted small">Leer = Handle bzw. Kurzform des Schlüssels.</span>
-                <div className="row"><button onClick={() => void save()}>Speichern</button></div>
+                <span className="muted small">{withDirectory ? "Leer = dein Name auf allen Servern (unten) bzw. dein Handle." : "Leer = Handle bzw. Kurzform des Schlüssels."}</span>
+                {withDirectory && (
+                  <>
+                    <h3>Anzeigename auf allen Servern</h3>
+                    <input value={globalName} maxLength={32} onChange={(e) => setGlobalName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void save(); }} />
+                    <span className="muted small">Wird bei {dirHost} zu deinem Konto @{directoryAccount?.handle} gespeichert und gilt auf jedem Server, für den du keinen eigenen Namen setzt. Andere Server übernehmen ihn beim nächsten Öffnen.</span>
+                  </>
+                )}
+                <div className="row"><button disabled={busy} onClick={() => void save()}>Speichern</button></div>
               </>
             )}
 

@@ -108,6 +108,34 @@ const [, health0] = await api("GET", "/api/health");
 check("health names directory (null or url)", "directoryUrl" in health0 && ("handle" in ownerState.members.find((m) => m.userId === owner.userId)), `directory ${health0.directoryUrl ?? "keins"}`);
 // Mit Verzeichnisdienst (M6): Handle des Eigentuemers wurde beim Login nachgeschlagen (registriert weiter oben).
 if (health0.directoryUrl) check("owner handle resolved via directory", typeof ownerState.members.find((m) => m.userId === owner.userId)?.handle === "string", ownerState.members.find((m) => m.userId === owner.userId)?.handle);
+check("health publishes serverKey (directory registration)", /^[0-9a-f]{64}$/.test(health0.serverKey ?? ""));
+// Anzeigename aus dem Verzeichnis: der Server ist dort registriert (Token) und uebernimmt global/je Server beim Login; ohne Eintrag bleibt der lokale.
+if (health0.directoryUrl) {
+  const dir = health0.directoryUrl;
+  const dj = async (method, path, body) => { const r = await fetch(dir + path, { method, headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined }); return [r.status, await r.json().catch(() => ({}))]; };
+  const [, dh] = await dj("GET", "/api/health");
+  const setName = async (server, displayName) => {
+    const [, ch] = await dj("POST", "/api/challenge", { publicKey: ownerKey.publicKey });
+    const msg = `community-directory-profile-update\n${dh.host}\n${ch.nonce}\n${server ?? ""}\n${displayName ?? ""}`;
+    const signature = Buffer.from(await ed.signAsync(new TextEncoder().encode(msg), ownerKey.priv)).toString("hex");
+    return dj("POST", "/api/profile", { publicKey: ownerKey.publicKey, challengeId: ch.challengeId, signature, server, displayName });
+  };
+  const nameAfterLogin = async () => { const o = await login(ownerKey); const [, st] = await api("GET", "/api/state", undefined, o.token); return st.members.find((m) => m.userId === owner.userId)?.displayName; };
+  const [sg] = await setName(null, "Smoke Global");
+  check("directory: global display name applied at login", sg === 200 && (await nameAfterLogin()) === "Smoke Global");
+  const [ss] = await setName(health0.domain.toLowerCase(), "Smoke Hier");
+  check("directory: server display name wins at login", ss === 200 && (await nameAfterLogin()) === "Smoke Hier");
+  const [spush] = await setName(health0.domain.toLowerCase(), "Smoke Push");
+  await new Promise((r) => setTimeout(r, 800));
+  const [, stPush] = await api("GET", "/api/state", undefined, owner.token);
+  check("directory: name change is pushed to the server without a new login", spush === 200 && stPush.members.find((m) => m.userId === owner.userId)?.displayName === "Smoke Push", stPush.members.find((m) => m.userId === owner.userId)?.displayName);
+  await setName(health0.domain.toLowerCase(), null);
+  await setName(null, null);
+  await new Promise((r) => setTimeout(r, 800)); // Pushes abwarten, bevor der lokale Name geleert wird
+  await api("PATCH", "/api/me", { displayName: null }, owner.token);
+  const handleName = ownerState.members.find((m) => m.userId === owner.userId)?.handle;
+  check("directory: names cleared -> local null stays, handle shown", (await nameAfterLogin()) === `@${handleName}`);
+}
 check("bootstrap created channels", ownerState.channels?.some((c) => c.kind === "text") && ownerState.channels?.some((c) => c.kind === "voice"));
 const defaultRole = ownerState.roles.find((r) => r.isDefault);
 check("default role exists", !!defaultRole);

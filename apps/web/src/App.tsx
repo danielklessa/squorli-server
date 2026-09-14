@@ -167,7 +167,8 @@ export function App() {
       {showAdmin && <AdminPanel server={server} onClose={() => setShowAdmin(false)} />}
       {cameraPick && <CameraPicker cameras={cameraPick} initial={voiceSettings.cameraDeviceId} initialBlur={voiceSettings.cameraBlur} onPick={(id, b) => { void pickCamera(id, b); }} onCancel={() => setCameraPick(null)} />}
       {showProfile && (
-        <ProfileDialog me={state.me} directoryUrl={state.directoryUrl} onClose={() => setShowProfile(false)}
+        <ProfileDialog me={state.me} directoryUrl={state.directoryUrl} directoryAccount={state.directoryAccount} serverDomain={state.serverDomain}
+          onSaveDirectoryName={(server, n) => store.setDirectoryName(server, n)} onClose={() => setShowProfile(false)}
           onLogout={() => { setShowProfile(false); void client.leave(); store.logout(); }}
           onForget={() => { setShowProfile(false); void client.leave(); void store.forgetIdentity(); }} />
       )}

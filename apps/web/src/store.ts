@@ -37,6 +37,8 @@ export type State = {
   /** Servername und Icon aus /api/health, fuer Seitentitel und Favicon schon vor dem Login. */
   serverName: string | null;
   iconUrl: string | null;
+  /** PUBLIC_DOMAIN dieses Servers (aus /api/health): Schluessel des Anzeigenamens je Server im Verzeichnis. */
+  serverDomain: string | null;
 };
 
 const SESSION_KEY = "chat.session.v1";
@@ -47,7 +49,7 @@ export class Store {
   state: State = {
     identity: null, me: null, userId: null, connection: "idle", error: null, removed: null, server: null,
     voice: {}, messages: {}, typing: {}, currentChannelId: null, unread: {}, log: [],
-    directoryUrl: null, directoryAccount: undefined, directoryError: null, serverName: null, iconUrl: null,
+    directoryUrl: null, directoryAccount: undefined, directoryError: null, serverName: null, iconUrl: null, serverDomain: null,
   };
   private listeners = new Set<(s: State) => void>();
   private ws: WebSocket | null = null;
@@ -89,7 +91,7 @@ export class Store {
   async refreshDirectory(): Promise<void> {
     const health = await api.getHealth().catch(() => null);
     const directoryUrl = health?.directoryUrl ?? null;
-    this.set({ directoryUrl, directoryError: null, serverName: health?.serverName ?? null, iconUrl: health?.iconUrl ?? null });
+    this.set({ directoryUrl, directoryError: null, serverName: health?.serverName ?? null, iconUrl: health?.iconUrl ?? null, serverDomain: health?.domain?.toLowerCase() ?? null });
     const id = this.state.identity;
     if (!directoryUrl || !id) { this.set({ directoryAccount: null }); return; }
     try { this.set({ directoryAccount: await api.directoryLookup(directoryUrl, id.publicKey) }); }
@@ -135,6 +137,16 @@ export class Store {
     this.set({ identity: id, directoryAccount: undefined, connection: "idle" });
     void this.refreshDirectory();
     await this.login(invite);
+  }
+
+  /** Anzeigename im Verzeichnis setzen (server = null: global, sonst dieser Server); wirft bei Fehlern (Meldung uebersetzt). */
+  async setDirectoryName(server: string | null, displayName: string | null): Promise<void> {
+    const id = this.state.identity; const url = this.state.directoryUrl;
+    if (!id || !url) throw new Error("Kein Verzeichnis.");
+    try { await api.directorySetDisplayName(url, id, server, displayName); }
+    catch (err) { throw new Error(api.explainDirectoryError(err)); }
+    const acc = this.state.directoryAccount;
+    if (acc && server === null) this.set({ directoryAccount: { ...acc, displayName } });
   }
 
   /** M6b: Passwort-Backup fuer den Geraeteschluessel beim Verzeichnis ablegen. */

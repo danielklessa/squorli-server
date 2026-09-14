@@ -3,17 +3,28 @@ import { and, desc, eq, lt, ne, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { requireSession } from "../auth/session";
 import type { Db } from "../db";
+import { directoryStale, type DirectoryClient } from "../directory";
 import { sessions, users } from "../db/schema";
 import type { Hub } from "../hub";
 import { broadcastStructure } from "../state";
 import type { VoicePresence } from "../voice/presence";
 
 /** Profil des angemeldeten Nutzers (M2: Anzeigename) und seine Sitzungen (M6c: Geraeteverwaltung). Funktioniert auch ohne Mitgliedschaft. */
-export async function registerUserRoutes(app: FastifyInstance, db: Db, hub: Hub, presence: VoicePresence) {
+export async function registerUserRoutes(app: FastifyInstance, db: Db, directory: DirectoryClient, hub: Hub, presence: VoicePresence) {
   app.get("/api/me", async (req, reply) => {
     const s = await requireSession(db, req, reply);
     if (!s) return;
-    const me: Me = { userId: s.userId, publicKey: s.publicKey, displayName: s.displayName, handle: s.handle };
+    let { displayName, handle } = s;
+    // Anzeigename aus dem Verzeichnis (global oder fuer diesen Server) ohne neuen Login uebernehmen: der Client ruft /api/me beim Oeffnen.
+    if (directory.enabled && directoryStale(s.handleCheckedAt)) {
+      const fresh = await directory.refresh({ id: s.userId, publicKey: s.publicKey, displayName: s.displayName });
+      if (fresh && (fresh.displayName !== s.displayName || fresh.handle !== s.handle)) {
+        ({ displayName, handle } = fresh);
+        presence.rename(s.userId, { displayName, publicKey: s.publicKey, handle });
+        await broadcastStructure(db, hub, ["members"]);
+      }
+    }
+    const me: Me = { userId: s.userId, publicKey: s.publicKey, displayName, handle };
     return me;
   });
 

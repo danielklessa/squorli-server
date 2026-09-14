@@ -12,6 +12,7 @@ export * from "./backup";
 export * from "./useragent";
 export { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { Iso, PublicKey, Signature, Uuid } from "./primitives";
+import { DisplayName } from "./directory";
 
 /** Bei inkompatiblen Aenderungen erhoehen. Server lehnt aeltere Clients ab. */
 export const PROTOCOL_VERSION = 4; // v4: voice.moved/voice.stop, Member.streamBlocked, MODERATE_VOICE
@@ -45,8 +46,7 @@ export function challengeMessage(domain: string, nonce: string): string {
 
 // ---------- Profil ----------
 
-/** Anzeigename pro Server (siehe PLAN 3.2). Leer = Kurzform des Schluessels. */
-export const DisplayName = z.string().trim().min(1).max(32);
+// DisplayName liegt in directory.ts (das Verzeichnis nutzt dasselbe Schema).
 export const Me = z.object({
   userId: Uuid,
   publicKey: PublicKey,

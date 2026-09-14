@@ -275,7 +275,9 @@ Handle registration, mapping handle → public key, encrypted key backup, device
 | M6a | Register a handle (proof of ownership by signature), resolution in both directions, chat server shows verified handles | done 14 September 2026 |
 | M6b | Password-encrypted key backup (PBKDF2 + HKDF + AES-GCM in the client, the service only sees ciphertext and the hash of an auth key), account page of the service for creating an account with handle + password and for changing the password, login on any chat server with handle + password | done 14 September 2026 |
 | M6c | TOTP authenticator as second factor for key retrieval and account changes (secret encrypted with `DIRECTORY_SECRET_KEY`, each code only once), ten recovery codes (hashed only), device management: sessions per chat server with device label and remote logout (WebSocket close 4011) plus list of key retrievals on the account page; e-mail confirmation as soon as SMTP arrives | done 14 September 2026 (without e-mail) |
-| M6d | Server directory, server registration by operators | open |
+| M6c+ | Display names in the directory: one global name and one per chat server (override), set signed on the account page or in the chat profile dialog; chat servers take them at login and refresh them on `GET /api/me`; the names are readable only by the registered chat server of that host | done 14 September 2026 |
+| M6d (1/2) | Server registration: each chat server has its own key, registers at the directory with a signature and a host proof (the directory fetches the server's `/api/health` and compares `serverKey`), gets a 24-h token and may then read only its own users' names; the directory records logins per server for the account page, pushes name changes to the servers concerned and the servers re-sync all users every 5 minutes | done 14 September 2026 |
+| M6d (2/2) | Server directory: listing of registered servers, join via link | open |
 
 **Not in release 1:** Mobile clients, recording, end-to-end encryption of media, bot API, threads, federation between servers.
 
