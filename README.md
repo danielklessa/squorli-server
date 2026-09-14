@@ -78,6 +78,8 @@ docker compose --env-file ../.env --profile external up -d    # your own proxy, 
 
 `--env-file ../.env` is required: otherwise Compose only substitutes the `${...}` placeholders in `compose.yml` from a `.env` in the `deploy/` folder, and password and LiveKit keys would remain empty.
 
+By default Compose builds the image from this repo. To use a prebuilt image instead (the GitLab pipeline in `.gitlab-ci.yml` pushes one to the project registry on every push to the default branch and on git tags), set `APP_IMAGE=<registry>/<group>/squorli-server:<tag>` in `.env` and run `docker compose --env-file ../.env pull` before `up`.
+
 Open ports: `443/tcp` (bundled only), `7881/tcp`, `7882/udp`. TURN is prepared but off by default (needs a certificate, see `deploy/livekit/livekit.yaml`).
 
 ## License

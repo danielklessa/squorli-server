@@ -3,13 +3,14 @@
 #   PROXY_MODE=external -> docker compose --env-file ../.env --profile external up -d   (your proxy, see proxies/README.md)
 # --env-file ../.env is mandatory: otherwise the ${...} placeholders here are only filled from deploy/.env (empty).
 # Media ports (UDP 7882, TCP 7881) go directly to LiveKit in BOTH modes, never through an HTTP proxy.
+# Image: either build it here (build from this repo) or specify a prebuilt image via APP_IMAGE (e.g. from the GitLab registry, see .gitlab-ci.yml).
 
 name: squorli
 
 services:
   app:
     build: { context: .., dockerfile: Dockerfile, target: app }
-    image: squorli/app:local
+    image: ${APP_IMAGE:-squorli/app:local}
     restart: unless-stopped
     env_file: ../.env
     environment:

@@ -1,0 +1,74 @@
+# test:  typecheck + vitest + build on every push and merge request
+# build: production image (Dockerfile, target "app") into the project registry on the default branch
+#        (tags <branch-slug>, <short-sha>, latest) and on git tags (<tag>, latest).
+#        Use it on the servers via APP_IMAGE in .env, see deploy/compose.yml.
+# Modelled on ../squorli-directory/.gitlab-ci.yml; keep both in step.
+
+stages:
+  - test
+  - build
+
+variables:
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_HOST: tcp://docker:2375
+  IMAGE_TAG: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+  IMAGE_TAG_SHA: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+
+test:
+  stage: test
+  image: node:22-alpine
+  variables:
+    PNPM_HOME: $CI_PROJECT_DIR/.pnpm
+  cache:
+    key: pnpm-$CI_COMMIT_REF_SLUG
+    paths:
+      - .pnpm-store
+  before_script:
+    - corepack enable
+    - pnpm config set store-dir $CI_PROJECT_DIR/.pnpm-store
+    - pnpm install --frozen-lockfile
+  script:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+build:
+  stage: build
+  image: docker:29
+  services:
+    - docker:29-dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - |
+      docker build \
+        --target app \
+        --cache-from $IMAGE_TAG \
+        --provenance=false \
+        --tag $IMAGE_TAG \
+        --tag $IMAGE_TAG_SHA \
+        .
+    - docker push $IMAGE_TAG
+    - docker push $IMAGE_TAG_SHA
+    - docker tag $IMAGE_TAG $CI_REGISTRY_IMAGE:latest
+    - docker push $CI_REGISTRY_IMAGE:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+build-tag:
+  stage: build
+  image: docker:29
+  services:
+    - docker:29-dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker build --target app --provenance=false --tag $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG --tag $CI_REGISTRY_IMAGE:latest .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
+    - docker push $CI_REGISTRY_IMAGE:latest
+  rules:
+    - if: $CI_COMMIT_TAG

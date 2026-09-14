@@ -75,6 +75,7 @@ tools/icons.mjs        collects all `<Icon name>` names in the web client, gener
 tools/bots.mjs         Load test bots: `lk load-test` from the image livekit/livekit-cli, attaches to the network of the LiveKit dev container; `--video N` for camera bots (M3 bandwidth measurement)
 Dockerfile             Multi-stage build, target `app` (web + server); `pnpm deploy --legacy` (pnpm 10 requires the flag), runtime image only dist + drizzle + node_modules + public
 .dockerignore          keeps node_modules, dist, .env, public out of the build context
+.gitlab-ci.yml         GitLab CI: `test` (typecheck, vitest, build; every push/MR/tag), `build` (image target `app` into the project registry on the default branch: `<branch-slug>`, `<short-sha>`, `latest`), `build-tag` (on git tags: `<tag>`, `latest`). Modelled on `../squorli-directory/.gitlab-ci.yml`, keep both in step. Servers use the image via `APP_IMAGE` in `.env` (compose.yml: `${APP_IMAGE:-squorli/app:local}`)
 .env.example           Template for production (.env in the repo root, read by compose.yml)
 .env.development       Template for local development (copy to apps/server/.env)
 ```
@@ -249,6 +250,7 @@ Fixed in M1: the RTC URL ended in `/rtc` (the SDK appends it itself); the LiveKi
 
 | Date | Change |
 |---|---|
+| 2026-09-14 | `.gitlab-ci.yml` (test + image build into the GitLab registry, modelled on the directory repo); `deploy/compose.yml` takes a prebuilt image via `APP_IMAGE` (default `squorli/app:local`, build from the repo), variable documented in `.env.example`. |
 | 2026-09-14 | Directory service moved out of the monorepo into the unpublished sibling repo `../squorli-directory` (user's decision): `apps/directory`, `deploy/directory/`, `postgres/init-directory.sql`, the `directory` Compose profile, `/id` in Caddy/nginx/overlays, the Dockerfile target and the `smoke:directory`/`db:generate:directory` scripts removed here; `tools/dev.mjs` no longer creates the `directory` database. New section 2a with the sync rules for the protocol copy and the brand package. |
 | 2026-09-14 | All documentation, READMEs and AI instructions (AGENTS.md, CLAUDE.md, docs/PLAN.md, docs/brand, deploy READMEs, comments in env templates, compose files, Caddy/nginx/LiveKit configs and the Dockerfile) translated to English (user decision: docs are always English from now on). Code comments and UI texts stay German. |
 | 2026-09-14 | Page title = server name (also in the login, from `/api/health`), server icon in the admin panel (upload/remove, favicon, sidebar; migration 0009), multiple owners (`members.is_owner`, `PUT /api/members/:id/owner`, owner group at the very top of the member list, first owner cannot be demoted). Smoke test +6 checks. |
