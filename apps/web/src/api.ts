@@ -60,12 +60,19 @@ export async function explainLoginError(err: unknown): Promise<string> {
     case "challenge_invalid": return "Anmeldung abgelehnt: Challenge abgelaufen oder Server neu gestartet. Bitte erneut versuchen.";
     case "invite_required": return "Dieser Server ist nur mit Einladung betretbar. Bitte Einladungscode eingeben.";
     case "invite_invalid": return "Die Einladung ist ungültig, abgelaufen oder aufgebraucht.";
+    case "account_required": return "Dieser Server verlangt ein Konto beim Verzeichnis. Melde dich mit einem Konto an oder registriere ein Handle für diesen Schlüssel.";
     case "banned": return `Du bist auf diesem Server gebannt${typeof err.body.reason === "string" && err.body.reason ? `: ${err.body.reason}` : "."}`;
     default: return err.message;
   }
 }
 
-export type Health = { ok: boolean; domain: string; protocolVersion: number; directoryUrl: string | null; serverName: string | null; iconUrl: string | null };
+export type Health = {
+  ok: boolean; domain: string; protocolVersion: number; directoryUrl: string | null; serverName: string | null; iconUrl: string | null;
+  /** Anmeldung nur mit Verzeichniskonto (Verwaltung > Server); der Server meldet false, wenn er kein Verzeichnis nutzt. */
+  requireAccount: boolean;
+  /** Serverversion (package.json), im Login unten neben dem Squorli-Hinweis. */
+  version: string;
+};
 export const getHealth = () => request<Health>("GET", "/api/health", undefined, { auth: false });
 
 // ---------- Verzeichnisdienst (M6): laeuft unter eigener URL, wird direkt aus dem Browser aufgerufen
@@ -174,7 +181,7 @@ export async function uploadAttachment(file: File): Promise<Attachment> {
 export const rtcToken = (channelId: string) => request<RtcTokenResponse>("POST", "/api/rtc-token", { channelId }).then((r) => RtcTokenResponse.parse(r));
 
 // ---------- Verwaltung
-export const updateSettings = (patch: { name?: string; openJoin?: boolean }) => request("PATCH", "/api/settings", patch);
+export const updateSettings = (patch: { name?: string; openJoin?: boolean; requireAccount?: boolean }) => request("PATCH", "/api/settings", patch);
 /** Server-Icon (PNG/JPEG/WebP/GIF, 2 MB); erscheint in Seitenleiste und Favicon. */
 export async function uploadServerIcon(file: File): Promise<{ ok: true; iconUrl: string | null }> {
   const form = new FormData();

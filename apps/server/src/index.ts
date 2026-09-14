@@ -4,7 +4,7 @@ import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
 import { DirectoryNotifyRequest, PROTOCOL_VERSION } from "@squorli/protocol";
 import Fastify from "fastify";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { WebSocket } from "ws";
@@ -24,11 +24,15 @@ import { registerRoleRoutes } from "./routes/roles";
 import { registerSettingsRoutes } from "./routes/settings";
 import { registerUserRoutes } from "./users/routes";
 import { DirectoryClient, SYNC_INTERVAL_MS } from "./directory";
-import { broadcastStructure, loadSettings } from "./state";
+import { broadcastStructure, loadSettings, setRequireAccountForced } from "./state";
 import { VoicePresence } from "./voice/presence";
 import { registerWs } from "./ws/handler";
 
 const here = dirname(fileURLToPath(import.meta.url));
+/** Version aus der package.json des Servers (dev: apps/server, Container: /app); der Client zeigt sie im Login. */
+const VERSION = ((): string => {
+  try { return (JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8")) as { version?: string }).version ?? "0"; } catch { return "0"; }
+})();
 
 /**
  * Optionale .env neben dem Paket (apps/server/.env) laden, ohne Zusatzabhaengigkeit.
@@ -76,7 +80,9 @@ async function main() {
     /** Oeffentlicher Server-Schluessel; das Verzeichnis prueft ihn bei der Server-Registrierung (Host-Nachweis). */
     serverKey: directory?.serverKey ?? null,
     /** Servername und Icon fuer Seitentitel und Favicon schon vor dem Login (beides ist auch in der Einladungsvorschau sichtbar). */
-    ...(await loadSettings(db).then((st) => ({ serverName: st.name, iconUrl: st.iconUrl })).catch(() => ({ serverName: null, iconUrl: null }))),
+    ...(await loadSettings(db).then((st) => ({ serverName: st.name, iconUrl: st.iconUrl, requireAccount: st.requireAccount && !!config.DIRECTORY_URL }))
+      .catch(() => ({ serverName: null, iconUrl: null, requireAccount: false }))),
+    version: VERSION,
     /** Verzeichnisdienst (M6), den dieser Server anerkennt; der Client registriert Handles dort. null = keiner. */
     directoryUrl: config.DIRECTORY_URL ?? null,
     /** Domain, an die Login-Signaturen gebunden sind; der Client vergleicht sie mit seinem Hostnamen. */
@@ -85,6 +91,8 @@ async function main() {
     time: new Date().toISOString(),
   }));
 
+  setRequireAccountForced(config.REQUIRE_ACCOUNT ?? null);
+  if (config.REQUIRE_ACCOUNT !== undefined && !config.DIRECTORY_URL) app.log.warn("REQUIRE_ACCOUNT gesetzt, aber ohne DIRECTORY_URL wirkungslos (kein Verzeichnis, keine Kontopruefung)");
   await bootstrap(db, config, app.log);
   directory = new DirectoryClient(db, config, app.log);
   await directory.init();

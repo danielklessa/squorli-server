@@ -39,6 +39,10 @@ export type State = {
   iconUrl: string | null;
   /** PUBLIC_DOMAIN dieses Servers (aus /api/health): Schluessel des Anzeigenamens je Server im Verzeichnis. */
   serverDomain: string | null;
+  /** Anmeldung nur mit Verzeichniskonto (aus /api/health); der Login sperrt dann den reinen Browser-Schluessel. */
+  requireAccount: boolean;
+  /** Serverversion aus /api/health fuer den Squorli-Hinweis im Login. */
+  serverVersion: string | null;
 };
 
 const SESSION_KEY = "chat.session.v1";
@@ -50,6 +54,7 @@ export class Store {
     identity: null, me: null, userId: null, connection: "idle", error: null, removed: null, server: null,
     voice: {}, messages: {}, typing: {}, currentChannelId: null, unread: {}, log: [],
     directoryUrl: null, directoryAccount: undefined, directoryError: null, serverName: null, iconUrl: null, serverDomain: null,
+    requireAccount: false, serverVersion: null,
   };
   private listeners = new Set<(s: State) => void>();
   private ws: WebSocket | null = null;
@@ -91,7 +96,10 @@ export class Store {
   async refreshDirectory(): Promise<void> {
     const health = await api.getHealth().catch(() => null);
     const directoryUrl = health?.directoryUrl ?? null;
-    this.set({ directoryUrl, directoryError: null, serverName: health?.serverName ?? null, iconUrl: health?.iconUrl ?? null, serverDomain: health?.domain?.toLowerCase() ?? null });
+    this.set({
+      directoryUrl, directoryError: null, serverName: health?.serverName ?? null, iconUrl: health?.iconUrl ?? null, serverDomain: health?.domain?.toLowerCase() ?? null,
+      requireAccount: !!directoryUrl && health?.requireAccount === true, serverVersion: health?.version ?? null,
+    });
     const id = this.state.identity;
     if (!directoryUrl || !id) { this.set({ directoryAccount: null }); return; }
     try { this.set({ directoryAccount: await api.directoryLookup(directoryUrl, id.publicKey) }); }

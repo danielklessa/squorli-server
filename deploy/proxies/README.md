@@ -94,6 +94,55 @@ proxy_set_header Connection "upgrade";
 Firewall as with nginx: `443/tcp`, `80/tcp`, `7881/tcp`, `7882/udp` directly to the host; the media ports do not go through NPM.
 `TRUSTED_PROXIES` in `.env` can stay at the default (NPM comes from a Docker network). Check as above with `/api/health` and `/rtc/validate`.
 
+## Plesk (nginx of the Plesk host in front of the containers)
+
+Works with the Portainer stack (`deploy/portainer.yml`) or the Docker extension on the same host. Do **not** use Plesk's
+"Docker Proxy Rules": the generated locations carry no `Upgrade`/`Connection` headers, so `/api/ws` and `/rtc` (WebSockets) fail.
+
+1. Stack: `PROXY_BIND_IP=127.0.0.1` (3000 and 7880 only reachable by the host's nginx), `TRUSTED_PROXIES` at its default
+   (the container sees nginx as the Docker gateway, `172.x`), `LIVEKIT_NODE_IP` = public IP of the Plesk host.
+2. Plesk > domain > Hosting & DNS > Apache & nginx Settings > "Additional nginx directives" (regex locations, so that they
+   do not collide with Plesk's own `location /`; order matters, first match wins):
+
+```nginx
+location ~ ^/rtc {
+  proxy_pass http://127.0.0.1:7880;
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_read_timeout 3600s;
+}
+location ~ ^/api/ws {
+  proxy_pass http://127.0.0.1:3000;
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_read_timeout 3600s;
+}
+location ~ ^/ {
+  proxy_pass http://127.0.0.1:3000;
+  proxy_http_version 1.1;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  client_max_body_size 30m;   # >= MAX_UPLOAD_MB
+}
+```
+
+3. Certificate: Let's Encrypt for the domain in Plesk (SSL/TLS Certificates), "Permanent SEO-safe 301 redirect from HTTP to HTTPS" on.
+4. Plesk Firewall: allow inbound `7881/tcp` and `7882/udp` (media goes directly to LiveKit); 80/443 as usual. 3000/7880 stay closed.
+5. Check: `https://<domain>/api/health` returns JSON with `domain` = the Plesk domain, `https://<domain>/rtc/validate` returns 401,
+   and in the browser the debug view (`?debug`) shows the ICE path after joining a voice channel.
+
 ## Traefik
 
 `traefik.labels.yml` as overlay: `docker compose --env-file ../.env -f compose.yml -f proxies/traefik.labels.yml --profile external up -d`. Adjust the network name and certresolver.

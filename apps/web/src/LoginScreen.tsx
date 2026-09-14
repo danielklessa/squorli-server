@@ -35,6 +35,9 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
   const [needCode, setNeedCode] = useState(false);
   const [showOther, setShowOther] = useState(false);
 
+  // Nur mit Konto (Verwaltung): der reine Browser-Schluessel darf sich erst anmelden, wenn er ein Handle hat.
+  const accountRequired = state.requireAccount && !!state.directoryUrl;
+  const deviceAllowed = !accountRequired || !!state.directoryAccount;
   const deviceFirst = !state.directoryUrl || !!state.directoryAccount;
   const showDevice = deviceFirst || showOther;
   const showAccount = !!state.directoryUrl && (!deviceFirst || showOther);
@@ -149,6 +152,9 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
       ) : (
         <span className="muted small">Dieser Server nutzt kein Verzeichnis: kein Handle, Anmeldung nur mit diesem Schlüssel. Wer diesen Browser-Speicher verliert, verliert dieses Konto.</span>
       )}
+      {accountRequired && !state.directoryAccount && state.directoryAccount !== undefined && (
+        <span className="small">Dieser Server verlangt ein Konto: Handle registrieren oder oben mit einem Konto anmelden.</span>
+      )}
       {state.directoryError && <p className="error small">{state.directoryError}</p>}
     </div>
   );
@@ -156,7 +162,10 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
   return (
     <main className="login">
       <div className="login-card">
-        <img className="login-logo" src="/brand/squorli-logo.svg" alt="Squorli" width="180" height="175" />
+        <header className="login-head">
+          <img className="login-icon" src={state.iconUrl ?? "/brand/squorli-icon.svg"} alt="" width="72" height="72" />
+          <h1>{state.serverName ?? "Squorli"}</h1>
+        </header>
         {preview && (
           <p className="invite-preview">
             Einladung zu <strong>{preview.serverName}</strong> · {preview.memberCount} Mitglieder
@@ -174,7 +183,7 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
         {deviceFirst ? <>{deviceBox}{accountBox}</> : <>{accountBox}{deviceBox}</>}
         {state.directoryUrl && (
           <button className="secondary small" onClick={() => setShowOther(!showOther)}>
-            {showOther ? "Weniger anzeigen" : deviceFirst ? "Mit einem anderen Konto anmelden" : "Ohne Konto: Schlüssel dieses Browsers verwenden"}
+            {showOther ? "Weniger anzeigen" : deviceFirst ? "Mit einem anderen Konto anmelden" : accountRequired ? "Schlüssel dieses Browsers verwenden" : "Ohne Konto: Schlüssel dieses Browsers verwenden"}
           </button>
         )}
 
@@ -186,11 +195,15 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
         )}
 
         <div className="row">
-          {showDevice && <button onClick={() => void go()} disabled={!state.identity || busy}>{busy ? "Verbinde …" : "Anmelden und verbinden"}</button>}
+          {showDevice && <button onClick={() => void go()} disabled={!state.identity || busy || !deviceAllowed}>{busy ? "Verbinde …" : "Anmelden und verbinden"}</button>}
           {!needInvite && !invite && <button className="secondary" onClick={() => setNeedInvite(true)}>Ich habe eine Einladung</button>}
           {showDevice && <button className="secondary" onClick={() => void store.forgetIdentity()} disabled={busy}>Identität verwerfen</button>}
         </div>
       </div>
+      <footer className="login-foot">
+        <img src="/brand/squorli-icon-small.svg" alt="" width="18" height="18" />
+        <span>Betrieben mit Squorli{state.serverVersion ? ` · Version ${state.serverVersion}` : ""}</span>
+      </footer>
     </main>
   );
 }

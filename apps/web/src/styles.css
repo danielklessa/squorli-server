@@ -70,9 +70,14 @@ h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; colo
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 
 /* Login */
-.login { min-height: 100%; display: grid; place-items: center; padding: 1.5rem; }
+.login { min-height: 100%; display: grid; grid-template-rows: 1fr auto; place-items: center; gap: 1rem; padding: 1.5rem; }
 .login-card { width: min(34rem, 100%); background: var(--bg2); padding: 2rem 2rem 1.75rem; border-radius: var(--r-panel); }
-.login-logo { display: block; width: 180px; height: auto; margin: 0 auto 1rem; }
+/* Splash: Icon und Name des Servers (aus /api/health); ohne eigenes Icon das Squorli-Signet */
+.login-head { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; margin-bottom: 1.25rem; text-align: center; }
+.login-head h1 { margin: 0; font-size: 1.5rem; font-weight: 600; overflow-wrap: anywhere; }
+.login-icon { width: 72px; height: 72px; border-radius: 20px; object-fit: cover; }
+.login-foot { display: flex; align-items: center; gap: 0.4rem; color: var(--muted); font-size: 0.8125rem; }
+.login-foot img { opacity: 0.8; }
 .invite-preview { background: var(--bg); padding: 0.6rem 0.9rem; border-radius: var(--r); }
 
 /* Layout */

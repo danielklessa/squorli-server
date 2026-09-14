@@ -20,6 +20,7 @@ services:
       # Directory service (M6): separate repo squorli-directory, runs on its own host, e.g. https://id.example.org. Empty = no directory.
       DIRECTORY_URL: ${DIRECTORY_URL:-}
       DIRECTORY_PROOF_URL: ${DIRECTORY_PROOF_URL:-}
+      REQUIRE_ACCOUNT: ${REQUIRE_ACCOUNT:-}
     volumes: [appdata:/app/data]   # attachments
     depends_on:
       postgres: { condition: service_healthy }

@@ -48,13 +48,20 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: C
     if (ban) return reply.code(403).send({ error: "banned", reason: ban.reason });
 
     // Verifiziertes Handle und Anzeigename aus dem Verzeichnis (M6) nachschlagen; Ausfall des Dienstes ist kein Login-Fehler.
-    await directory.refresh({ id: user.id, publicKey, displayName: user.displayName });
+    const profile = await directory.refresh({ id: user.id, publicKey, displayName: user.displayName });
+
+    const [member] = await db.select().from(members).where(eq(members.userId, user.id)).limit(1);
+    const settings = await loadSettings(db);
+    const firstEver = settings.ownerId === null && (config.OWNER_PUBLIC_KEY === undefined || config.OWNER_PUBLIC_KEY === publicKey);
+    // Nur mit Konto (Verwaltung): der Schluessel braucht ein Handle beim Verzeichnis. Eigentuemer und der erste Login sind
+    // ausgenommen (kein Aussperren). Ist das Verzeichnis gerade nicht erreichbar, zaehlt das zuletzt gecachte Handle.
+    if (settings.requireAccount && config.DIRECTORY_URL && !member?.isOwner && !firstEver) {
+      const handle = profile ? profile.handle : user.handle;
+      if (!handle) return reply.code(403).send({ error: "account_required" });
+    }
 
     // Mitgliedschaft: bestehendes Mitglied, offener Server, oder gueltige Einladung.
-    const [member] = await db.select().from(members).where(eq(members.userId, user.id)).limit(1);
     if (!member) {
-      const settings = await loadSettings(db);
-      const firstEver = settings.ownerId === null && (config.OWNER_PUBLIC_KEY === undefined || config.OWNER_PUBLIC_KEY === publicKey);
       if (!settings.openJoin && !firstEver) {
         if (!invite) return reply.code(403).send({ error: "invite_required" });
         const used = await consumeInvite(db, invite);
@@ -65,8 +72,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: C
     }
 
     // Eigentuemer festlegen: erster passender Login, solange keiner existiert.
-    const settings = await loadSettings(db);
-    if (settings.ownerId === null && (config.OWNER_PUBLIC_KEY === undefined || config.OWNER_PUBLIC_KEY === publicKey)) {
+    if (firstEver) {
       await db.update(serverSettings).set({ ownerId: user.id }).where(and(eq(serverSettings.id, SETTINGS_ID), isNull(serverSettings.ownerId)));
       await db.update(members).set({ isOwner: true }).where(eq(members.userId, user.id));
       const [admin] = await db.select({ id: roles.id }).from(roles).where(eq(roles.name, "Admin")).limit(1);

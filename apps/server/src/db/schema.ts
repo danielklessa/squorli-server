@@ -33,6 +33,8 @@ export const serverSettings = pgTable("server_settings", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   openJoin: boolean("open_join").notNull().default(false),
+  /** Anmeldung nur mit Verzeichniskonto (Handle); Eigentuemer ausgenommen. Ohne DIRECTORY_URL ohne Wirkung. */
+  requireAccount: boolean("require_account").notNull().default(false),
   ownerId: uuid("owner_id").references(() => users.id, { onDelete: "set null" }),
   /** Server-Icon (Verwaltung): Datei liegt unter DATA_DIR/server-icon, hier MIME-Typ und Zeitpunkt (Cache-Version). */
   iconMime: text("icon_mime"),

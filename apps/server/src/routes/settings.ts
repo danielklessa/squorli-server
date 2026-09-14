@@ -35,6 +35,8 @@ export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: 
     if (!can(m.actor, Permission.MANAGE_SERVER)) return reply.code(403).send({ error: "forbidden" });
     const body = UpdateSettingsRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    // REQUIRE_ACCOUNT per Konfiguration vorgegeben: die Verwaltung darf es nicht umstellen.
+    if (body.data.requireAccount !== undefined && (await loadSettings(db)).requireAccountLocked) return reply.code(409).send({ error: "locked_by_config" });
     await db.update(serverSettings).set(compact(body.data)).where(eq(serverSettings.id, SETTINGS_ID));
     await broadcastStructure(db, hub, ["settings"]);
     return { ok: true };

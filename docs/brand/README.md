@@ -17,6 +17,7 @@ The fuller, round speech figures follow the original draft more closely. The ico
 - squorli-tokens.css / palette.json: design colors for adoption in the app.
 - designpalette.svg: visual overview of the palette.
 - brand-guide.html: logo overview, usage examples and colors.
+- BRAND_ORIGIN.md: origin of the name (squad, swirl, circle), pronunciation, brand statement and how the logo relates to it.
 
 ## Usage
 At least 32 px for the normal icon mark; below that, use the small variant. At least 160 px width for the vertical logo; at least 240 px for the horizontal version. Clear space on all sides of at least 1/8 of the icon mark's width. Do not distort or rotate the shapes. Use primarily flat colors. The blue holds the identity together; Mint, Amber and Coral remain status colors and should be supplemented by text or a symbol.

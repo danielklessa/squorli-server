@@ -7,11 +7,16 @@ import type { Hub } from "./hub";
 
 export const SETTINGS_ID = "server";
 
+/** REQUIRE_ACCOUNT aus der Konfiguration: null = die Verwaltung entscheidet, sonst fest vorgegeben (index.ts setzt es beim Start). */
+let requireAccountForced: boolean | null = null;
+export function setRequireAccountForced(v: boolean | null): void { requireAccountForced = v; }
+
 export async function loadSettings(db: Db): Promise<ServerSettings> {
   const [row] = await db.select().from(serverSettings).where(eq(serverSettings.id, SETTINGS_ID)).limit(1);
   if (!row) throw new Error("server_settings fehlt (Bootstrap nicht gelaufen)");
   return {
     name: row.name, openJoin: row.openJoin, ownerId: row.ownerId,
+    requireAccount: requireAccountForced ?? row.requireAccount, requireAccountLocked: requireAccountForced !== null,
     iconUrl: row.iconMime && row.iconUpdatedAt ? `/api/server-icon?v=${row.iconUpdatedAt.getTime()}` : null,
   };
 }

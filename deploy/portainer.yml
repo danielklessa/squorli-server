@@ -1,0 +1,85 @@
+# Portainer stack (web editor or git): chat server + Postgres + LiveKit, external mode (your reverse proxy terminates TLS).
+# Self-contained on purpose: no env_file, no build, no bind mounts, no profiles (Portainer cannot provide any of them from
+# the web editor). LiveKit gets its config via LIVEKIT_CONFIG instead of deploy/livekit/livekit.yaml (keep both in step).
+# Enter the ${...} variables under "Environment variables" of the stack (see README.md "Portainer"):
+#   required: PUBLIC_DOMAIN, POSTGRES_PASSWORD, LIVEKIT_API_KEY, LIVEKIT_API_SECRET (32+ characters)
+#   usually:  LIVEKIT_NODE_IP (public IP of this host), DIRECTORY_URL, TRUSTED_PROXIES (IP of the proxy), PROXY_BIND_IP
+#   optional: APP_IMAGE, SERVER_NAME, OWNER_PUBLIC_KEY, MAX_UPLOAD_MB, LIVEKIT_PUBLIC_URL, DIRECTORY_PROOF_URL, REQUIRE_ACCOUNT (true/false)
+# The image comes from the GitLab registry (.gitlab-ci.yml); register the registry in Portainer with a deploy token (read_registry).
+# Firewall: 7881/tcp + 7882/udp open to the world (media); 3000 + 7880 only for the proxy host (HTTP, no TLS).
+
+services:
+  app:
+    image: ${APP_IMAGE:-registry.klessa.net/squorli/squorli-server:latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
+      PROXY_MODE: external
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,127.0.0.1}
+      DATABASE_URL: postgres://chat:${POSTGRES_PASSWORD}@postgres:5432/chat
+      LIVEKIT_URL: http://livekit:7880
+      LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      DATA_DIR: /app/data
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+      SERVER_NAME: ${SERVER_NAME:-Community}
+      OWNER_PUBLIC_KEY: ${OWNER_PUBLIC_KEY:-}
+      DIRECTORY_URL: ${DIRECTORY_URL:-}
+      DIRECTORY_PROOF_URL: ${DIRECTORY_PROOF_URL:-}
+      REQUIRE_ACCOUNT: ${REQUIRE_ACCOUNT:-}
+    volumes: [appdata:/app/data]   # attachments, server icon
+    ports:
+      - "${PROXY_BIND_IP:-0.0.0.0}:3000:3000"   # proxy: https://PUBLIC_DOMAIN -> http://<host>:3000 (with WebSocket)
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [internal]
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: chat
+      POSTGRES_USER: chat
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chat -d chat"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+
+  livekit:
+    image: livekit/livekit-server:latest
+    restart: unless-stopped
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+      LIVEKIT_NODE_IP: ${LIVEKIT_NODE_IP:-}
+      # Same content as deploy/livekit/livekit.yaml (TURN off).
+      LIVEKIT_CONFIG: |
+        port: 7880
+        rtc:
+          tcp_port: 7881
+          udp_port: 7882
+          use_external_ip: true
+        turn:
+          enabled: false
+        audio:
+          update_interval: 150
+          smooth_intervals: 1
+        logging:
+          level: info
+    ports:
+      - "${PROXY_BIND_IP:-0.0.0.0}:7880:7880"   # signaling: proxy https://PUBLIC_DOMAIN/rtc* -> http://<host>:7880 (WebSocket)
+      - "7881:7881/tcp"                          # media fallback via TCP
+      - "7882:7882/udp"                          # media via UDP
+    networks: [internal]
+
+volumes:
+  pgdata:
+  appdata:
+
+networks:
+  internal:

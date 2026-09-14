@@ -164,7 +164,7 @@ export function App() {
       <MemberList members={server.members} roles={server.roles} myUserId={state.userId} myPermissions={server.myPermissions} ownerId={server.settings.ownerId}
         voice={state.voice} channels={server.channels} />
 
-      {showAdmin && <AdminPanel server={server} onClose={() => setShowAdmin(false)} />}
+      {showAdmin && <AdminPanel server={server} directoryUrl={state.directoryUrl} onClose={() => setShowAdmin(false)} />}
       {cameraPick && <CameraPicker cameras={cameraPick} initial={voiceSettings.cameraDeviceId} initialBlur={voiceSettings.cameraBlur} onPick={(id, b) => { void pickCamera(id, b); }} onCancel={() => setCameraPick(null)} />}
       {showProfile && (
         <ProfileDialog me={state.me} directoryUrl={state.directoryUrl} directoryAccount={state.directoryAccount} serverDomain={state.serverDomain}

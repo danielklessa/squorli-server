@@ -178,6 +178,22 @@ const B = await login(keyB, invite.code);
 check("join with invite", B.status === 200);
 const B2 = await login(keyB); // Mitglied: braucht keine Einladung mehr
 check("member re-login without invite", B2.status === 200);
+
+// ---------- Nur mit Konto (Verwaltung): ohne Handle beim Verzeichnis 403 account_required; ohne Verzeichnis ist die Option wirkungslos.
+const [sra] = await api("PATCH", "/api/settings", { requireAccount: true }, owner.token);
+const [, hra] = await api("GET", "/api/health");
+const [, stRa] = await api("GET", "/api/state", undefined, owner.token);
+check("require account: not locked by config in this run", stRa.settings.requireAccountLocked === false);
+check("require account: patch, in state, in health (only with directory), version present", sra === 200 && stRa.settings.requireAccount === true
+  && hra.requireAccount === !!hra.directoryUrl && typeof hra.version === "string" && hra.version.length > 0);
+const keyNoAcc = await newKey();
+const [, invRa] = await api("POST", "/api/invites", { maxUses: 1 }, owner.token);
+const noAcc = await login(keyNoAcc, invRa.code);
+if (hra.directoryUrl) check("require account: key without handle rejected", noAcc.status === 403 && noAcc.body.error === "account_required", `${noAcc.status} ${noAcc.body.error ?? ""}`);
+else check("require account: without directory no effect", noAcc.status === 200, `${noAcc.status}`);
+const ownerRa = await login(ownerKey);
+check("require account: owner exempt, existing member without account", ownerRa.status === 200 && (await login(keyB)).status === (hra.directoryUrl ? 403 : 200));
+await api("PATCH", "/api/settings", { requireAccount: false }, owner.token);
 await api("PATCH", "/api/me", { displayName: "Bea" }, B.token);
 
 // ---------- Sitzungen / Geraete (M6c): Liste, Bezeichnung aus dem User-Agent, Fernabmeldung (WS-Close 4011), andere, eigene

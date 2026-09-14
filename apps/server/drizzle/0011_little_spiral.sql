@@ -1,0 +1,1 @@
+ALTER TABLE "server_settings" ADD COLUMN "require_account" boolean DEFAULT false NOT NULL;

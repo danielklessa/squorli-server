@@ -82,6 +82,33 @@ By default Compose builds the image from this repo. To use a prebuilt image inst
 
 Open ports: `443/tcp` (bundled only), `7881/tcp`, `7882/udp`. TURN is prepared but off by default (needs a certificate, see `deploy/livekit/livekit.yaml`).
 
+## Portainer
+
+`deploy/portainer.yml` is a self-contained stack for Portainer (web editor or git repository, path `deploy/portainer.yml`):
+external mode with a reverse proxy on another host, no `env_file`, no build, no bind mounts. The LiveKit config is inlined
+via `LIVEKIT_CONFIG` (keep it in step with `deploy/livekit/livekit.yaml`).
+
+1. Registries: add `registry.klessa.net` with a GitLab deploy token (scope `read_registry`), so Portainer can pull the image
+   `registry.klessa.net/squorli/squorli-server:latest` that `.gitlab-ci.yml` pushes.
+2. Stacks > Add stack > paste `deploy/portainer.yml`, then enter the environment variables:
+
+| Variable | Value |
+|---|---|
+| `PUBLIC_DOMAIN` | `chat.example.org`, exactly the hostname in the browser (required) |
+| `POSTGRES_PASSWORD` | any secret (required) |
+| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | key name + secret with 32+ characters, e.g. `openssl rand -hex 32` (required) |
+| `LIVEKIT_NODE_IP` | public IP of this host (otherwise LiveKit detects it via STUN) |
+| `DIRECTORY_URL` | `https://id.example.org`, empty = no directory |
+| `TRUSTED_PROXIES` | IP/CIDR of the proxy host (default: private ranges) |
+| `PROXY_BIND_IP` | address on which 3000 and 7880 are published; default `0.0.0.0`, then restrict via firewall |
+| `REQUIRE_ACCOUNT` | `true` forces "only with account" (login needs a directory handle, owners exempt) and locks the admin panel setting; `false` forces it off; empty = admin panel decides |
+| `APP_IMAGE`, `SERVER_NAME`, `OWNER_PUBLIC_KEY`, `MAX_UPLOAD_MB`, `LIVEKIT_PUBLIC_URL`, `DIRECTORY_PROOF_URL` | optional, see `.env.example` |
+
+3. Proxy (e.g. Nginx Proxy Manager): `https://PUBLIC_DOMAIN` -> `http://<host>:3000` with WebSocket support, plus a location
+   `/rtc` -> `http://<host>:7880` (WebSocket); details in `deploy/proxies/README.md`. Firewall: `7881/tcp` and `7882/udp` open
+   to everyone, `3000` and `7880` only for the proxy host.
+4. Check: `https://PUBLIC_DOMAIN/api/health` shows `domain` and `serverKey`; `https://PUBLIC_DOMAIN/rtc/validate` returns 401.
+
 ## License
 
 Not decided yet (MIT or Apache 2.0). Until then: all rights reserved.

@@ -84,8 +84,15 @@ export const ServerSettings = z.object({
   ownerId: Uuid.nullable(),
   /** Server-Icon aus der Verwaltung (mit Versions-Parameter fuer den Cache), null = keins. Dient dem Client auch als Favicon. */
   iconUrl: z.string().nullable(),
+  /**
+   * true = Anmeldung nur mit Konto beim Verzeichnis (Schluessel muss dort ein Handle haben); Eigentuemer sind ausgenommen.
+   * Ohne DIRECTORY_URL wirkungslos (der Server kann kein Konto pruefen).
+   */
+  requireAccount: z.boolean(),
+  /** true = REQUIRE_ACCOUNT ist per Konfiguration vorgegeben; die Verwaltung kann requireAccount dann nicht aendern (409 locked_by_config). */
+  requireAccountLocked: z.boolean(),
 });
-export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true }).partial();
+export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true, requireAccount: true }).partial();
 
 export const Category = z.object({ id: Uuid, name: z.string().min(1).max(64), position: z.number().int() });
 export const ChannelKind = z.enum(["text", "voice"]);

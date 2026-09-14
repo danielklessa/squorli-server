@@ -38,6 +38,11 @@ const Env = z.object({
    * Standard: https://PUBLIC_DOMAIN/api/health; bei PUBLIC_DOMAIN=localhost http://localhost:PORT/api/health (Dev).
    */
   DIRECTORY_PROOF_URL: z.string().url().optional(),
+  /**
+   * "Nur mit Konto" beim Deployment fest vorgeben: true/false ueberschreibt die Einstellung aus der Verwaltung (dort dann
+   * gesperrt). Leer = die Verwaltung entscheidet. Wirkt nur mit DIRECTORY_URL.
+   */
+  REQUIRE_ACCOUNT: z.enum(["true", "false", "1", "0"]).transform((v) => v === "true" || v === "1").optional(),
 });
 
 export type Config = z.infer<typeof Env> & { trustedProxies: string[]; livekitPublicUrl: string; directoryProofUrl: string };

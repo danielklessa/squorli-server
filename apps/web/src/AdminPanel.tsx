@@ -7,7 +7,7 @@ import { Icon } from "./Icon";
 type Tab = "server" | "channels" | "roles" | "invites" | "bans";
 
 /** Verwaltung: Server, Kategorien/Kanaele, Rollen, Einladungen, Bans. Aenderungen kommen per structure-Ereignis zurueck. */
-export function AdminPanel({ server, onClose }: { server: ServerState; onClose: () => void }) {
+export function AdminPanel({ server, directoryUrl, onClose }: { server: ServerState; directoryUrl: string | null; onClose: () => void }) {
   const p = server.myPermissions;
   const allTabs: { id: Tab; label: string; icon: string; ok: boolean }[] = [
     { id: "server", label: "Server", icon: "server", ok: hasPermission(p, Permission.MANAGE_SERVER) },
@@ -35,7 +35,7 @@ export function AdminPanel({ server, onClose }: { server: ServerState; onClose: 
           </nav>
           <div className="settings-body">
             {err && <p className="error">{err}</p>}
-            {tab === "server" && <ServerTab server={server} run={run} />}
+            {tab === "server" && <ServerTab server={server} directoryUrl={directoryUrl} run={run} />}
             {tab === "channels" && <ChannelsTab server={server} run={run} />}
             {tab === "roles" && <RolesTab server={server} run={run} />}
             {tab === "invites" && <InvitesTab run={run} canManage={hasPermission(p, Permission.MANAGE_SERVER)} />}
@@ -49,7 +49,7 @@ export function AdminPanel({ server, onClose }: { server: ServerState; onClose: 
 
 type RunFn = (fn: () => Promise<unknown>) => Promise<void>;
 
-function ServerTab({ server, run }: { server: ServerState; run: RunFn }) {
+function ServerTab({ server, directoryUrl, run }: { server: ServerState; directoryUrl: string | null; run: RunFn }) {
   const [name, setName] = useState(server.settings.name);
   const owners = server.members.filter((m) => m.isOwner);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -61,6 +61,12 @@ function ServerTab({ server, run }: { server: ServerState; run: RunFn }) {
         <input type="checkbox" checked={server.settings.openJoin} onChange={(e) => run(() => api.updateSettings({ openJoin: e.target.checked }))} />
         Offener Server: jeder mit Schlüssel darf ohne Einladung beitreten
       </label>
+      <label className="check">
+        <input type="checkbox" checked={server.settings.requireAccount} disabled={!directoryUrl || server.settings.requireAccountLocked} onChange={(e) => run(() => api.updateSettings({ requireAccount: e.target.checked }))} />
+        Nur mit Konto: Anmeldung nur mit einem Handle beim Verzeichnis (Eigentümer ausgenommen)
+      </label>
+      {!directoryUrl && <span className="muted small">Dieser Server nutzt kein Verzeichnis, daher kann er keine Konten prüfen.</span>}
+      {directoryUrl && server.settings.requireAccountLocked && <span className="muted small">Durch die Serverkonfiguration (REQUIRE_ACCOUNT) fest vorgegeben.</span>}
       <h3>Server-Icon</h3>
       <div className="row">
         <img className="server-icon-preview" src={server.settings.iconUrl ?? "/brand/squorli-icon-small.svg"} alt="" width="48" height="48" />
