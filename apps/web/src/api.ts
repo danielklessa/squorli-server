@@ -1,5 +1,5 @@
 import {
-  AccountStatus, Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, ServerListResponse, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
+  AccountStatus, Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, FriendSearchResponse, ServerListResponse, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
   BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryActionMessage, directoryBackupMessage, directoryProfilePayload,
   directoryRegisterMessage, openBackup,
   type Attachment, type Category, type Channel, type Role,
@@ -13,45 +13,116 @@ export class ApiError extends Error {
   }
 }
 
-let authToken: string | null = null;
-export const setToken = (t: string | null) => { authToken = t; };
-export const getToken = () => authToken;
-/** Wird gerufen, wenn der Server ein gesetztes Token mit 401 ablehnt (abgelaufen oder von einem anderen Geraet abgemeldet, M6c). */
-let unauthorizedHandler: (() => void) | null = null;
-export const onUnauthorized = (fn: (() => void) | null) => { unauthorizedHandler = fn; };
+/**
+ * Zugriff auf einen Chat-Server. `base` = "" fuer den Server, der diesen Client ausliefert (relative Pfade, Vite-Proxy im Dev),
+ * sonst die Origin eines fremden Servers (Multi-Server-Client: die Server-Leiste wechselt zwischen Servern, ohne die Seite zu
+ * verlassen; fremde Server antworten dank CORS mit Bearer-Token). Jede Instanz hat ihr eigenes Sitzungstoken.
+ */
+export class ServerApi {
+  private token: string | null = null;
+  /** Wird gerufen, wenn der Server ein gesetztes Token mit 401 ablehnt (abgelaufen oder von einem anderen Geraet abgemeldet, M6c). */
+  onUnauthorized: (() => void) | null = null;
+  constructor(readonly base: string) {}
+  setToken(t: string | null) { this.token = t; }
+  getToken() { return this.token; }
+  /** Relative Server-URL (Anhaenge, Server-Icon) auf diesen Server beziehen. */
+  abs(url: string): string { return this.base && url.startsWith("/") ? `${this.base}${url}` : url; }
 
-async function request<T>(method: string, path: string, body?: unknown, opts: { auth?: boolean; form?: FormData } = {}): Promise<T> {
-  const headers: Record<string, string> = {};
-  const init: RequestInit = { method, headers };
-  if (opts.form) init.body = opts.form;
-  else if (body !== undefined) { headers["content-type"] = "application/json"; init.body = JSON.stringify(body); }
-  const withAuth = opts.auth !== false && !!authToken;
-  if (withAuth) headers.authorization = `Bearer ${authToken}`;
-  const res = await fetch(path, init);
-  if (!res.ok) {
-    const b = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-    if (res.status === 401 && withAuth) unauthorizedHandler?.();
-    throw new ApiError(method, path, res.status, typeof b.error === "string" ? b.error : null, b);
+  private async request<T>(method: string, path: string, body?: unknown, opts: { auth?: boolean; form?: FormData } = {}): Promise<T> {
+    const headers: Record<string, string> = {};
+    const init: RequestInit = { method, headers };
+    if (opts.form) init.body = opts.form;
+    else if (body !== undefined) { headers["content-type"] = "application/json"; init.body = JSON.stringify(body); }
+    const withAuth = opts.auth !== false && !!this.token;
+    if (withAuth) headers.authorization = `Bearer ${this.token}`;
+    const res = await fetch(`${this.base}${path}`, init);
+    if (!res.ok) {
+      const b = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (res.status === 401 && withAuth) this.onUnauthorized?.();
+      throw new ApiError(method, path, res.status, typeof b.error === "string" ? b.error : null, b);
+    }
+    return (await res.json()) as T;
   }
-  return (await res.json()) as T;
-}
 
-// ---------- Auth
-export async function login(id: Identity, invite?: string): Promise<VerifyResponse> {
-  const challenge = ChallengeResponse.parse(await request("POST", "/api/auth/challenge", { publicKey: id.publicKey }, { auth: false }));
-  const message = challengeMessage(window.location.hostname, challenge.nonce);
-  const signature = await sign(id, message);
-  return VerifyResponse.parse(await request("POST", "/api/auth/verify",
-    { challengeId: challenge.challengeId, publicKey: id.publicKey, signature, ...(invite ? { invite } : {}) }, { auth: false }));
+  // ---------- Auth
+  /** Anmelden: die Signatur ist an `domain` gebunden (PUBLIC_DOMAIN des Servers; eigener Server = Hostname der Adressleiste). */
+  async login(id: Identity, domain: string, invite?: string): Promise<VerifyResponse> {
+    const challenge = ChallengeResponse.parse(await this.request("POST", "/api/auth/challenge", { publicKey: id.publicKey }, { auth: false }));
+    const signature = await sign(id, challengeMessage(domain, challenge.nonce));
+    return VerifyResponse.parse(await this.request("POST", "/api/auth/verify",
+      { challengeId: challenge.challengeId, publicKey: id.publicKey, signature, ...(invite ? { invite } : {}) }, { auth: false }));
+  }
+  getHealth() { return this.request<Health>("GET", "/api/health", undefined, { auth: false }); }
+
+  getMe() { return this.request<Me>("GET", "/api/me").then((m) => Me.parse(m)); }
+  updateMe(displayName: string | null) { return this.request<Me>("PATCH", "/api/me", { displayName }).then((m) => Me.parse(m)); }
+  // ---------- Sitzungen / Geraete (M6c)
+  getSessions() { return this.request<SessionInfo[]>("GET", "/api/me/sessions").then((s) => z.array(SessionInfo).parse(s)); }
+  revokeSession(id: string) { return this.request("DELETE", `/api/me/sessions/${id}`); }
+  revokeOtherSessions() { return this.request<{ ok: true; revoked: number }>("DELETE", "/api/me/sessions/others"); }
+  /** Eigene Sitzung serverseitig beenden (beim Abmelden); best effort. */
+  logoutSession() { return this.request("DELETE", "/api/me/sessions/current"); }
+  getState() { return this.request<ServerState>("GET", "/api/state").then((s) => ServerState.parse(s)); }
+  getInvitePreview(code: string) { return this.request<InvitePreview>("GET", `/api/invites/${encodeURIComponent(code)}`, undefined, { auth: false }).then((p) => InvitePreview.parse(p)); }
+
+  // ---------- Nachrichten
+  getMessages(channelId: string, before?: number) {
+    return this.request<MessagePage>("GET", `/api/channels/${channelId}/messages?limit=50${before ? `&before=${before}` : ""}`).then((p) => MessagePage.parse(p));
+  }
+  sendMessage(channelId: string, content: string, attachmentIds: string[]) {
+    return this.request<Message>("POST", `/api/channels/${channelId}/messages`, { content, attachmentIds }).then((m) => Message.parse(m));
+  }
+  editMessage(id: string, content: string) { return this.request<Message>("PATCH", `/api/messages/${id}`, { content }).then((m) => Message.parse(m)); }
+  deleteMessage(id: string) { return this.request("DELETE", `/api/messages/${id}`); }
+  async uploadAttachment(file: File): Promise<Attachment> {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return this.request<Attachment>("POST", "/api/attachments", undefined, { form });
+  }
+
+  // ---------- Sprache
+  rtcToken(channelId: string) { return this.request<RtcTokenResponse>("POST", "/api/rtc-token", { channelId }).then((r) => RtcTokenResponse.parse(r)); }
+
+  // ---------- Verwaltung
+  updateSettings(patch: { name?: string; openJoin?: boolean; requireAccount?: boolean; listed?: boolean; description?: string | null }) { return this.request("PATCH", "/api/settings", patch); }
+  /** Server-Icon (PNG/JPEG/WebP/GIF, 2 MB); erscheint in Seitenleiste und Favicon. */
+  async uploadServerIcon(file: File): Promise<{ ok: true; iconUrl: string | null }> {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return this.request("PUT", "/api/settings/icon", undefined, { form });
+  }
+  deleteServerIcon() { return this.request("DELETE", "/api/settings/icon"); }
+  /** Eigentuemerstatus (nur Eigentuemer; der erste Eigentuemer ist unentziehbar). */
+  setOwner(userId: string, owner: boolean) { return this.request("PUT", `/api/members/${userId}/owner`, { owner }); }
+  createCategory(name: string) { return this.request<Category>("POST", "/api/categories", { name }); }
+  updateCategory(id: string, patch: { name?: string; position?: number }) { return this.request("PATCH", `/api/categories/${id}`, patch); }
+  deleteCategory(id: string) { return this.request("DELETE", `/api/categories/${id}`); }
+  createChannel(data: { kind: "text" | "voice"; name: string; topic?: string | null; categoryId?: string | null }) { return this.request<Channel>("POST", "/api/channels", data); }
+  updateChannel(id: string, patch: { name?: string; topic?: string | null; categoryId?: string | null; position?: number; audioBitrate?: number; audioStereo?: boolean }) { return this.request("PATCH", `/api/channels/${id}`, patch); }
+  deleteChannel(id: string) { return this.request("DELETE", `/api/channels/${id}`); }
+  createRole(data: { name: string; color?: string | null; permissions?: number }) { return this.request<Role>("POST", "/api/roles", data); }
+  updateRole(id: string, patch: { name?: string; color?: string | null; permissions?: number; position?: number }) { return this.request("PATCH", `/api/roles/${id}`, patch); }
+  deleteRole(id: string) { return this.request("DELETE", `/api/roles/${id}`); }
+  setMemberRoles(userId: string, roleIds: string[]) { return this.request("PUT", `/api/members/${userId}/roles`, { roleIds }); }
+  kickMember(userId: string) { return this.request("DELETE", `/api/members/${userId}`); }
+  moveMember(userId: string, channelId: string | null) { return this.request("POST", `/api/members/${userId}/move`, { channelId }); }
+  stopMemberStreams(userId: string, what: { camera: boolean; screen: boolean }) { return this.request("POST", `/api/members/${userId}/stream/stop`, what); }
+  setStreamBlocked(userId: string, blocked: boolean) { return this.request("PUT", `/api/members/${userId}/stream`, { blocked }); }
+  banMember(userId: string, reason: string | null) { return this.request("POST", "/api/bans", { userId, reason }); }
+  unban(userId: string) { return this.request("DELETE", `/api/bans/${userId}`); }
+  listBans() { return this.request<Ban[]>("GET", "/api/bans").then((b) => z.array(Ban).parse(b)); }
+  createInvite(data: { expiresInHours?: number | null; maxUses?: number | null }) { return this.request<Invite>("POST", "/api/invites", data).then((i) => Invite.parse(i)); }
+  listInvites() { return this.request<Invite[]>("GET", "/api/invites").then((i) => z.array(Invite).parse(i)); }
+  revokeInvite(code: string) { return this.request("DELETE", `/api/invites/${encodeURIComponent(code)}`); }
 }
 
 /** Uebersetzt Login-Fehler in einen Satz, der sagt, was zu tun ist. */
-export async function explainLoginError(err: unknown): Promise<string> {
+export async function explainLoginError(err: unknown, api: ServerApi, here: string): Promise<string> {
+  if (err instanceof TypeError) return api.base ? `Der Server ${api.base} ist nicht erreichbar oder erlaubt keinen Zugriff aus anderen Clients (älterer Squorli-Server ohne CORS).` : "Der Server ist nicht erreichbar.";
   if (!(err instanceof ApiError)) return String(err);
-  const here = window.location.hostname;
   switch (err.code) {
     case "signature_invalid": {
-      const health = await fetch("/api/health").then((r) => r.json()).catch(() => null) as { domain?: string } | null;
+      const health = await api.getHealth().catch(() => null);
       if (health?.domain && health.domain !== here) {
         return `Anmeldung abgelehnt: Der Server erwartet die Domain "${health.domain}" (PUBLIC_DOMAIN), diese Seite läuft unter "${here}". Beides muss übereinstimmen.`;
       }
@@ -73,7 +144,6 @@ export type Health = {
   /** Serverversion (package.json), im Login unten neben dem Squorli-Hinweis. */
   version: string;
 };
-export const getHealth = () => request<Health>("GET", "/api/health", undefined, { auth: false });
 
 // ---------- Verzeichnisdienst (M6): laeuft unter eigener URL, wird direkt aus dem Browser aufgerufen
 async function directoryFetch<T>(dirUrl: string, method: string, path: string, body?: unknown): Promise<T> {
@@ -126,6 +196,9 @@ export async function directorySetDisplayName(dirUrl: string, id: Identity, serv
   const signature = await sign(id, directoryActionMessage(health.host, "profile-update", ch.nonce, directoryProfilePayload(server, displayName)));
   await directoryFetch(dirUrl, "POST", "/api/profile", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, server, displayName });
 }
+/** Handle-Suche fuer die Freundesliste (M7, oeffentlich, Praefix, hoechstens 10 Treffer). */
+export const directorySearchHandles = (dirUrl: string, q: string) => directoryFetch(dirUrl, "GET", `/api/handles?q=${encodeURIComponent(q)}`).then((r) => FriendSearchResponse.parse(r));
+export const directoryHealth = (dirUrl: string) => directoryFetch(dirUrl, "GET", "/api/health").then((r) => DirectoryHealth.parse(r));
 /** Oeffentliches Serververzeichnis (M6d): alle Server, die sich auflisten lassen. */
 export const directoryServers = (dirUrl: string) => directoryFetch(dirUrl, "GET", "/api/servers").then((r) => ServerListResponse.parse(r));
 /** Kontostatus (signiert): u. a. die Server, auf denen sich das Handle angemeldet hat (Server-Leiste, M6d). */
@@ -161,62 +234,3 @@ export function explainDirectoryError(err: unknown): string {
   if (err instanceof TypeError) return "Verzeichnisdienst nicht erreichbar (Netzwerk oder CORS). Läuft der Dienst unter der in /api/health genannten Adresse?";
   return String(err);
 }
-
-export const getMe = () => request<Me>("GET", "/api/me").then((m) => Me.parse(m));
-export const updateMe = (displayName: string | null) => request<Me>("PATCH", "/api/me", { displayName }).then((m) => Me.parse(m));
-// ---------- Sitzungen / Geraete (M6c)
-export const getSessions = () => request<SessionInfo[]>("GET", "/api/me/sessions").then((s) => z.array(SessionInfo).parse(s));
-export const revokeSession = (id: string) => request("DELETE", `/api/me/sessions/${id}`);
-export const revokeOtherSessions = () => request<{ ok: true; revoked: number }>("DELETE", "/api/me/sessions/others");
-/** Eigene Sitzung serverseitig beenden (beim Abmelden); best effort. */
-export const logoutSession = () => request("DELETE", "/api/me/sessions/current");
-export const getState = () => request<ServerState>("GET", "/api/state").then((s) => ServerState.parse(s));
-export const getInvitePreview = (code: string) => request<InvitePreview>("GET", `/api/invites/${encodeURIComponent(code)}`, undefined, { auth: false }).then((p) => InvitePreview.parse(p));
-
-// ---------- Nachrichten
-export const getMessages = (channelId: string, before?: number) =>
-  request<MessagePage>("GET", `/api/channels/${channelId}/messages?limit=50${before ? `&before=${before}` : ""}`).then((p) => MessagePage.parse(p));
-export const sendMessage = (channelId: string, content: string, attachmentIds: string[]) =>
-  request<Message>("POST", `/api/channels/${channelId}/messages`, { content, attachmentIds }).then((m) => Message.parse(m));
-export const editMessage = (id: string, content: string) => request<Message>("PATCH", `/api/messages/${id}`, { content }).then((m) => Message.parse(m));
-export const deleteMessage = (id: string) => request("DELETE", `/api/messages/${id}`);
-export async function uploadAttachment(file: File): Promise<Attachment> {
-  const form = new FormData();
-  form.append("file", file, file.name);
-  return request<Attachment>("POST", "/api/attachments", undefined, { form });
-}
-
-// ---------- Sprache
-export const rtcToken = (channelId: string) => request<RtcTokenResponse>("POST", "/api/rtc-token", { channelId }).then((r) => RtcTokenResponse.parse(r));
-
-// ---------- Verwaltung
-export const updateSettings = (patch: { name?: string; openJoin?: boolean; requireAccount?: boolean; listed?: boolean; description?: string | null }) => request("PATCH", "/api/settings", patch);
-/** Server-Icon (PNG/JPEG/WebP/GIF, 2 MB); erscheint in Seitenleiste und Favicon. */
-export async function uploadServerIcon(file: File): Promise<{ ok: true; iconUrl: string | null }> {
-  const form = new FormData();
-  form.append("file", file, file.name);
-  return request("PUT", "/api/settings/icon", undefined, { form });
-}
-export const deleteServerIcon = () => request("DELETE", "/api/settings/icon");
-/** Eigentuemerstatus (nur Eigentuemer; der erste Eigentuemer ist unentziehbar). */
-export const setOwner = (userId: string, owner: boolean) => request("PUT", `/api/members/${userId}/owner`, { owner });
-export const createCategory = (name: string) => request<Category>("POST", "/api/categories", { name });
-export const updateCategory = (id: string, patch: { name?: string; position?: number }) => request("PATCH", `/api/categories/${id}`, patch);
-export const deleteCategory = (id: string) => request("DELETE", `/api/categories/${id}`);
-export const createChannel = (data: { kind: "text" | "voice"; name: string; topic?: string | null; categoryId?: string | null }) => request<Channel>("POST", "/api/channels", data);
-export const updateChannel = (id: string, patch: { name?: string; topic?: string | null; categoryId?: string | null; position?: number; audioBitrate?: number; audioStereo?: boolean }) => request("PATCH", `/api/channels/${id}`, patch);
-export const deleteChannel = (id: string) => request("DELETE", `/api/channels/${id}`);
-export const createRole = (data: { name: string; color?: string | null; permissions?: number }) => request<Role>("POST", "/api/roles", data);
-export const updateRole = (id: string, patch: { name?: string; color?: string | null; permissions?: number; position?: number }) => request("PATCH", `/api/roles/${id}`, patch);
-export const deleteRole = (id: string) => request("DELETE", `/api/roles/${id}`);
-export const setMemberRoles = (userId: string, roleIds: string[]) => request("PUT", `/api/members/${userId}/roles`, { roleIds });
-export const kickMember = (userId: string) => request("DELETE", `/api/members/${userId}`);
-export const moveMember = (userId: string, channelId: string | null) => request("POST", `/api/members/${userId}/move`, { channelId });
-export const stopMemberStreams = (userId: string, what: { camera: boolean; screen: boolean }) => request("POST", `/api/members/${userId}/stream/stop`, what);
-export const setStreamBlocked = (userId: string, blocked: boolean) => request("PUT", `/api/members/${userId}/stream`, { blocked });
-export const banMember = (userId: string, reason: string | null) => request("POST", "/api/bans", { userId, reason });
-export const unban = (userId: string) => request("DELETE", `/api/bans/${userId}`);
-export const listBans = () => request<Ban[]>("GET", "/api/bans").then((b) => z.array(Ban).parse(b));
-export const createInvite = (data: { expiresInHours?: number | null; maxUses?: number | null }) => request<Invite>("POST", "/api/invites", data).then((i) => Invite.parse(i));
-export const listInvites = () => request<Invite[]>("GET", "/api/invites").then((i) => z.array(Invite).parse(i));
-export const revokeInvite = (code: string) => request("DELETE", `/api/invites/${encodeURIComponent(code)}`);

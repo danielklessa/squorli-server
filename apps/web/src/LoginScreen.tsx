@@ -1,8 +1,7 @@
 import { BACKUP_MIN_PASSWORD, type InvitePreview } from "@squorli/protocol";
 import { useEffect, useState } from "react";
-import { getInvitePreview } from "./api";
 import { askConfirm } from "./dialogs";
-import type { State, Store } from "./store";
+import { homeState, type State, type Store } from "./store";
 
 /** Einladungscode aus /invite/<code> oder ?invite=<code>. */
 export function inviteFromUrl(): string | null {
@@ -17,10 +16,11 @@ export function inviteFromUrl(): string | null {
  * Passwort-Backup anlegen). Hat der Geraeteschluessel schon ein Handle, steht er vorn.
  */
 export function LoginScreen({ store, state }: { store: Store; state: State }) {
+  const home = homeState(state);
   const [invite, setInvite] = useState(() => inviteFromUrl() ?? "");
   const [needInvite, setNeedInvite] = useState(() => !!inviteFromUrl());
   const [preview, setPreview] = useState<InvitePreview | null>(null);
-  const busy = state.connection === "logging-in" || state.connection === "connecting";
+  const busy = home.connection === "logging-in" || home.connection === "connecting";
   const dirHost = state.directoryUrl ? new URL(state.directoryUrl).host : null;
 
   // Geraeteschluessel: Handle registrieren, Passwort-Backup anlegen
@@ -37,7 +37,7 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
 
   // Nur mit Konto (Verwaltung): ein Browser-Schluessel ohne Handle wird gar nicht angeboten (keine Box, kein Umschalter);
   // hat er ein verifiziertes Handle, ist er ein Konto und darf sich wie bisher anmelden.
-  const accountRequired = state.requireAccount && !!state.directoryUrl;
+  const accountRequired = home.requireAccount && !!state.directoryUrl;
   const deviceAllowed = !accountRequired || !!state.directoryAccount;
   const deviceFirst = !state.directoryUrl || !!state.directoryAccount;
   const showDevice = deviceAllowed && (deviceFirst || showOther);
@@ -48,7 +48,7 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
     const code = invite.trim();
     if (!/^[A-Za-z0-9_-]{6,32}$/.test(code)) { setPreview(null); return; }
     let alive = true;
-    getInvitePreview(code).then((p) => { if (alive) setPreview(p); }).catch(() => { if (alive) setPreview(null); });
+    store.home.api.getInvitePreview(code).then((p) => { if (alive) setPreview(p); }).catch(() => { if (alive) setPreview(null); });
     return () => { alive = false; };
   }, [invite]);
 
@@ -162,8 +162,8 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
     <main className="login">
       <div className="login-card">
         <header className="login-head">
-          <img className="login-icon" src={state.iconUrl ?? "/brand/squorli-icon.svg"} alt="" width="72" height="72" />
-          <h1>{state.serverName ?? "Squorli"}</h1>
+          <img className="login-icon" src={home.iconUrl ?? "/brand/squorli-icon.svg"} alt="" width="72" height="72" />
+          <h1>{home.serverName ?? "Squorli"}</h1>
         </header>
         {preview && (
           <p className="invite-preview">
@@ -171,13 +171,13 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
             {!preview.valid && <span className="error"> · Einladung ungültig oder abgelaufen</span>}
           </p>
         )}
-        {state.removed && (
+        {home.removed && (
           <p className="error">
-            {state.removed.reason === "banned" ? "Du wurdest gebannt" : "Du wurdest vom Server entfernt"}
-            {state.removed.message ? `: ${state.removed.message}` : "."}
+            {home.removed.reason === "banned" ? "Du wurdest gebannt" : "Du wurdest vom Server entfernt"}
+            {home.removed.message ? `: ${home.removed.message}` : "."}
           </p>
         )}
-        {state.error && <p className="error">{state.error}</p>}
+        {home.error && <p className="error">{home.error}</p>}
 
         {deviceFirst ? <>{deviceBox}{accountBox}</> : <>{accountBox}{deviceBox}</>}
         {accountRequired && !deviceAllowed && <p className="muted small">Dieser Server verlangt ein Konto beim Verzeichnis. Eine Anmeldung nur mit dem Schlüssel dieses Browsers ist hier nicht möglich.</p>}
@@ -203,7 +203,7 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
       </div>
       <footer className="login-foot">
         <img src="/brand/squorli-icon-small.svg" alt="" width="18" height="18" />
-        <span>Betrieben mit Squorli{state.serverVersion ? ` · Version ${state.serverVersion}` : ""}</span>
+        <span>Betrieben mit Squorli{home.serverVersion ? ` · Version ${home.serverVersion}` : ""}</span>
       </footer>
     </main>
   );

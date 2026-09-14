@@ -1,15 +1,17 @@
 import { Permission, hasPermission, type Channel, type ServerState, type VoiceMember } from "@squorli/protocol";
 import { useState } from "react";
-import { moveMember } from "./api";
+import type { ServerApi } from "./api";
 import type { VoiceState } from "./voice/voiceClient";
 import { Icon } from "./Icon";
 
 type Props = {
   server: ServerState;
+  api: ServerApi;
   /** Kanal, der im Hauptbereich angezeigt wird (Textkanal oder die Buehne des Sprachkanals): nur er ist hinterlegt. */
   currentChannelId: string | null;
   voice: Record<string, VoiceMember[]>;
-  voiceState: VoiceState;
+  /** Eigene Sprachverbindung, wenn sie zu diesem Server gehoert; sonst null (Multi-Server-Client). */
+  voiceState: VoiceState | null;
   unread: Record<string, boolean>;
   connection: string;
   onSelect: (channelId: string) => void;
@@ -18,7 +20,7 @@ type Props = {
   myUserId: string;
 };
 
-export function Sidebar({ server, currentChannelId, voice, voiceState, unread, connection, onSelect, onJoinVoice, onOpenAdmin, myUserId }: Props) {
+export function Sidebar({ server, api, currentChannelId, voice, voiceState, unread, connection, onSelect, onJoinVoice, onOpenAdmin, myUserId }: Props) {
   // Drag & Drop: Sprachteilnehmer auf einen anderen Sprachkanal ziehen (sich selbst immer, andere mit MODERATE_VOICE).
   const canModerate = hasPermission(server.myPermissions, Permission.MODERATE_VOICE);
   const [dragging, setDragging] = useState<{ userId: string; from: string } | null>(null);
@@ -32,7 +34,7 @@ export function Sidebar({ server, currentChannelId, voice, voiceState, unread, c
     if (!d || d.from === channelId) return;
     if (d.userId === myUserId) { onJoinVoice(channelId); return; }
     setDragErr(null);
-    moveMember(d.userId, channelId).catch((e: unknown) => setDragErr(e instanceof Error ? e.message : String(e)));
+    api.moveMember(d.userId, channelId).catch((e: unknown) => setDragErr(e instanceof Error ? e.message : String(e)));
   };
   const canAdmin = hasPermission(server.myPermissions, Permission.MANAGE_CHANNELS) || hasPermission(server.myPermissions, Permission.MANAGE_ROLES)
     || hasPermission(server.myPermissions, Permission.MANAGE_SERVER) || hasPermission(server.myPermissions, Permission.BAN_MEMBERS)
@@ -45,7 +47,7 @@ export function Sidebar({ server, currentChannelId, voice, voiceState, unread, c
   const renderChannel = (c: Channel) => {
     const members = voice[c.id] ?? [];
     const active = c.id === currentChannelId;
-    const joined = c.kind === "voice" && voiceState.channelId === c.id;
+    const joined = c.kind === "voice" && voiceState?.channelId === c.id;
     const droppable = c.kind === "voice" && dragging !== null && dragging.from !== c.id;
     return (
       <li key={c.id} className={`channel ${active ? "active" : ""} ${joined ? "joined" : ""} ${unread[c.id] ? "unread" : ""} ${droppable ? "droppable" : ""} ${dropTarget === c.id ? "drop-target" : ""}`}
@@ -60,7 +62,7 @@ export function Sidebar({ server, currentChannelId, voice, voiceState, unread, c
         {c.kind === "voice" && members.length > 0 && (
           <ul className="voice-members">
             {members.map((m) => {
-              const p = voiceState.channelId === c.id ? voiceState.participants.find((x) => x.identity === m.userId) : undefined;
+              const p = voiceState?.channelId === c.id ? voiceState.participants.find((x) => x.identity === m.userId) : undefined;
               const draggable = canDrag(m.userId);
               return <li key={m.userId} className={`${p?.speaking ? "speaking" : ""} ${draggable ? "draggable" : ""} ${dragging?.userId === m.userId ? "dragging" : ""}`}
                 draggable={draggable} title={draggable ? "In einen anderen Sprachkanal ziehen" : undefined}
@@ -76,7 +78,7 @@ export function Sidebar({ server, currentChannelId, voice, voiceState, unread, c
   return (
     <nav className="sidebar">
       <header className="server-head">
-        <img className={`brand-mark ${server.settings.iconUrl ? "server-icon" : ""}`} src={server.settings.iconUrl ?? "/brand/squorli-icon-small.svg"} alt="" width="22" height="22" />
+        <img className={`brand-mark ${server.settings.iconUrl ? "server-icon" : ""}`} src={server.settings.iconUrl ? api.abs(server.settings.iconUrl) : "/brand/squorli-icon-small.svg"} alt="" width="22" height="22" />
         <strong>{server.settings.name}</strong>
         {connection !== "connected" && <span className="muted"> · {connection}</span>}
         {canAdmin && <button className="icon" title="Verwaltung" onClick={onOpenAdmin}><Icon name="settings" /></button>}

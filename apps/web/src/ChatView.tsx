@@ -1,9 +1,9 @@
 import { Permission, hasPermission, type Channel, type Member, type Message } from "@squorli/protocol";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { deleteMessage, editMessage } from "./api";
 import { askConfirm } from "./dialogs";
 import { Icon } from "./Icon";
-import type { ChannelMessages, Store } from "./store";
+import type { ChannelMessages } from "./store";
+import type { ServerConnection } from "./serverConnection";
 
 type Props = {
   channel: Channel;
@@ -12,7 +12,7 @@ type Props = {
   myUserId: string;
   myPermissions: number;
   typing: Record<string, number>;
-  store: Store;
+  conn: ServerConnection;
 };
 
 const GROUP_MS = 5 * 60_000;
@@ -33,7 +33,7 @@ const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2
 const fmtDay = (iso: string) => new Date(iso).toLocaleDateString([], { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
 const fmtSize = (n: number) => (n > 1_048_576 ? `${(n / 1_048_576).toFixed(1)} MB` : n > 1024 ? `${Math.round(n / 1024)} kB` : `${n} B`);
 
-export function ChatView({ channel, messages, members, myUserId, myPermissions, typing, store }: Props) {
+export function ChatView({ channel, messages, members, myUserId, myPermissions, typing, conn }: Props) {
   const [draft, setDraft] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
@@ -60,7 +60,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     if (el.scrollTop < 60 && messages.hasMore && !messages.loading && messages.loaded) {
       const before = el.scrollHeight;
-      void store.loadHistory(channel.id, true).then(() => { requestAnimationFrame(() => { el.scrollTop = el.scrollHeight - before; }); });
+      void conn.loadHistory(channel.id, true).then(() => { requestAnimationFrame(() => { el.scrollTop = el.scrollHeight - before; }); });
     }
   }
 
@@ -69,7 +69,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
     if ((!content && files.length === 0) || sending) return;
     setSending(true); setErr(null);
     try {
-      await store.sendMessage(channel.id, content, files);
+      await conn.sendMessage(channel.id, content, files);
       setDraft(""); setFiles([]);
       stickToBottom.current = true;
     } catch (e) {
@@ -79,14 +79,14 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
 
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); }
-    else if (Date.now() - lastTyping.current > 2500) { lastTyping.current = Date.now(); store.typing(channel.id); }
+    else if (Date.now() - lastTyping.current > 2500) { lastTyping.current = Date.now(); conn.typing(channel.id); }
   }
 
   async function saveEdit() {
     if (!editing) return;
     const text = editing.text.trim();
     if (!text) return;
-    try { await editMessage(editing.id, text); setEditing(null); } catch (e) { setErr(String(e)); }
+    try { await conn.api.editMessage(editing.id, text); setEditing(null); } catch (e) { setErr(String(e)); }
   }
 
   const typers = Object.entries(typing).filter(([uid, t]) => uid !== myUserId && Date.now() - t < 4000).map(([uid]) => nameOf.get(uid) ?? "jemand");
@@ -128,8 +128,8 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
                       {m.content && <p>{renderText(m.content)}{m.editedAt && <span className="muted"> (bearbeitet)</span>}</p>}
                       {m.attachments.map((a) => (
                         a.mimeType.startsWith("image/")
-                          ? <a key={a.id} href={a.url} target="_blank" rel="noreferrer"><img className="attachment-img" src={a.url} alt={a.name} loading="lazy" /></a>
-                          : <a key={a.id} className="attachment" href={a.url} target="_blank" rel="noreferrer"><Icon name="paperclip" /> {a.name} <span className="muted">({fmtSize(a.size)})</span></a>
+                          ? <a key={a.id} href={conn.api.abs(a.url)} target="_blank" rel="noreferrer"><img className="attachment-img" src={conn.api.abs(a.url)} alt={a.name} loading="lazy" /></a>
+                          : <a key={a.id} className="attachment" href={conn.api.abs(a.url)} target="_blank" rel="noreferrer"><Icon name="paperclip" /> {a.name} <span className="muted">({fmtSize(a.size)})</span></a>
                       ))}
                     </>
                   )}
@@ -137,7 +137,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
                 {(mine || canManage) && editing?.id !== m.id && (
                   <div className="msg-actions">
                     {mine && m.content && <button className="icon" title="Bearbeiten" onClick={() => setEditing({ id: m.id, text: m.content })}><Icon name="pencil" /></button>}
-                    <button className="icon" title="Löschen" onClick={() => { void askConfirm({ title: "Nachricht löschen?", text: m.content ? m.content.slice(0, 160) + (m.content.length > 160 ? "…" : "") : `${m.attachments.length} Anhang/Anhänge`, confirmLabel: "Löschen", danger: true }).then((ok) => { if (ok) return deleteMessage(m.id); }).catch((e) => setErr(String(e))); }}><Icon name="trash-2" /></button>
+                    <button className="icon" title="Löschen" onClick={() => { void askConfirm({ title: "Nachricht löschen?", text: m.content ? m.content.slice(0, 160) + (m.content.length > 160 ? "…" : "") : `${m.attachments.length} Anhang/Anhänge`, confirmLabel: "Löschen", danger: true }).then((ok) => { if (ok) return conn.api.deleteMessage(m.id); }).catch((e) => setErr(String(e))); }}><Icon name="trash-2" /></button>
                   </div>
                 )}
               </article>

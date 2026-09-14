@@ -60,7 +60,10 @@ async function main() {
   // Migrationsordner: im Dev relativ zu src, im Build relativ zu dist -> beide zeigen auf ../drizzle
   await runMigrations(db, join(here, "..", "drizzle"));
 
-  await app.register(cors, { origin: config.NODE_ENV !== "production" });
+  // CORS fuer alle Origins: der Web-Client eines anderen Squorli-Servers spricht diesen Server direkt an (Multi-Server-Client,
+  // Server-Leiste). Auth laeuft ausschliesslich ueber das Bearer-Token im Header (keine Cookies), die Login-Signatur bleibt an
+  // PUBLIC_DOMAIN gebunden; ein fremder Origin kann also nichts im Namen des Nutzers tun, ohne dessen Token zu besitzen.
+  await app.register(cors, { origin: true });
   await app.register(websocket);
 
   // Verzeichnis-Anbindung (M6): Server-Schluessel + Token; init() nach bootstrap (Einstellungen), register() nach app.listen.

@@ -1,112 +1,351 @@
-import { PROTOCOL_VERSION, ServerEvent, type AccountServer, type ClientEvent, type DirectoryAccount, type Me, type Message, type ServerState, type VoiceMember } from "@squorli/protocol";
+import {
+  deriveDmKey, directoryServerUrl, openDm, sealDm,
+  type AccountServer, type DirectoryAccount, type DirectoryServerEvent, type DmConversation, type DmMessage, type Friend,
+} from "@squorli/protocol";
 import * as api from "./api";
+import { DirectoryLink, type LinkStatus } from "./directoryLink";
 import { loadOrCreateIdentity, storeIdentity, type Identity } from "./identity";
+import { ServerConnection, type ServerConnState } from "./serverConnection";
+
+export type { ChannelMessages, Connection, RawLogEntry, ServerConnState } from "./serverConnection";
 
 /**
- * Client-Zustand ohne UI-Abhaengigkeit (PLAN 3.4): Sitzung, Serverzustand, Nachrichten-Cache,
- * Sprachkanal-Praesenz, Tipp-Anzeige, WebSocket mit Wiederverbindung.
+ * Client-Zustand ohne UI-Abhaengigkeit (PLAN 3.4). Multi-Server-Client: eine `ServerConnection` je Server (eigener Server =
+ * der, der den Client ausliefert, Schluessel `homeHost`; fremde Server aus der Server-Leiste ueber ihre Origin, Schluessel =
+ * Host aus dem Verzeichnis). Die Server-Leiste wechselt `activeHost`, ohne die Seite zu verlassen; laufende Verbindungen
+ * (und damit die Sprachverbindung) bleiben bestehen. Dazu Identitaet, Verzeichnis (M6), Freunde und Direktnachrichten (M7).
  */
-export type Connection = "idle" | "logging-in" | "connecting" | "connected" | "reconnecting" | "error";
 
-export type ChannelMessages = { list: Message[]; hasMore: boolean; loaded: boolean; loading: boolean };
-
-export type RawLogEntry = { dir: "in" | "out"; at: number; text: string };
+/** Entschluesselte Direktnachricht (M7); text = null, wenn sie sich nicht oeffnen liess (fremder Schluessel, beschaedigt). */
+export type Dm = { id: string; seq: number; from: string; to: string; sentAt: string; text: string | null };
+export type DmThread = { list: Dm[]; hasMore: boolean; loaded: boolean; loading: boolean };
 
 export type State = {
   identity: Identity | null;
-  me: Me | null;
-  userId: string | null;
-  connection: Connection;
-  error: string | null;
-  /** Server hat uns entfernt; Login erst nach Nutzeraktion erneut. */
-  removed: { reason: "kicked" | "banned"; message: string | null } | null;
-  server: ServerState | null;
-  voice: Record<string, VoiceMember[]>;
-  messages: Record<string, ChannelMessages>;
-  /** channelId -> userId -> Zeitstempel des letzten Tippens */
-  typing: Record<string, Record<string, number>>;
-  currentChannelId: string | null;
-  /** Kanal mit ungelesenen Nachrichten (seit letztem Ansehen). */
-  unread: Record<string, boolean>;
-  log: RawLogEntry[];
-  /** Verzeichnisdienst (M6), den dieser Server nennt; null = keiner. */
+  /** Schluessel des eigenen Servers in `servers` (Host der Adressleiste). */
+  homeHost: string;
+  /** Server, der im Hauptbereich gezeigt wird (Server-Leiste). */
+  activeHost: string;
+  /** Zustand je Server; der eigene Server ist immer vorhanden. */
+  servers: Record<string, ServerConnState>;
+  /** Verzeichnisdienst (M6), den der eigene Server nennt; null = keiner. */
   directoryUrl: string | null;
   /** Konto beim Verzeichnis fuer den eigenen Schluessel; undefined = noch nicht geprueft, null = nicht registriert. */
   directoryAccount: DirectoryAccount | null | undefined;
   directoryError: string | null;
-  /** Servername und Icon aus /api/health, fuer Seitentitel und Favicon schon vor dem Login. */
-  serverName: string | null;
-  iconUrl: string | null;
-  /** PUBLIC_DOMAIN dieses Servers (aus /api/health): Schluessel des Anzeigenamens je Server im Verzeichnis. */
-  serverDomain: string | null;
-  /** Anmeldung nur mit Verzeichniskonto (aus /api/health); der Login sperrt dann den reinen Browser-Schluessel. */
-  requireAccount: boolean;
-  /** Serverversion aus /api/health fuer den Squorli-Hinweis im Login. */
-  serverVersion: string | null;
   /** Server, auf denen sich das Handle angemeldet hat (Verzeichnis, AccountStatus.servers): Server-Leiste. null = unbekannt/kein Konto. */
   accountServers: AccountServer[] | null;
+  // ---- M7: Freunde und Direktnachrichten ueber den Verzeichnis-Socket
+  /** Verbindung zum Verzeichnis-Socket; "idle" auch ohne Verzeichnis oder ohne Konto. */
+  directoryLink: LinkStatus;
+  directoryLinkError: string | null;
+  /** Freunde und offene Anfragen (aus meiner Sicht); null = noch nichts vom Verzeichnis. */
+  friends: Friend[] | null;
+  /** Gespraeche je Freund (Schluessel des Freundes) mit Ungelesenem; kommt mit dem welcome und wird live nachgefuehrt. */
+  conversations: Record<string, DmConversation>;
+  dms: Record<string, DmThread>;
+  /** Startansicht (Squorli-Symbol in der Leiste): Freundesliste und Direktnachrichten statt der Server-Spalten. */
+  homeOpen: boolean;
+  currentPeer: string | null;
+  /** Letzter Fehler einer Freundes- oder Nachrichtenaktion (inline anzeigen). */
+  friendsError: string | null;
 };
 
-const SESSION_KEY = "chat.session.v1";
-const LOG_MAX = 80;
-const EMPTY: ChannelMessages = { list: [], hasMore: true, loaded: false, loading: false };
+/** Sitzungen je Server (Token bleibt geheim); v1 hielt nur die des eigenen Servers und wird einmalig uebernommen. */
+const SESSIONS_KEY = "chat.sessions.v2";
+const SESSION_KEY_V1 = "chat.session.v1";
+type StoredSessions = { publicKey: string; tokens: Record<string, string> };
+
+export const homeState = (s: State): ServerConnState => s.servers[s.homeHost]!;
+export const activeState = (s: State): ServerConnState => s.servers[s.activeHost] ?? homeState(s);
 
 export class Store {
-  state: State = {
-    identity: null, me: null, userId: null, connection: "idle", error: null, removed: null, server: null,
-    voice: {}, messages: {}, typing: {}, currentChannelId: null, unread: {}, log: [],
-    directoryUrl: null, directoryAccount: undefined, directoryError: null, serverName: null, iconUrl: null, serverDomain: null,
-    requireAccount: false, serverVersion: null, accountServers: null,
-  };
+  readonly homeHost = window.location.host;
+  state: State;
+  private conns = new Map<string, ServerConnection>();
+  private link: DirectoryLink | null = null;
+  /** Paarschluessel je Freund (M7), abgeleitet aus dem eigenen Seed und dem Schluessel des Freundes; bei Identitaetswechsel leeren. */
+  private dmKeys = new Map<string, Promise<CryptoKey>>();
   private listeners = new Set<(s: State) => void>();
-  private ws: WebSocket | null = null;
-  private reconnectTimer: number | null = null;
-  private reconnectDelay = 1000;
-  private wantConnection = false;
-  private pingTimer: number | null = null;
-  /** Wird vom Sprach-Client gesetzt, damit ein Kick die Sprachverbindung beendet. */
-  onRemoved: (() => void) | null = null;
-  /** Moderation (M3): Verschieben in einen anderen Sprachkanal (null = raus) und Beenden von Kamera/Bildschirm. */
-  onVoiceMoved: ((channelId: string | null, by: string) => void) | null = null;
-  onVoiceStop: ((what: { camera: boolean; screen: boolean }, by: string) => void) | null = null;
+  /** Wird vom Sprach-Client gesetzt: Kick/Sitzungsverlust auf `host` beendet die Sprachverbindung, falls sie dort laeuft. */
+  onRemoved: ((host: string) => void) | null = null;
+  /** Moderation (M3) auf `host`: Verschieben in einen anderen Sprachkanal (null = raus) und Beenden von Kamera/Bildschirm. */
+  onVoiceMoved: ((host: string, channelId: string | null, by: string) => void) | null = null;
+  onVoiceStop: ((host: string, what: { camera: boolean; screen: boolean }, by: string) => void) | null = null;
+
+  constructor() {
+    const home = this.createConnection(this.homeHost, "");
+    this.state = {
+      identity: null, homeHost: this.homeHost, activeHost: this.homeHost, servers: { [this.homeHost]: home.state },
+      directoryUrl: null, directoryAccount: undefined, directoryError: null, accountServers: null,
+      directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null, friendsError: null,
+    };
+  }
 
   subscribe(fn: (s: State) => void) { this.listeners.add(fn); fn(this.state); return () => { this.listeners.delete(fn); }; }
   private set(p: Partial<State>) { this.state = { ...this.state, ...p }; for (const fn of this.listeners) fn(this.state); }
 
+  /** Verbindung zu einem Server (eigener Server immer vorhanden). */
+  connection(host: string): ServerConnection | null { return this.conns.get(host) ?? null; }
+  get home(): ServerConnection { return this.conns.get(this.homeHost)!; }
+  get active(): ServerConnection { return this.conns.get(this.state.activeHost) ?? this.home; }
+
+  private createConnection(host: string, base: string): ServerConnection {
+    const conn = new ServerConnection(host, base, () => this.state.identity, {
+      onState: (s) => { if (this.state) this.set({ servers: { ...this.state.servers, [host]: s } }); },
+      onToken: (token) => this.storeToken(host, token),
+      onSessionLost: (message) => this.sessionLost(host, message),
+      onRemoved: () => this.onRemoved?.(host),
+      onConnected: () => { void this.refreshAccountServers(); },
+      onVoiceMoved: (channelId, by) => this.onVoiceMoved?.(host, channelId, by),
+      onVoiceStop: (what, by) => this.onVoiceStop?.(host, what, by),
+    });
+    this.conns.set(host, conn);
+    return conn;
+  }
+
   async init() {
     const identity = await loadOrCreateIdentity();
     this.set({ identity });
-    // Token vom Server abgelehnt (abgelaufen, von einem anderen Geraet abgemeldet): zurueck zum Login, nicht mit totem Token weiterlaufen.
-    api.onUnauthorized(() => { if (this.state.me) this.sessionLost("Die Sitzung ist abgelaufen oder wurde abgemeldet. Bitte erneut anmelden."); });
     void this.refreshDirectory();
-    // Gespeicherte Sitzung wiederverwenden, wenn sie noch gilt.
-    try {
-      const raw = localStorage.getItem(SESSION_KEY);
-      if (raw) {
-        const s = JSON.parse(raw) as { token: string; publicKey: string };
-        if (s.publicKey === identity.publicKey) {
-          api.setToken(s.token);
-          const me = await api.getMe().catch(() => null);
-          if (me) { this.set({ me, userId: me.userId }); this.connect(); return; }
-          api.setToken(null);
-        }
-      }
-    } catch { /* kein localStorage */ }
+    const token = this.storedToken(this.homeHost);
+    if (token) await this.home.resume(token);
   }
 
-  /** Verzeichnis-URL vom Server holen und nachsehen, ob der eigene Schluessel dort ein Handle hat. */
+  // ---------- Sitzungen je Server im localStorage
+  private readSessions(): StoredSessions | null {
+    try {
+      const raw = localStorage.getItem(SESSIONS_KEY);
+      if (raw) return JSON.parse(raw) as StoredSessions;
+      const v1 = localStorage.getItem(SESSION_KEY_V1);
+      if (v1) {
+        const s = JSON.parse(v1) as { token: string; publicKey: string };
+        const migrated: StoredSessions = { publicKey: s.publicKey, tokens: { [this.homeHost]: s.token } };
+        localStorage.setItem(SESSIONS_KEY, JSON.stringify(migrated));
+        localStorage.removeItem(SESSION_KEY_V1);
+        return migrated;
+      }
+    } catch { /* kein localStorage */ }
+    return null;
+  }
+  private storedToken(host: string): string | null {
+    const s = this.readSessions();
+    return s && s.publicKey === this.state.identity?.publicKey ? s.tokens[host] ?? null : null;
+  }
+  private storeToken(host: string, token: string | null) {
+    const pk = this.state.identity?.publicKey;
+    if (!pk) return;
+    try {
+      const prev = this.readSessions();
+      const tokens = prev && prev.publicKey === pk ? { ...prev.tokens } : {};
+      if (token) tokens[host] = token; else delete tokens[host];
+      localStorage.setItem(SESSIONS_KEY, JSON.stringify({ publicKey: pk, tokens } satisfies StoredSessions));
+    } catch { /* egal */ }
+  }
+  private forgetAllTokens() { try { localStorage.removeItem(SESSIONS_KEY); localStorage.removeItem(SESSION_KEY_V1); } catch { /* egal */ } }
+
+  // ---------- Server-Leiste: Server wechseln und fremde Server oeffnen
+  /** Host aus dem Verzeichnis (PUBLIC_DOMAIN) auf den Schluessel in `servers` abbilden: der eigene Server heisst hier `homeHost`. */
+  hostFor(directoryHost: string): string {
+    const h = directoryHost.toLowerCase();
+    const home = homeState(this.state);
+    return h === home.serverDomain || h === this.homeHost.toLowerCase() || h === window.location.hostname.toLowerCase() ? this.homeHost : h;
+  }
+  /** Server im Hauptbereich zeigen; ein fremder Server wird beim ersten Mal verbunden (Anmeldung mit dem eigenen Schluessel). */
+  openServer(directoryHost: string) {
+    const host = this.hostFor(directoryHost);
+    this.set({ activeHost: host, homeOpen: false });
+    if (host === this.homeHost) return;
+    let conn = this.conns.get(host);
+    if (!conn) {
+      conn = this.createConnection(host, directoryServerUrl(host));
+      this.set({ servers: { ...this.state.servers, [host]: conn.state } });
+    }
+    const st = conn.state;
+    if (st.connection === "idle" && !st.removed) void this.connectForeign(conn);
+  }
+  /** Erneut versuchen (nach Fehler oder Entfernung). */
+  retryServer(host: string) {
+    const conn = this.conns.get(host);
+    if (conn && host !== this.homeHost) void this.connectForeign(conn);
+  }
+  private async connectForeign(conn: ServerConnection) {
+    const health = await conn.refreshHealth();
+    if (!health) { conn.state = { ...conn.state, connection: "error", error: `Der Server ${conn.state.base} ist nicht erreichbar oder erlaubt keinen Zugriff aus anderen Clients.` }; this.set({ servers: { ...this.state.servers, [conn.state.host]: conn.state } }); return; }
+    const token = this.storedToken(conn.state.host);
+    if (token && await conn.resume(token)) return;
+    try { await conn.login(health.domain.toLowerCase()); } catch { /* Meldung steht im Zustand des Servers */ }
+  }
+  /** Fremden Server schliessen und aus der Leiste des Clients nehmen (Sitzung bleibt gespeichert). */
+  closeServer(host: string) {
+    if (host === this.homeHost) return;
+    const conn = this.conns.get(host);
+    conn?.close();
+    this.conns.delete(host);
+    const servers = { ...this.state.servers }; delete servers[host];
+    this.set({ servers, activeHost: this.state.activeHost === host ? this.homeHost : this.state.activeHost });
+  }
+  /** Sitzung auf `host` weg: eigener Server = zurueck zum Login (alle Verbindungen zu), fremder = nur dort abgemeldet. */
+  private sessionLost(host: string, _message: string) {
+    if (host !== this.homeHost) return;
+    this.closeAllForeign();
+  }
+  private closeAllForeign() {
+    for (const [host, conn] of this.conns) if (host !== this.homeHost) { conn.close(); this.conns.delete(host); }
+    this.set({ servers: { [this.homeHost]: this.home.state }, activeHost: this.homeHost });
+  }
+
+  /** Verzeichnis-URL vom eigenen Server holen und nachsehen, ob der eigene Schluessel dort ein Handle hat. */
   async refreshDirectory(): Promise<void> {
-    const health = await api.getHealth().catch(() => null);
+    const health = await this.home.refreshHealth();
     const directoryUrl = health?.directoryUrl ?? null;
-    this.set({
-      directoryUrl, directoryError: null, serverName: health?.serverName ?? null, iconUrl: health?.iconUrl ?? null, serverDomain: health?.domain?.toLowerCase() ?? null,
-      requireAccount: !!directoryUrl && health?.requireAccount === true, serverVersion: health?.version ?? null,
-    });
+    this.set({ directoryUrl, directoryError: null });
     const id = this.state.identity;
     if (!directoryUrl || !id) { this.set({ directoryAccount: null }); return; }
     try { this.set({ directoryAccount: await api.directoryLookup(directoryUrl, id.publicKey) }); }
     catch (err) { this.set({ directoryAccount: undefined, directoryError: api.explainDirectoryError(err) }); }
     void this.refreshAccountServers();
+    void this.connectDirectory();
+  }
+
+  // ---------- M7: Verzeichnis-Socket (Freunde, Praesenz, Direktnachrichten)
+  /** Socket zum Verzeichnis aufbauen, sobald Verzeichnis, Konto und Schluessel da sind; sonst schliessen. */
+  private async connectDirectory() {
+    const id = this.state.identity; const url = this.state.directoryUrl;
+    this.link?.close(); this.link = null;
+    this.dmKeys.clear();
+    this.set({ directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null });
+    if (!id || !url || !this.state.directoryAccount) return;
+    const health = await api.directoryHealth(url).catch(() => null);
+    if (!health?.features.friends) return;
+    const link = new DirectoryLink(url, id, (e) => this.handleDirectory(e), (status, error) => this.set({ directoryLink: status, directoryLinkError: error ?? null }));
+    this.link = link;
+    link.connect();
+  }
+  private dmKey(peer: string): Promise<CryptoKey> {
+    const id = this.state.identity!;
+    let p = this.dmKeys.get(peer);
+    if (!p) { p = deriveDmKey(id.privateKey, id.publicKey, peer); this.dmKeys.set(peer, p); }
+    return p;
+  }
+  private async decrypt(m: DmMessage): Promise<Dm> {
+    const me = this.state.identity?.publicKey;
+    const peer = m.from === me ? m.to : m.from;
+    let text: string | null = null;
+    try { text = (await openDm(await this.dmKey(peer), m)).text; } catch { text = null; }
+    return { id: m.id, seq: m.seq, from: m.from, to: m.to, sentAt: m.sentAt, text };
+  }
+  private thread(peer: string): DmThread { return this.state.dms[peer] ?? { list: [], hasMore: true, loaded: false, loading: false }; }
+  private setThread(peer: string, t: DmThread) { this.set({ dms: { ...this.state.dms, [peer]: t } }); }
+  private async handleDirectory(e: DirectoryServerEvent) {
+    const me = this.state.identity?.publicKey ?? "";
+    switch (e.type) {
+      case "welcome": {
+        const conversations: Record<string, DmConversation> = {};
+        for (const c of e.conversations) conversations[c.peer] = c;
+        // Nach einer Wiederverbindung den offenen Verlauf neu laden, es koennten Nachrichten fehlen.
+        this.set({ friends: e.friends, conversations, dms: {} });
+        if (this.state.currentPeer) void this.loadDmHistory(this.state.currentPeer);
+        break;
+      }
+      case "friends.update": {
+        const rest = (this.state.friends ?? []).filter((f) => f.publicKey !== e.publicKey);
+        this.set({ friends: e.friend ? [...rest, e.friend] : rest });
+        break;
+      }
+      case "friends.presence":
+        this.set({ friends: (this.state.friends ?? []).map((f) => (f.publicKey === e.publicKey ? { ...f, online: e.online } : f)) });
+        break;
+      case "dm.message": {
+        const m = e.message;
+        const peer = m.from === me ? m.to : m.from;
+        const dm = await this.decrypt(m);
+        const t = this.thread(peer);
+        if (t.loaded && !t.list.some((x) => x.id === dm.id)) this.setThread(peer, { ...t, list: [...t.list, dm].sort((a, b) => a.seq - b.seq) });
+        const viewing = this.state.homeOpen && this.state.currentPeer === peer && document.visibilityState === "visible";
+        const prev = this.state.conversations[peer];
+        const unread = m.from === me || viewing ? 0 : (prev?.unread ?? 0) + 1;
+        this.set({ conversations: { ...this.state.conversations, [peer]: { peer, lastSeq: m.seq, lastAt: m.sentAt, unread } } });
+        if (viewing && m.from !== me) this.link?.send({ type: "dm.read", peer, seq: m.seq });
+        break;
+      }
+      case "dm.history": {
+        const list = await Promise.all(e.messages.map((m) => this.decrypt(m)));
+        const t = this.thread(e.peer);
+        const known = new Set(t.list.map((m) => m.id));
+        const merged = [...list.filter((m) => !known.has(m.id)), ...t.list].sort((a, b) => a.seq - b.seq);
+        this.setThread(e.peer, { list: merged, hasMore: t.loaded && merged.length && list.length && list[0]!.seq > merged[0]!.seq ? t.hasMore : e.more, loaded: true, loading: false });
+        break;
+      }
+      case "dm.read": {
+        const c = this.state.conversations[e.peer];
+        if (c && e.seq >= c.lastSeq) this.set({ conversations: { ...this.state.conversations, [e.peer]: { ...c, unread: 0 } } });
+        break;
+      }
+      case "dm.deleted": {
+        const t = this.state.dms[e.peer];
+        if (t) this.setThread(e.peer, { ...t, list: t.list.filter((m) => m.id !== e.id) });
+        break;
+      }
+      case "dm.cleared": {
+        const conversations = { ...this.state.conversations }; delete conversations[e.peer];
+        this.set({ conversations, dms: { ...this.state.dms, [e.peer]: { list: [], hasMore: false, loaded: true, loading: false } } });
+        break;
+      }
+      case "error":
+        if (e.code === "version" || e.code === "unauthorized" || e.code === "unknown_account") break; // Verbindungsfehler, steht in directoryLinkError
+        this.set({ friendsError: explainDirectoryCode(e.code) });
+        break;
+      case "pong": case "challenge":
+        break;
+    }
+  }
+  openHome(open = true) { this.set({ homeOpen: open, friendsError: null }); }
+  /** Gespraech mit einem Freund oeffnen: Startansicht, Verlauf laden, als gelesen melden. */
+  selectPeer(peer: string) {
+    this.set({ homeOpen: true, currentPeer: peer, friendsError: null });
+    if (!this.state.dms[peer]?.loaded) void this.loadDmHistory(peer);
+    this.markDmRead(peer);
+  }
+  markDmRead(peer: string) {
+    const c = this.state.conversations[peer];
+    if (!c || c.unread === 0) return;
+    this.set({ conversations: { ...this.state.conversations, [peer]: { ...c, unread: 0 } } });
+    this.link?.send({ type: "dm.read", peer, seq: c.lastSeq });
+  }
+  async loadDmHistory(peer: string, older = false) {
+    const t = this.thread(peer);
+    if (t.loading || (older && !t.hasMore)) return;
+    this.setThread(peer, { ...t, loading: true });
+    const before = older ? t.list[0]?.seq : undefined;
+    if (!this.link?.send({ type: "dm.history", peer, ...(before !== undefined ? { before } : {}) })) this.setThread(peer, { ...t, loading: false });
+  }
+  private friendAction(type: "friends.request" | "friends.accept" | "friends.decline" | "friends.remove" | "friends.block" | "friends.unblock", publicKey: string) {
+    this.set({ friendsError: null });
+    if (!this.link?.send({ type, publicKey })) this.set({ friendsError: "Keine Verbindung zum Verzeichnis." });
+  }
+  requestFriend(publicKey: string) { this.friendAction("friends.request", publicKey); }
+  acceptFriend(publicKey: string) { this.friendAction("friends.accept", publicKey); }
+  declineFriend(publicKey: string) { this.friendAction("friends.decline", publicKey); }
+  removeFriend(publicKey: string) { this.friendAction("friends.remove", publicKey); }
+  blockFriend(publicKey: string) { this.friendAction("friends.block", publicKey); }
+  unblockFriend(publicKey: string) { this.friendAction("friends.unblock", publicKey); }
+  /** Direktnachricht verschluesseln und senden; die Anzeige kommt ueber das Echo des Verzeichnisses (dm.message). */
+  async sendDm(peer: string, text: string) {
+    const id = this.state.identity;
+    if (!id) return;
+    const msgId = crypto.randomUUID();
+    const sealed = await sealDm(await this.dmKey(peer), id.publicKey, peer, msgId, { text });
+    if (!this.link?.send({ type: "dm.send", to: peer, id: msgId, ...sealed, sentAt: new Date().toISOString() })) throw new Error("Keine Verbindung zum Verzeichnis.");
+  }
+  deleteDm(peer: string, id: string) { this.link?.send({ type: "dm.delete", peer, id }); }
+  clearDm(peer: string) { this.link?.send({ type: "dm.clear", peer }); }
+  /** Handle-Suche beim Verzeichnis (Praefix); Fehler sind hier kein Drama, dann eben keine Treffer. */
+  searchHandles(q: string) { const url = this.state.directoryUrl; return url ? api.directorySearchHandles(url, q).catch(() => []) : Promise.resolve([]); }
+  /** Zustand eines Schluessels in meiner Freundesliste; null = kein Eintrag; undefined = kein Verzeichnis-Socket. */
+  friendState(publicKey: string): Friend["state"] | null | undefined {
+    if (!this.state.friends) return undefined;
+    return this.state.friends.find((f) => f.publicKey === publicKey)?.state ?? null;
   }
 
   /** Server-Leiste: Serverliste des Kontos beim Verzeichnis holen (signiert). Nur mit Handle; Fehler sind kein Login-Problem. */
@@ -139,21 +378,24 @@ export class Store {
   async loginWithHandle(handle: string, password: string, invite?: string, code?: string): Promise<void> {
     const url = this.state.directoryUrl;
     if (!url) return;
-    this.set({ connection: "logging-in", error: null, removed: null });
+    const home = this.home;
+    home.state = { ...home.state, connection: "logging-in", error: null, removed: null };
+    this.set({ servers: { ...this.state.servers, [this.homeHost]: home.state } });
     let id: Identity;
     try { id = await api.directoryRestore(url, handle, password, code); }
     catch (err) {
       const errCode = err instanceof api.ApiError ? err.code : null;
       // totp_required ist kein Fehler, sondern der naechste Schritt: Meldung neutral halten.
-      this.set({ connection: errCode === "totp_required" ? "idle" : "error", error: api.explainDirectoryError(err) });
+      home.state = { ...home.state, connection: errCode === "totp_required" ? "idle" : "error", error: api.explainDirectoryError(err) };
+      this.set({ servers: { ...this.state.servers, [this.homeHost]: home.state } });
       throw Object.assign(new Error("restore failed"), { code: errCode });
     }
-    this.wantConnection = false;
-    this.ws?.close();
-    api.setToken(null);
-    try { localStorage.removeItem(SESSION_KEY); } catch { /* egal */ }
+    this.closeAllForeign();
+    home.close();
+    home.api.setToken(null);
+    this.forgetAllTokens();
     storeIdentity(id);
-    this.set({ identity: id, directoryAccount: undefined, connection: "idle" });
+    this.set({ identity: id, directoryAccount: undefined });
     void this.refreshDirectory();
     await this.login(invite);
   }
@@ -184,218 +426,40 @@ export class Store {
     }
   }
 
-  /** Anmelden (Challenge-Response), optional mit Einladung, dann WebSocket verbinden. */
+  /** Am eigenen Server anmelden (Signatur ueber den Hostnamen der Adressleiste = PUBLIC_DOMAIN), optional mit Einladung. */
   async login(invite?: string): Promise<void> {
-    const id = this.state.identity;
-    if (!id) return;
-    this.set({ connection: "logging-in", error: null, removed: null });
-    try {
-      const session = await api.login(id, invite);
-      api.setToken(session.sessionToken);
-      try { localStorage.setItem(SESSION_KEY, JSON.stringify({ token: session.sessionToken, publicKey: id.publicKey })); } catch { /* egal */ }
-      const me = await api.getMe();
-      this.set({ me, userId: me.userId });
-      this.connect();
-    } catch (err) {
-      const code = err instanceof api.ApiError ? err.code : null;
-      this.set({ connection: "error", error: await api.explainLoginError(err) });
-      throw Object.assign(new Error("login failed"), { code });
-    }
+    await this.home.login(window.location.hostname, invite);
   }
 
+  /** Abmelden: alle Server (der Client haengt an der Sitzung des eigenen Servers). */
   logout() {
-    // Sitzung auch serverseitig beenden (M6c), damit sie nicht in der Geraeteliste anderer Browser bleibt; best effort.
-    if (api.getToken()) void api.logoutSession().catch(() => {});
-    this.clearSession(null);
-  }
-
-  /** Sitzung vom Server verloren (Fernabmeldung, abgelaufen): wie Abmelden, aber mit Meldung im Login und Sprache verlassen. */
-  private sessionLost(message: string) {
-    this.onRemoved?.();
-    this.clearSession(message);
-  }
-
-  private clearSession(error: string | null) {
-    this.wantConnection = false;
-    this.ws?.close();
-    api.setToken(null);
-    try { localStorage.removeItem(SESSION_KEY); } catch { /* egal */ }
-    this.set({ me: null, userId: null, connection: "idle", server: null, messages: {}, voice: {}, currentChannelId: null, removed: null, error });
+    this.closeAllForeign();
+    this.home.logout();
   }
 
   async forgetIdentity() {
     this.logout();
+    this.link?.close(); this.link = null;
+    this.forgetAllTokens();
     const { forgetIdentity } = await import("./identity");
     forgetIdentity();
     this.set({ identity: await loadOrCreateIdentity(), directoryAccount: undefined });
     void this.refreshDirectory();
   }
-
-  // ---------- WebSocket
-  private connect() {
-    this.wantConnection = true;
-    const token = api.getToken();
-    if (!token) return;
-    this.set({ connection: this.state.server ? "reconnecting" : "connecting" });
-    const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${window.location.host}/api/ws`);
-    this.ws = ws;
-    ws.onopen = () => this.send({ type: "hello", protocolVersion: PROTOCOL_VERSION, sessionToken: token });
-    ws.onmessage = (m) => {
-      this.pushLog({ dir: "in", at: Date.now(), text: String(m.data).slice(0, 2000) });
-      const parsed = ServerEvent.safeParse(JSON.parse(m.data));
-      if (parsed.success) this.handle(parsed.data);
-    };
-    ws.onclose = (ev) => {
-      if (this.ws === ws) this.ws = null;
-      if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
-      // 4011 = Sitzung von einem anderen Geraet abgemeldet (M6c): nicht wiederverbinden, zurueck zum Login.
-      if (ev.code === 4011 && this.wantConnection) return this.sessionLost("Diese Sitzung wurde von einem anderen Gerät abgemeldet.");
-      if (!this.wantConnection) return;
-      this.set({ connection: "reconnecting" });
-      this.reconnectTimer = window.setTimeout(() => this.connect(), this.reconnectDelay);
-      this.reconnectDelay = Math.min(15_000, this.reconnectDelay * 2);
-    };
-  }
-
-  send(e: ClientEvent) {
-    if (this.ws?.readyState !== WebSocket.OPEN) return;
-    const text = JSON.stringify(e);
-    this.pushLog({ dir: "out", at: Date.now(), text });
-    this.ws.send(text);
-  }
-
-  private pushLog(e: RawLogEntry) { this.set({ log: [...this.state.log.slice(-(LOG_MAX - 1)), e] }); }
-
-  private handle(e: ServerEvent) {
-    switch (e.type) {
-      case "welcome": {
-        this.reconnectDelay = 1000;
-        const wasReconnect = this.state.server !== null;
-        const current = this.state.currentChannelId && e.state.channels.some((c) => c.id === this.state.currentChannelId)
-          ? this.state.currentChannelId
-          : e.state.channels.find((c) => c.kind === "text")?.id ?? null;
-        this.set({ server: e.state, userId: e.userId, connection: "connected", currentChannelId: current, error: null });
-        if (!wasReconnect) void this.refreshAccountServers();
-        if (this.pingTimer) clearInterval(this.pingTimer);
-        this.pingTimer = window.setInterval(() => this.send({ type: "ping", t: Date.now() }), 20_000);
-        // Nach Wiederverbindung: Verlauf des aktuellen Kanals neu laden, es koennten Nachrichten fehlen.
-        if (wasReconnect && current) { this.set({ messages: { ...this.state.messages, [current]: EMPTY } }); void this.loadHistory(current); }
-        else if (current) void this.loadHistory(current);
-        break;
-      }
-      case "structure": {
-        const server = this.state.server;
-        if (!server) break;
-        const next: ServerState = {
-          ...server,
-          ...(e.settings ? { settings: e.settings } : {}),
-          ...(e.categories ? { categories: e.categories } : {}),
-          ...(e.channels ? { channels: e.channels } : {}),
-          ...(e.roles ? { roles: e.roles } : {}),
-          ...(e.members ? { members: e.members } : {}),
-        };
-        const current = this.state.currentChannelId && next.channels.some((c) => c.id === this.state.currentChannelId)
-          ? this.state.currentChannelId : next.channels.find((c) => c.kind === "text")?.id ?? null;
-        this.set({ server: next, currentChannelId: current });
-        break;
-      }
-      case "me":
-        if (this.state.server) this.set({ server: { ...this.state.server, myPermissions: e.myPermissions } });
-        break;
-      case "voice.state":
-        this.set({ voice: { ...this.state.voice, [e.channelId]: e.members } });
-        break;
-      case "voice.moved":
-        this.onVoiceMoved?.(e.channelId, e.by);
-        break;
-      case "voice.stop":
-        this.onVoiceStop?.({ camera: e.camera, screen: e.screen }, e.by);
-        break;
-      case "message.create": {
-        const ch = this.state.messages[e.message.channelId];
-        if (ch?.loaded && !ch.list.some((m) => m.id === e.message.id)) {
-          this.set({ messages: { ...this.state.messages, [e.message.channelId]: { ...ch, list: [...ch.list, e.message] } } });
-        }
-        const typing = { ...(this.state.typing[e.message.channelId] ?? {}) };
-        delete typing[e.message.authorId];
-        const unread = e.message.channelId !== this.state.currentChannelId && e.message.authorId !== this.state.userId;
-        this.set({ typing: { ...this.state.typing, [e.message.channelId]: typing }, unread: unread ? { ...this.state.unread, [e.message.channelId]: true } : this.state.unread });
-        break;
-      }
-      case "message.update": {
-        const ch = this.state.messages[e.message.channelId];
-        if (ch) this.set({ messages: { ...this.state.messages, [e.message.channelId]: { ...ch, list: ch.list.map((m) => (m.id === e.message.id ? e.message : m)) } } });
-        break;
-      }
-      case "message.delete": {
-        const ch = this.state.messages[e.channelId];
-        if (ch) this.set({ messages: { ...this.state.messages, [e.channelId]: { ...ch, list: ch.list.filter((m) => m.id !== e.id) } } });
-        break;
-      }
-      case "typing":
-        this.set({ typing: { ...this.state.typing, [e.channelId]: { ...(this.state.typing[e.channelId] ?? {}), [e.userId]: Date.now() } } });
-        break;
-      case "removed":
-        this.wantConnection = false;
-        this.onRemoved?.();
-        this.set({ removed: { reason: e.reason, message: e.message }, connection: "idle", server: null, messages: {}, voice: {} });
-        break;
-      case "error":
-        if (e.code === "unauthorized") {
-          // Token ungueltig oder keine Mitgliedschaft mehr: nicht mit totem Socket im Chat bleiben.
-          this.sessionLost(e.message === "not a member" ? "Du bist auf diesem Server kein Mitglied mehr." : "Die Sitzung ist ungültig. Bitte erneut anmelden.");
-        } else if (e.code === "protocol_version") {
-          this.wantConnection = false;
-          this.set({ connection: "error", error: `${e.code}: ${e.message}` });
-        }
-        break;
-      case "pong":
-        break;
-    }
-  }
-
-  // ---------- Kanaele und Nachrichten
-  selectChannel(channelId: string) {
-    this.set({ currentChannelId: channelId, unread: { ...this.state.unread, [channelId]: false } });
-    if (!this.state.messages[channelId]?.loaded) void this.loadHistory(channelId);
-  }
-
-  async loadHistory(channelId: string, older = false) {
-    const ch = this.state.messages[channelId] ?? EMPTY;
-    if (ch.loading || (older && !ch.hasMore)) return;
-    this.set({ messages: { ...this.state.messages, [channelId]: { ...ch, loading: true } } });
-    try {
-      const before = older ? ch.list[0]?.seq : undefined;
-      const page = await api.getMessages(channelId, before);
-      const cur = this.state.messages[channelId] ?? EMPTY;
-      const merged = older ? [...page.messages, ...cur.list] : mergeLatest(cur.list, page.messages);
-      this.set({ messages: { ...this.state.messages, [channelId]: { list: merged, hasMore: older ? page.hasMore : (cur.loaded ? cur.hasMore : page.hasMore), loaded: true, loading: false } } });
-    } catch (err) {
-      this.set({ messages: { ...this.state.messages, [channelId]: { ...ch, loading: false } }, error: String(err) });
-    }
-  }
-
-  async sendMessage(channelId: string, content: string, files: File[]) {
-    const attachmentIds: string[] = [];
-    for (const f of files) attachmentIds.push((await api.uploadAttachment(f)).id);
-    const msg = await api.sendMessage(channelId, content, attachmentIds);
-    const ch = this.state.messages[channelId];
-    if (ch?.loaded && !ch.list.some((m) => m.id === msg.id)) {
-      this.set({ messages: { ...this.state.messages, [channelId]: { ...ch, list: [...ch.list, msg] } } });
-    }
-  }
-
-  typing(channelId: string) { this.send({ type: "typing", channelId }); }
-
-  clearError() { this.set({ error: null }); }
 }
 
-/** Neueste Seite mit vorhandenem Cache zusammenfuehren (nach Reconnect), ohne Dubletten. */
-function mergeLatest(cur: Message[], page: Message[]): Message[] {
-  if (!cur.length) return page;
-  const known = new Set(cur.map((m) => m.id));
-  const byId = new Map(page.map((m) => [m.id, m]));
-  const updated = cur.map((m) => byId.get(m.id) ?? m);
-  return [...updated, ...page.filter((m) => !known.has(m.id))].sort((a, b) => a.seq - b.seq);
+/** Fehlercodes des Verzeichnis-Sockets (M7) in Saetze. */
+function explainDirectoryCode(code: string): string {
+  switch (code) {
+    case "self": return "Das bist du selbst.";
+    case "unknown_account": return "Dieses Konto gibt es beim Verzeichnis nicht.";
+    case "not_friends": return "Ihr seid keine Freunde; Nachrichten gehen nur an bestätigte Freunde.";
+    case "blocked": return "Diese Person hat dich blockiert, oder du sie.";
+    case "declined_recently": return "Die Anfrage wurde vor Kurzem abgelehnt; bitte später noch einmal.";
+    case "rate_limited": return "Zu viele Aktionen, bitte kurz warten.";
+    case "too_large": return "Die Nachricht ist zu groß.";
+    case "duplicate": return "Diese Nachricht wurde schon gesendet.";
+    case "not_found": return "Nicht gefunden.";
+    default: return `Verzeichnis: ${code}`;
+  }
 }

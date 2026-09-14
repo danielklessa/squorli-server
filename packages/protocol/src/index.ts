@@ -10,6 +10,8 @@ export * from "./permissions";
 export * from "./directory";
 export * from "./backup";
 export * from "./useragent";
+export * from "./friends";
+export * from "./dm";
 export { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { DisplayName } from "./directory";

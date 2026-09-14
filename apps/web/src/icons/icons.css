@@ -3,6 +3,7 @@
 .ic { font-family: "lucide" !important; font-style: normal; font-weight: normal; line-height: 1; display: inline-block; vertical-align: -0.125em; -webkit-font-smoothing: antialiased; }
 .ic-ban::before { content: "\e051"; }
 .ic-bug::before { content: "\e20c"; }
+.ic-check::before { content: "\e06c"; }
 .ic-chevron-down::before { content: "\e06d"; }
 .ic-chevron-up::before { content: "\e070"; }
 .ic-compass::before { content: "\e09b"; }
@@ -12,6 +13,8 @@
 .ic-headphones::before { content: "\e0f1"; }
 .ic-key-round::before { content: "\e4a7"; }
 .ic-link::before { content: "\e102"; }
+.ic-lock::before { content: "\e10b"; }
+.ic-message-circle::before { content: "\e116"; }
 .ic-mic::before { content: "\e118"; }
 .ic-mic-off::before { content: "\e119"; }
 .ic-monitor::before { content: "\e11d"; }
@@ -27,6 +30,7 @@
 .ic-shield::before { content: "\e158"; }
 .ic-trash-2::before { content: "\e18e"; }
 .ic-user::before { content: "\e19f"; }
+.ic-user-plus::before { content: "\e1a2"; }
 .ic-video::before { content: "\e1a5"; }
 .ic-video-off::before { content: "\e1a6"; }
 .ic-volume-2::before { content: "\e1ab"; }

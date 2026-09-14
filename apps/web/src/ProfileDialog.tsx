@@ -1,6 +1,6 @@
 import type { DirectoryAccount, Me, SessionInfo } from "@squorli/protocol";
 import { useCallback, useEffect, useState } from "react";
-import { getSessions, revokeOtherSessions, revokeSession, updateMe } from "./api";
+import type { ServerApi } from "./api";
 import { askConfirm } from "./dialogs";
 import { Icon } from "./Icon";
 
@@ -19,8 +19,8 @@ const fmt = (iso: string) => new Date(iso).toLocaleString("de-DE", { dateStyle: 
  * hinterlegt), Geraete (Sitzungen auf diesem Server mit Fernabmeldung, M6c), Konto (Handle, Schluessel, Link zur Kontoseite
  * des Verzeichnisses, Abmelden, Identitaet verwerfen).
  */
-export function ProfileDialog({ me, directoryUrl, directoryAccount, serverDomain, onSaveDirectoryName, onClose, onLogout, onForget }: {
-  me: Me; directoryUrl: string | null; directoryAccount: DirectoryAccount | null | undefined; serverDomain: string | null;
+export function ProfileDialog({ api, me, directoryUrl, directoryAccount, serverDomain, onSaveDirectoryName, onClose, onLogout, onForget }: {
+  api: ServerApi; me: Me; directoryUrl: string | null; directoryAccount: DirectoryAccount | null | undefined; serverDomain: string | null;
   onSaveDirectoryName: (server: string | null, displayName: string | null) => Promise<void>;
   onClose: () => void; onLogout: () => void; onForget: () => void;
 }) {
@@ -41,7 +41,7 @@ export function ProfileDialog({ me, directoryUrl, directoryAccount, serverDomain
   }, [onClose]);
 
   const loadSessions = useCallback(async () => {
-    try { setSessions(await getSessions()); setErr(null); } catch (e) { setErr(String(e)); }
+    try { setSessions(await api.getSessions()); setErr(null); } catch (e) { setErr(String(e)); }
   }, []);
   useEffect(() => { if (tab === "devices") void loadSessions(); }, [tab, loadSessions]);
 
@@ -55,7 +55,7 @@ export function ProfileDialog({ me, directoryUrl, directoryAccount, serverDomain
         await onSaveDirectoryName(serverDomain, local === global ? null : local);
         if (global !== (directoryAccount?.displayName ?? null)) await onSaveDirectoryName(null, global);
       }
-      await updateMe(local ?? global);
+      await api.updateMe(local ?? global);
       onClose();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   }
@@ -63,13 +63,13 @@ export function ProfileDialog({ me, directoryUrl, directoryAccount, serverDomain
     const ok = await askConfirm({ title: "Gerät abmelden?", text: `${s.label ?? "Dieses Gerät"} (angemeldet am ${fmt(s.createdAt)}) wird sofort abgemeldet.`, confirmLabel: "Abmelden", danger: true });
     if (!ok) return;
     setBusy(true);
-    try { await revokeSession(s.id); await loadSessions(); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+    try { await api.revokeSession(s.id); await loadSessions(); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }
   async function revokeOthers() {
     const ok = await askConfirm({ title: "Alle anderen Geräte abmelden?", text: "Alle Sitzungen außer dieser werden sofort beendet.", confirmLabel: "Alle abmelden", danger: true });
     if (!ok) return;
     setBusy(true);
-    try { await revokeOtherSessions(); await loadSessions(); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+    try { await api.revokeOtherSessions(); await loadSessions(); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }
   async function forget() {
     const ok = await askConfirm({ title: "Identität verwerfen?", text: "Der Schlüssel wird aus diesem Browser gelöscht. Ohne Passwort-Backup beim Verzeichnis ist das Konto danach nicht wiederherstellbar.", confirmLabel: "Verwerfen", danger: true });

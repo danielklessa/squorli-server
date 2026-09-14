@@ -99,7 +99,7 @@ export const BackupBlob = z.object({ handle: Handle, publicKey: PublicKey, ciphe
 
 // ---- M6c: signierte Kontoaktionen (Authenticator, Wiederherstellungscodes, Kontostatus). Gleiches Muster wie Registrierung
 // und Backup: Challenge + Signatur ueber Host, Nonce und Nutzlast (bei Aktionen mit Code ist der Code die Nutzlast).
-export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update"]);
+export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends"]);
 export type DirectoryAction = z.infer<typeof DirectoryAction>;
 export function directoryActionMessage(directoryHost: string, action: DirectoryAction, nonce: string, payload = ""): string {
   return `community-directory-${action}\n${directoryHost}\n${nonce}\n${payload}`;
@@ -204,7 +204,8 @@ export const DirectoryHealth = z.object({
   service: z.literal("directory"),
   /** Host, an den Registrierungs-Signaturen gebunden sind. */
   host: z.string(),
-  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean() }),
+  /** `friends` (M7): Freunde und Direktnachrichten ueber den WebSocket /api/ws. */
+  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false) }),
   time: Iso,
 });
 

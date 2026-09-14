@@ -9,6 +9,8 @@ type Props = {
   client: VoiceClient;
   voice: VoiceState;
   channel: Channel | null;
+  /** Name des Servers der Sprachverbindung, wenn gerade ein anderer Server angezeigt wird (Multi-Server-Client); sonst null. */
+  serverName: string | null;
   displayName: string;
   onLeave: () => Promise<void>;
   onOpenProfile: () => void;
@@ -31,7 +33,7 @@ const isTypingTarget = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
 
 /** Unterer Bereich der Seitenleiste: eigener Name, Sprachstatus, Stumm, Verlassen, Einstellungen. */
-export function VoiceDock({ client, voice, channel, displayName, onLeave, onOpenProfile, onOpenStage, canStream, onSettings, onToggleCamera }: Props) {
+export function VoiceDock({ client, voice, channel, serverName, displayName, onLeave, onOpenProfile, onOpenStage, canStream, onSettings, onToggleCamera }: Props) {
   const [settings, setSettings] = useState<VoiceSettings>(() => loadVoiceSettings());
   const [showSettings, setShowSettings] = useState(false);
   const [tab, setTab] = useState<SettingsTab>("voice");
@@ -95,7 +97,7 @@ export function VoiceDock({ client, voice, channel, displayName, onLeave, onOpen
         <div className="dock-voice">
           <div className="dock-status">
             <span className={voice.status === "connected" ? "ok" : "warn"}>{voice.status === "connected" ? "Sprache verbunden" : voice.status}</span>
-            <span className="muted"> · <Icon name="volume-2" /> {channel?.name ?? "…"}</span>
+            <span className="muted"> · <Icon name="volume-2" /> {serverName ? `${serverName} / ` : ""}{channel?.name ?? "…"}</span>
             {!voice.canPlayback && <button className="small warn" title="Der Browser blockiert die Wiedergabe bis zu einem Klick" onClick={() => client.startAudio()}>Ton freigeben</button>}
             {voice.status === "connected" && voice.audioContext !== "running" && voice.audioContext !== "none" && <button className="small warn" title="Der Browser hat den Audio-Kontext angehalten; Klick gibt Mikrofon und Sprecheranzeige frei" onClick={() => client.prepareAudio()}>Mikrofon freigeben</button>}
             {onOpenStage && <button className="small secondary" title="Kacheln und Bildschirmfreigaben anzeigen" onClick={onOpenStage}>Ansicht</button>}

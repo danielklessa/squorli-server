@@ -1,13 +1,13 @@
 import { AUDIO_BITRATES, PERMISSION_LABELS, Permission, hasPermission, permissionNames, type Ban, type Invite, type PermissionName, type ServerState } from "@squorli/protocol";
 import { useEffect, useRef, useState } from "react";
-import * as api from "./api";
+import type { ServerApi } from "./api";
 import { askConfirm } from "./dialogs";
 import { Icon } from "./Icon";
 
 type Tab = "server" | "channels" | "roles" | "invites" | "bans";
 
 /** Verwaltung: Server, Kategorien/Kanaele, Rollen, Einladungen, Bans. Aenderungen kommen per structure-Ereignis zurueck. */
-export function AdminPanel({ server, directoryUrl, onClose }: { server: ServerState; directoryUrl: string | null; onClose: () => void }) {
+export function AdminPanel({ api, server, directoryUrl, onClose }: { api: ServerApi; server: ServerState; directoryUrl: string | null; onClose: () => void }) {
   const p = server.myPermissions;
   const allTabs: { id: Tab; label: string; icon: string; ok: boolean }[] = [
     { id: "server", label: "Server", icon: "server", ok: hasPermission(p, Permission.MANAGE_SERVER) },
@@ -35,11 +35,11 @@ export function AdminPanel({ server, directoryUrl, onClose }: { server: ServerSt
           </nav>
           <div className="settings-body">
             {err && <p className="error">{err}</p>}
-            {tab === "server" && <ServerTab server={server} directoryUrl={directoryUrl} run={run} />}
-            {tab === "channels" && <ChannelsTab server={server} run={run} />}
-            {tab === "roles" && <RolesTab server={server} run={run} />}
-            {tab === "invites" && <InvitesTab run={run} canManage={hasPermission(p, Permission.MANAGE_SERVER)} />}
-            {tab === "bans" && <BansTab run={run} />}
+            {tab === "server" && <ServerTab api={api} server={server} directoryUrl={directoryUrl} run={run} />}
+            {tab === "channels" && <ChannelsTab api={api} server={server} run={run} />}
+            {tab === "roles" && <RolesTab api={api} server={server} run={run} />}
+            {tab === "invites" && <InvitesTab api={api} run={run} canManage={hasPermission(p, Permission.MANAGE_SERVER)} />}
+            {tab === "bans" && <BansTab api={api} run={run} />}
           </div>
         </div>
       </div>
@@ -49,7 +49,7 @@ export function AdminPanel({ server, directoryUrl, onClose }: { server: ServerSt
 
 type RunFn = (fn: () => Promise<unknown>) => Promise<void>;
 
-function ServerTab({ server, directoryUrl, run }: { server: ServerState; directoryUrl: string | null; run: RunFn }) {
+function ServerTab({ api, server, directoryUrl, run }: { api: ServerApi; server: ServerState; directoryUrl: string | null; run: RunFn }) {
   const [name, setName] = useState(server.settings.name);
   const [description, setDescription] = useState(server.settings.description ?? "");
   const owners = server.members.filter((m) => m.isOwner);
@@ -78,7 +78,7 @@ function ServerTab({ server, directoryUrl, run }: { server: ServerState; directo
       {!directoryUrl && <span className="muted small">Ohne Verzeichnis gibt es kein Serververzeichnis.</span>}
       <h3>Server-Icon</h3>
       <div className="row">
-        <img className="server-icon-preview" src={server.settings.iconUrl ?? "/brand/squorli-icon-small.svg"} alt="" width="48" height="48" />
+        <img className="server-icon-preview" src={server.settings.iconUrl ? api.abs(server.settings.iconUrl) : "/brand/squorli-icon-small.svg"} alt="" width="48" height="48" />
         <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden
           onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void run(() => api.uploadServerIcon(f)); }} />
         <button className="secondary" onClick={() => fileRef.current?.click()}>Icon hochladen</button>
@@ -91,7 +91,7 @@ function ServerTab({ server, directoryUrl, run }: { server: ServerState; directo
   );
 }
 
-function ChannelsTab({ server, run }: { server: ServerState; run: RunFn }) {
+function ChannelsTab({ api, server, run }: { api: ServerApi; server: ServerState; run: RunFn }) {
   const [catName, setCatName] = useState("");
   const [chName, setChName] = useState("");
   const [chKind, setChKind] = useState<"text" | "voice">("text");
@@ -161,7 +161,7 @@ function ChannelsTab({ server, run }: { server: ServerState; run: RunFn }) {
   );
 }
 
-function RolesTab({ server, run }: { server: ServerState; run: RunFn }) {
+function RolesTab({ api, server, run }: { api: ServerApi; server: ServerState; run: RunFn }) {
   const [sel, setSel] = useState<string | null>(server.roles.find((r) => !r.isDefault)?.id ?? server.roles[0]?.id ?? null);
   const [newName, setNewName] = useState("");
   const role = server.roles.find((r) => r.id === sel) ?? null;
@@ -208,7 +208,7 @@ function RolesTab({ server, run }: { server: ServerState; run: RunFn }) {
   );
 }
 
-function InvitesTab({ run, canManage }: { run: RunFn; canManage: boolean }) {
+function InvitesTab({ api, run, canManage }: { api: ServerApi; run: RunFn; canManage: boolean }) {
   const [list, setList] = useState<Invite[]>([]);
   const [hours, setHours] = useState<string>("168");
   const [uses, setUses] = useState<string>("");
@@ -235,7 +235,7 @@ function InvitesTab({ run, canManage }: { run: RunFn; canManage: boolean }) {
   );
 }
 
-function BansTab({ run }: { run: RunFn }) {
+function BansTab({ api, run }: { api: ServerApi; run: RunFn }) {
   const [list, setList] = useState<Ban[]>([]);
   const reload = () => api.listBans().then(setList).catch(() => {});
   useEffect(() => { void reload(); }, []);
