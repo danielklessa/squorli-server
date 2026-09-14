@@ -35,12 +35,14 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
   const [needCode, setNeedCode] = useState(false);
   const [showOther, setShowOther] = useState(false);
 
-  // Nur mit Konto (Verwaltung): der reine Browser-Schluessel darf sich erst anmelden, wenn er ein Handle hat.
+  // Nur mit Konto (Verwaltung): ein Browser-Schluessel ohne Handle wird gar nicht angeboten (keine Box, kein Umschalter);
+  // hat er ein verifiziertes Handle, ist er ein Konto und darf sich wie bisher anmelden.
   const accountRequired = state.requireAccount && !!state.directoryUrl;
   const deviceAllowed = !accountRequired || !!state.directoryAccount;
   const deviceFirst = !state.directoryUrl || !!state.directoryAccount;
-  const showDevice = deviceFirst || showOther;
-  const showAccount = !!state.directoryUrl && (!deviceFirst || showOther);
+  const showDevice = deviceAllowed && (deviceFirst || showOther);
+  const showAccount = !!state.directoryUrl && (!deviceFirst || showOther || !deviceAllowed);
+  const showToggle = !!state.directoryUrl && deviceAllowed;
 
   useEffect(() => {
     const code = invite.trim();
@@ -152,9 +154,6 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
       ) : (
         <span className="muted small">Dieser Server nutzt kein Verzeichnis: kein Handle, Anmeldung nur mit diesem Schlüssel. Wer diesen Browser-Speicher verliert, verliert dieses Konto.</span>
       )}
-      {accountRequired && !state.directoryAccount && state.directoryAccount !== undefined && (
-        <span className="small">Dieser Server verlangt ein Konto: Handle registrieren oder oben mit einem Konto anmelden.</span>
-      )}
       {state.directoryError && <p className="error small">{state.directoryError}</p>}
     </div>
   );
@@ -181,9 +180,11 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
         {state.error && <p className="error">{state.error}</p>}
 
         {deviceFirst ? <>{deviceBox}{accountBox}</> : <>{accountBox}{deviceBox}</>}
-        {state.directoryUrl && (
+        {accountRequired && !deviceAllowed && <p className="muted small">Dieser Server verlangt ein Konto beim Verzeichnis. Eine Anmeldung nur mit dem Schlüssel dieses Browsers ist hier nicht möglich.</p>}
+        {!showDevice && state.directoryError && <p className="error small">{state.directoryError}</p>}
+        {showToggle && (
           <button className="secondary small" onClick={() => setShowOther(!showOther)}>
-            {showOther ? "Weniger anzeigen" : deviceFirst ? "Mit einem anderen Konto anmelden" : accountRequired ? "Schlüssel dieses Browsers verwenden" : "Ohne Konto: Schlüssel dieses Browsers verwenden"}
+            {showOther ? "Weniger anzeigen" : deviceFirst ? "Mit einem anderen Konto anmelden" : "Ohne Konto: Schlüssel dieses Browsers verwenden"}
           </button>
         )}
 
@@ -195,7 +196,7 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
         )}
 
         <div className="row">
-          {showDevice && <button onClick={() => void go()} disabled={!state.identity || busy || !deviceAllowed}>{busy ? "Verbinde …" : "Anmelden und verbinden"}</button>}
+          {showDevice && <button onClick={() => void go()} disabled={!state.identity || busy}>{busy ? "Verbinde …" : "Anmelden und verbinden"}</button>}
           {!needInvite && !invite && <button className="secondary" onClick={() => setNeedInvite(true)}>Ich habe eine Einladung</button>}
           {showDevice && <button className="secondary" onClick={() => void store.forgetIdentity()} disabled={busy}>Identität verwerfen</button>}
         </div>
