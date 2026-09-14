@@ -51,6 +51,7 @@ type RunFn = (fn: () => Promise<unknown>) => Promise<void>;
 
 function ServerTab({ server, directoryUrl, run }: { server: ServerState; directoryUrl: string | null; run: RunFn }) {
   const [name, setName] = useState(server.settings.name);
+  const [description, setDescription] = useState(server.settings.description ?? "");
   const owners = server.members.filter((m) => m.isOwner);
   const fileRef = useRef<HTMLInputElement>(null);
   return (
@@ -67,6 +68,14 @@ function ServerTab({ server, directoryUrl, run }: { server: ServerState; directo
       </label>
       {!directoryUrl && <span className="muted small">Dieser Server nutzt kein Verzeichnis, daher kann er keine Konten prüfen.</span>}
       {directoryUrl && server.settings.requireAccountLocked && <span className="muted small">Durch die Serverkonfiguration (REQUIRE_ACCOUNT) fest vorgegeben.</span>}
+      <h3>Serververzeichnis</h3>
+      <label className="check">
+        <input type="checkbox" checked={server.settings.listed} disabled={!directoryUrl} onChange={(e) => run(() => api.updateSettings({ listed: e.target.checked }))} />
+        Im Serververzeichnis auflisten (Name, Beschreibung, Icon und Mitgliederzahl sind dann öffentlich)
+      </label>
+      <label className="stack">Beschreibung<textarea value={description} maxLength={200} rows={3} disabled={!directoryUrl} placeholder="Worum geht es auf diesem Server? (bis 200 Zeichen)" onChange={(e) => setDescription(e.target.value)} /></label>
+      <button disabled={!directoryUrl || (description.trim() || null) === server.settings.description} onClick={() => run(() => api.updateSettings({ description: description.trim() || null }))}>Beschreibung speichern</button>
+      {!directoryUrl && <span className="muted small">Ohne Verzeichnis gibt es kein Serververzeichnis.</span>}
       <h3>Server-Icon</h3>
       <div className="row">
         <img className="server-icon-preview" src={server.settings.iconUrl ?? "/brand/squorli-icon-small.svg"} alt="" width="48" height="48" />

@@ -115,7 +115,11 @@ export function directoryProfilePayload(server: string | null, displayName: stri
 }
 export const ProfileUpdateRequest = SignedActionRequest.extend({ server: ServerHost.nullable(), displayName: DisplayName.nullable() });
 /** Ein Chat-Server, der den Schluessel nachgeschlagen hat (Login dort), mit dem dort geltenden Anzeigenamen (Kontoseite). `verified` = beim Verzeichnis registriert. */
-export const AccountServer = z.object({ host: ServerHost, name: z.string().nullable(), displayName: DisplayName.nullable(), lastSeenAt: Iso, verified: z.boolean().default(false) });
+export const AccountServer = z.object({
+  host: ServerHost, name: z.string().nullable(), displayName: DisplayName.nullable(), lastSeenAt: Iso, verified: z.boolean().default(false),
+  /** Icon des Servers beim Verzeichnis (M6d): Zeitpunkt der letzten Uebernahme, null = keins. URL: directoryServerIconUrl(). */
+  iconUpdatedAt: Iso.nullable().default(null),
+});
 
 // ---- Server-Registrierung: ein Chat-Server weist seinen Schluessel nach (Signatur ueber Host + Nonce) und die Kontrolle ueber
 // seinen Host (das Verzeichnis liest `proofUrl`, die /api/health des Servers, und vergleicht `serverKey`). Danach darf er mit dem
@@ -131,7 +135,35 @@ export const ServerRegisterRequest = z.object({
   signature: Signature,
   /** /api/health des Chat-Servers; muss auf `host` zeigen (https; http nur fuer localhost/127.0.0.1) und `serverKey` = publicKey liefern. */
   proofUrl: z.string().url(),
+  /** Serververzeichnis (M6d): oeffentlich auflisten? Dazu Beschreibung, offener Beitritt und Mitgliederzahl (nur Anzeige). */
+  listed: z.boolean().default(false),
+  description: z.string().trim().max(200).nullable().default(null),
+  openJoin: z.boolean().default(false),
+  memberCount: z.number().int().min(0).nullable().default(null),
 });
+/**
+ * Eintrag im oeffentlichen Serververzeichnis (M6d, GET /api/servers: nur Server mit `listed`, deren Token nicht abgelaufen ist).
+ * Das Icon holt das Verzeichnis bei jeder Registrierung selbst von <proofUrl-Basis>/api/server-icon (Host ist nachgewiesen) und
+ * liefert es unter GET /api/servers/<host>/icon aus; Clients laden Icons also nur vom Verzeichnis, nie von fremden Servern.
+ */
+export const DirectoryServer = z.object({
+  host: ServerHost,
+  name: z.string().nullable(),
+  description: z.string().nullable(),
+  openJoin: z.boolean(),
+  memberCount: z.number().int().nullable(),
+  iconUpdatedAt: Iso.nullable(),
+  registeredAt: Iso,
+});
+export const ServerListResponse = z.array(DirectoryServer);
+/** URL des Server-Icons beim Verzeichnis (mit Versionsparameter, lange cachebar); null = kein Icon. */
+export function directoryServerIconUrl(dirUrl: string, host: string, iconUpdatedAt: string | null): string | null {
+  return iconUpdatedAt ? `${dirUrl}/api/servers/${encodeURIComponent(host)}/icon?v=${Date.parse(iconUpdatedAt)}` : null;
+}
+/** Link zum Chat-Server: https, ausser fuer localhost/127.0.0.1 (Dev). */
+export function directoryServerUrl(host: string): string {
+  return `${/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) ? "http" : "https"}://${host}`;
+}
 export const ServerRegisterResponse = z.object({ host: ServerHost, token: z.string().regex(/^[0-9a-f]{64}$/), expiresAt: Iso });
 /** Sammelabfrage eines registrierten Servers (Bearer-Token): Handle + Namen fuer viele Schluessel auf einmal (periodischer Abgleich). Unbekannte Schluessel fehlen in der Antwort. */
 export const ServerResolveRequest = z.object({ publicKeys: z.array(PublicKey).min(1).max(200) });
@@ -145,6 +177,7 @@ export const DirectoryNotifyRequest = z.object({ publicKey: PublicKey });
 export type ServerResolveRequest = z.infer<typeof ServerResolveRequest>;
 export type ServerRegisterRequest = z.infer<typeof ServerRegisterRequest>;
 export type ServerRegisterResponse = z.infer<typeof ServerRegisterResponse>;
+export type DirectoryServer = z.infer<typeof DirectoryServer>;
 
 /** Antwort auf totp-setup: Geheimnis (base32, 20 Byte) fuer QR-Code und Abtippen; aktiv wird es erst mit totp-enable. */
 export const TotpSetupResponse = z.object({ secret: z.string().regex(/^[A-Z2-7]{32}$/), otpauth: z.string().url(), issuer: z.string() });

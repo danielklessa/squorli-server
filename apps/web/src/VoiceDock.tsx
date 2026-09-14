@@ -106,19 +106,19 @@ export function VoiceDock({ client, voice, channel, displayName, onLeave, onOpen
             <div className="meter-fill" style={{ width: `${levelPct}%` }} />
             {settings.mode === "vad" && <div className="meter-threshold" style={{ left: `${thresholdPct}%` }} />}
           </div>
+          {/* Schnellzugriffe der Sprachverbindung: eigener Bereich oberhalb der Namenszeile */}
+          <div className="dock-row dock-controls">
+            <button className={`icon ${voice.micMuted ? "danger" : ""}`} title={voice.micMuted ? (voice.deafened ? "Ton und Mikrofon wieder an" : "Mikrofon wieder an") : "Mikrofon stummschalten"} onClick={() => client.setMuted(!voice.micMuted)}><Icon name={voice.micMuted ? "mic-off" : "mic"} /></button>
+            <button className={`icon ${voice.deafened ? "danger" : ""}`} title={voice.deafened ? "Ton wieder an" : "Ton aus (schaltet auch das Mikrofon stumm)"} onClick={() => client.setDeafened(!voice.deafened)}><Icon name={voice.deafened ? "headphone-off" : "headphones"} /></button>
+            {canStream && <button className={`icon ${voice.cameraOn ? "on" : ""}`} title={voice.cameraOn ? "Kamera aus" : "Kamera an"} onClick={() => { void onToggleCamera(); }}><Icon name={voice.cameraOn ? "video" : "video-off"} /></button>}
+            <span className="spacer" />
+            <button className="icon hangup" title="Sprachkanal verlassen (auflegen)" onClick={() => onLeave()}><Icon name="phone" rotate={135} /></button>
+          </div>
         </div>
       )}
       {!joined && voice.error && <p className="error small">{voice.error}</p>}
       <div className="dock-row">
         <button className="dock-name" onClick={onOpenProfile} title="Anzeigename ändern">{displayName}</button>
-        {joined && (
-          <>
-            <button className={`icon ${voice.micMuted ? "danger" : ""}`} title={voice.micMuted ? (voice.deafened ? "Ton und Mikrofon wieder an" : "Mikrofon wieder an") : "Mikrofon stummschalten"} onClick={() => client.setMuted(!voice.micMuted)}><Icon name={voice.micMuted ? "mic-off" : "mic"} /></button>
-            <button className={`icon ${voice.deafened ? "danger" : ""}`} title={voice.deafened ? "Ton wieder an" : "Ton aus (schaltet auch das Mikrofon stumm)"} onClick={() => client.setDeafened(!voice.deafened)}><Icon name={voice.deafened ? "headphone-off" : "headphones"} /></button>
-            {canStream && <button className={`icon ${voice.cameraOn ? "on" : ""}`} title={voice.cameraOn ? "Kamera aus" : "Kamera an"} onClick={() => { void onToggleCamera(); }}><Icon name={voice.cameraOn ? "video" : "video-off"} /></button>}
-            <button className="icon hangup" title="Sprachkanal verlassen (auflegen)" onClick={() => onLeave()}><Icon name="phone" rotate={135} /></button>
-          </>
-        )}
         <button className="icon" title="Spracheinstellungen" onClick={() => setShowSettings(true)}><Icon name="settings" /></button>
       </div>
 

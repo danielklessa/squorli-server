@@ -91,8 +91,11 @@ export const ServerSettings = z.object({
   requireAccount: z.boolean(),
   /** true = REQUIRE_ACCOUNT ist per Konfiguration vorgegeben; die Verwaltung kann requireAccount dann nicht aendern (409 locked_by_config). */
   requireAccountLocked: z.boolean(),
+  /** M6d: im oeffentlichen Serververzeichnis des Verzeichnisdienstes auflisten (mit Beschreibung); ohne DIRECTORY_URL wirkungslos. */
+  listed: z.boolean(),
+  description: z.string().trim().max(200).nullable(),
 });
-export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true, requireAccount: true }).partial();
+export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true, requireAccount: true, listed: true, description: true }).partial();
 
 export const Category = z.object({ id: Uuid, name: z.string().min(1).max(64), position: z.number().int() });
 export const ChannelKind = z.enum(["text", "voice"]);

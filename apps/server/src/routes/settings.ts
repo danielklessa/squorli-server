@@ -13,14 +13,32 @@ import { serverSettings } from "../db/schema";
 import type { Hub } from "../hub";
 import { SETTINGS_ID, broadcastStructure, loadSettings, loadState } from "../state";
 import { compact } from "../util";
+import type { DirectoryClient } from "../directory";
 
 /** Server-Icon: nur Rasterbilder (SVG koennte Skripte enthalten und wuerde same-origin ausgeliefert), hoechstens 2 MB. */
 const ICON_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const ICON_MAX_BYTES = 2 * 1024 * 1024;
 
-export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: Hub, config: Config) {
+export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: Hub, config: Config, directory: DirectoryClient) {
+  /** Verzeichnis (M6d): Name, Auflistung, Beschreibung, offener Beitritt und Icon stehen beim Verzeichnis; nach Aenderung neu registrieren. */
+  // Entprellt (1,5 s): mehrere Aenderungen kurz nacheinander = eine Registrierung (Registrierungslimit des Verzeichnisses 10/min).
+  let reregTimer: NodeJS.Timeout | null = null;
+  const reregister = () => {
+    if (reregTimer) clearTimeout(reregTimer);
+    reregTimer = setTimeout(() => { reregTimer = null; void directory.register().catch((err) => app.log.warn({ err }, "Verzeichnis: Neuregistrierung")); }, 1500);
+    reregTimer.unref();
+  };
   const iconPath = join(config.DATA_DIR, "server-icon");
   await mkdir(config.DATA_DIR, { recursive: true });
+  // Datei weg (DATA_DIR geleert oder gewechselt), aber in der DB noch ein Icon eingetragen: Eintrag loeschen, sonst zeigen
+  // Favicon, Seitenleiste, Login und Server-Leiste ein kaputtes Bild. Neu hochladen in Verwaltung > Server.
+  {
+    const [row] = await db.select({ iconMime: serverSettings.iconMime }).from(serverSettings).where(eq(serverSettings.id, SETTINGS_ID)).limit(1);
+    if (row?.iconMime && !existsSync(iconPath)) {
+      await db.update(serverSettings).set({ iconMime: null, iconUpdatedAt: null }).where(eq(serverSettings.id, SETTINGS_ID));
+      app.log.warn({ iconPath }, "Server-Icon-Datei fehlt, Eintrag entfernt; bitte in der Verwaltung neu hochladen");
+    }
+  }
 
   /** Gesamtzustand per REST (derselbe wie im WS-welcome), z. B. nach Reconnect. */
   app.get("/api/state", async (req, reply) => {
@@ -39,6 +57,7 @@ export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: 
     if (body.data.requireAccount !== undefined && (await loadSettings(db)).requireAccountLocked) return reply.code(409).send({ error: "locked_by_config" });
     await db.update(serverSettings).set(compact(body.data)).where(eq(serverSettings.id, SETTINGS_ID));
     await broadcastStructure(db, hub, ["settings"]);
+    if (body.data.name !== undefined || body.data.listed !== undefined || body.data.description !== undefined || body.data.openJoin !== undefined) reregister();
     return { ok: true };
   });
 
@@ -64,6 +83,7 @@ export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: 
     await db.update(serverSettings).set({ iconMime: part.mimetype, iconUpdatedAt: new Date() }).where(eq(serverSettings.id, SETTINGS_ID));
     await broadcastStructure(db, hub, ["settings"]);
     req.log.info({ by: m.userId, type: part.mimetype }, "Server-Icon gesetzt");
+    reregister();
     return { ok: true, iconUrl: (await loadSettings(db)).iconUrl };
   });
 
@@ -74,6 +94,7 @@ export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: 
     await rm(iconPath, { force: true });
     await db.update(serverSettings).set({ iconMime: null, iconUpdatedAt: null }).where(eq(serverSettings.id, SETTINGS_ID));
     await broadcastStructure(db, hub, ["settings"]);
+    reregister();
     return { ok: true };
   });
 

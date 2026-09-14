@@ -17,6 +17,7 @@ export async function loadSettings(db: Db): Promise<ServerSettings> {
   return {
     name: row.name, openJoin: row.openJoin, ownerId: row.ownerId,
     requireAccount: requireAccountForced ?? row.requireAccount, requireAccountLocked: requireAccountForced !== null,
+    listed: row.listed, description: row.description,
     iconUrl: row.iconMime && row.iconUpdatedAt ? `/api/server-icon?v=${row.iconUpdatedAt.getTime()}` : null,
   };
 }

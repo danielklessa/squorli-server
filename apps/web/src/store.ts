@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, ServerEvent, type ClientEvent, type DirectoryAccount, type Me, type Message, type ServerState, type VoiceMember } from "@squorli/protocol";
+import { PROTOCOL_VERSION, ServerEvent, type AccountServer, type ClientEvent, type DirectoryAccount, type Me, type Message, type ServerState, type VoiceMember } from "@squorli/protocol";
 import * as api from "./api";
 import { loadOrCreateIdentity, storeIdentity, type Identity } from "./identity";
 
@@ -43,6 +43,8 @@ export type State = {
   requireAccount: boolean;
   /** Serverversion aus /api/health fuer den Squorli-Hinweis im Login. */
   serverVersion: string | null;
+  /** Server, auf denen sich das Handle angemeldet hat (Verzeichnis, AccountStatus.servers): Server-Leiste. null = unbekannt/kein Konto. */
+  accountServers: AccountServer[] | null;
 };
 
 const SESSION_KEY = "chat.session.v1";
@@ -54,7 +56,7 @@ export class Store {
     identity: null, me: null, userId: null, connection: "idle", error: null, removed: null, server: null,
     voice: {}, messages: {}, typing: {}, currentChannelId: null, unread: {}, log: [],
     directoryUrl: null, directoryAccount: undefined, directoryError: null, serverName: null, iconUrl: null, serverDomain: null,
-    requireAccount: false, serverVersion: null,
+    requireAccount: false, serverVersion: null, accountServers: null,
   };
   private listeners = new Set<(s: State) => void>();
   private ws: WebSocket | null = null;
@@ -104,6 +106,15 @@ export class Store {
     if (!directoryUrl || !id) { this.set({ directoryAccount: null }); return; }
     try { this.set({ directoryAccount: await api.directoryLookup(directoryUrl, id.publicKey) }); }
     catch (err) { this.set({ directoryAccount: undefined, directoryError: api.explainDirectoryError(err) }); }
+    void this.refreshAccountServers();
+  }
+
+  /** Server-Leiste: Serverliste des Kontos beim Verzeichnis holen (signiert). Nur mit Handle; Fehler sind kein Login-Problem. */
+  async refreshAccountServers(): Promise<void> {
+    const id = this.state.identity; const url = this.state.directoryUrl;
+    if (!id || !url || !this.state.directoryAccount) { this.set({ accountServers: null }); return; }
+    try { this.set({ accountServers: (await api.directoryAccountStatus(url, id)).servers }); }
+    catch (err) { console.warn("Serverliste vom Verzeichnis nicht verfuegbar", err); }
   }
 
   /** Handle beim Verzeichnis registrieren (M6a). */
@@ -265,6 +276,7 @@ export class Store {
           ? this.state.currentChannelId
           : e.state.channels.find((c) => c.kind === "text")?.id ?? null;
         this.set({ server: e.state, userId: e.userId, connection: "connected", currentChannelId: current, error: null });
+        if (!wasReconnect) void this.refreshAccountServers();
         if (this.pingTimer) clearInterval(this.pingTimer);
         this.pingTimer = window.setInterval(() => this.send({ type: "ping", t: Date.now() }), 20_000);
         // Nach Wiederverbindung: Verlauf des aktuellen Kanals neu laden, es koennten Nachrichten fehlen.

@@ -13,7 +13,6 @@ type Props = {
   onToggleCamera: () => Promise<void>;
   onToggleBlur: () => Promise<void>;
   onLeave: () => Promise<void>;
-  onClose: () => void;
 };
 
 type Layout = "grid" | "focus";
@@ -26,7 +25,7 @@ type Item = { key: string; participant: VoiceParticipant; tile: VideoTile | null
  * "Sprecher" folgt ohne Anheften dem aktiven Sprecher bzw. der neuesten Bildschirmfreigabe.
  * Die Empfangsqualitaet folgt der Kachelgroesse (adaptiveStream im Sprach-Kern), hier muss nur das <video> passend gross sein.
  */
-export function VoiceStage({ client, voice, channel, members, myPermissions, onToggleCamera, onToggleBlur, onLeave, onClose }: Props) {
+export function VoiceStage({ client, voice, channel, members, myPermissions, onToggleCamera, onToggleBlur, onLeave }: Props) {
   // Namen aus der Mitgliederliste des Servers (kommt bei jeder Umbenennung sofort per WS), nicht aus dem LiveKit-Token,
   // das nur beim Beitritt entsteht. Unbekannte Identitaeten (Bots, "extern") behalten den LiveKit-Namen.
   const participants = voice.participants.map((p) => {
@@ -80,7 +79,6 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, onT
           <button className={layout === "focus" ? "active" : ""} title="Sprecher gross, andere klein" onClick={() => setLayout("focus")}>Sprecher</button>
           <button className={layout === "grid" ? "active" : ""} title="Alle gleich gross" onClick={() => setLayout("grid")}>Kacheln</button>
         </div>
-        <button className="icon" title="Zurück zum Chat (Sprache bleibt verbunden)" onClick={onClose}><Icon name="x" /></button>
       </header>
 
       {voice.error && <p className="error small stage-hint">{voice.error}</p>}

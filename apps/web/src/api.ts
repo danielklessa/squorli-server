@@ -1,5 +1,5 @@
 import {
-  Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
+  AccountStatus, Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, ServerListResponse, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
   BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryActionMessage, directoryBackupMessage, directoryProfilePayload,
   directoryRegisterMessage, openBackup,
   type Attachment, type Category, type Channel, type Role,
@@ -126,6 +126,15 @@ export async function directorySetDisplayName(dirUrl: string, id: Identity, serv
   const signature = await sign(id, directoryActionMessage(health.host, "profile-update", ch.nonce, directoryProfilePayload(server, displayName)));
   await directoryFetch(dirUrl, "POST", "/api/profile", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, server, displayName });
 }
+/** Oeffentliches Serververzeichnis (M6d): alle Server, die sich auflisten lassen. */
+export const directoryServers = (dirUrl: string) => directoryFetch(dirUrl, "GET", "/api/servers").then((r) => ServerListResponse.parse(r));
+/** Kontostatus (signiert): u. a. die Server, auf denen sich das Handle angemeldet hat (Server-Leiste, M6d). */
+export async function directoryAccountStatus(dirUrl: string, id: Identity): Promise<AccountStatus> {
+  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
+  const signature = await sign(id, directoryActionMessage(health.host, "account-status", ch.nonce));
+  return AccountStatus.parse(await directoryFetch(dirUrl, "POST", "/api/account/status", { publicKey: id.publicKey, challengeId: ch.challengeId, signature }));
+}
 export function explainDirectoryError(err: unknown): string {
   if (err instanceof ApiError) {
     switch (err.code) {
@@ -181,7 +190,7 @@ export async function uploadAttachment(file: File): Promise<Attachment> {
 export const rtcToken = (channelId: string) => request<RtcTokenResponse>("POST", "/api/rtc-token", { channelId }).then((r) => RtcTokenResponse.parse(r));
 
 // ---------- Verwaltung
-export const updateSettings = (patch: { name?: string; openJoin?: boolean; requireAccount?: boolean }) => request("PATCH", "/api/settings", patch);
+export const updateSettings = (patch: { name?: string; openJoin?: boolean; requireAccount?: boolean; listed?: boolean; description?: string | null }) => request("PATCH", "/api/settings", patch);
 /** Server-Icon (PNG/JPEG/WebP/GIF, 2 MB); erscheint in Seitenleiste und Favicon. */
 export async function uploadServerIcon(file: File): Promise<{ ok: true; iconUrl: string | null }> {
   const form = new FormData();

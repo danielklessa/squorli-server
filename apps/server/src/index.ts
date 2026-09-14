@@ -106,7 +106,7 @@ async function main() {
   await app.register(multipart, { limits: { fileSize: Math.round(config.MAX_UPLOAD_MB * 1024 * 1024), files: 1 } });
   await registerAuthRoutes(app, db, config, hub, directory);
   await registerUserRoutes(app, db, directory, hub, presence);
-  await registerSettingsRoutes(app, db, hub, config);
+  await registerSettingsRoutes(app, db, hub, config, directory);
   await registerChannelRoutes(app, db, hub, presence);
   await registerRoleRoutes(app, db, hub);
   await registerMemberRoutes(app, db, hub, presence, new LivekitAdmin(config, app.log));

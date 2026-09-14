@@ -25,6 +25,7 @@
   --on-dark: #FFFFFF;                    /* Text auf Action-Blau (4,57:1 gemessen) */
   --on-light: var(--sq-night, #0C1424);  /* Text auf Mint/Amber/Coral */
   --r: var(--sq-radius-control, 12px);
+  --head-h: 3.25rem;                    /* gemeinsame Hoehe der Kopfzeilen (Seitenleiste, Chat, Buehne) */
   --r-panel: var(--sq-radius-panel, 20px);
   --u: var(--sq-space-unit, 4px);
 }
@@ -82,6 +83,25 @@ h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; colo
 
 /* Layout */
 .app { height: 100%; display: grid; grid-template-columns: 15rem minmax(0, 1fr) 14rem; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+.app.with-rail { grid-template-columns: 4.25rem 15rem minmax(0, 1fr) 14rem; }
+/* Server-Leiste (M6d): Server des eigenen Handles laut Verzeichnis, aktueller Server markiert */
+.rail { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; padding: 0.6rem 0; background: var(--bg); border-right: 1px solid var(--line); overflow-y: auto; min-height: 0; }
+.rail-item { width: 2.75rem; height: 2.75rem; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; background: var(--bg2); color: var(--text); text-decoration: none; transition: border-radius 0.12s, background 0.12s; flex: none; }
+.rail-item img { width: 100%; height: 100%; object-fit: cover; }
+.rail-item:hover, .rail-item.current { border-radius: 14px; background: var(--bg4); }
+.rail-item.current { outline: 2px solid var(--brand); outline-offset: 2px; }
+.rail-initials { font-weight: 700; font-size: 0.95rem; letter-spacing: 0.02em; }
+.rail-sep { width: 1.75rem; border-top: 1px solid var(--line); margin: 0.1rem 0; }
+.rail-item.discover { color: var(--ok); }
+/* Serververzeichnis (M6d): Liste aus dem Verzeichnis, Beitritt per Link */
+.browser-modal { width: min(44rem, 100%); }
+.browser-list { list-style: none; margin: 0; padding: 0.5rem 1.25rem 1.25rem; display: flex; flex-direction: column; gap: 0.5rem; overflow-y: auto; }
+.browser-item { display: flex; align-items: center; gap: 0.8rem; background: var(--bg); padding: 0.7rem 0.9rem; border-radius: var(--r); }
+.browser-item .rail-item { cursor: default; }
+.browser-item .grow { flex: 1; min-width: 0; }
+.browser-item .grow p { margin: 0.15rem 0 0; }
+.link-btn { display: inline-block; background: var(--accent); color: var(--on-dark); font-weight: 600; padding: calc(var(--u) * 2) calc(var(--u) * 4); border-radius: var(--r); text-decoration: none; }
+.rail-empty { padding-top: 0.4rem; }
 .left { display: flex; flex-direction: column; background: var(--bg2); min-height: 0; }
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; position: relative; background: var(--bg3); }
 .members-col { background: var(--bg2); overflow-y: auto; padding: 0.75rem 0.5rem; font-size: 0.95rem; }
@@ -89,7 +109,7 @@ h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; colo
 
 /* Sidebar */
 .sidebar { flex: 1; overflow-y: auto; min-height: 0; }
-.server-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.8rem 0.9rem; border-bottom: 1px solid var(--line); }
+.server-head { display: flex; align-items: center; gap: 0.5rem; height: var(--head-h); padding: 0 0.9rem; border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .server-head strong { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .brand-mark { width: 22px; height: 22px; flex: none; }
 .brand-mark.server-icon, .server-icon-preview { border-radius: 6px; object-fit: cover; background: var(--bg); }
@@ -98,10 +118,12 @@ h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; colo
 .channel-list section { margin-bottom: 0.6rem; }
 .channel-list h3 { padding: 0.4rem 0.5rem 0.2rem; }
 .channel-list ul { list-style: none; margin: 0; padding: 0; }
+.channel-list li.channel + li.channel { margin-top: 4px; }   /* Luft zwischen den Kanaelen */
 .channel-btn { width: 100%; text-align: left; background: transparent; color: var(--muted); font-weight: 500; display: flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.6rem; border-radius: var(--r); }
 .channel-btn:hover { background: var(--bg4); color: var(--text); }
 .channel.active .channel-btn { background: var(--sel); color: var(--text); }
 .channel.unread .channel-btn { color: var(--text); font-weight: 600; }
+.channel.joined .channel-icon { color: var(--ok); opacity: 1; }   /* verbundener Sprachkanal: nur das Symbol, keine Hinterlegung */
 .channel-icon { opacity: 0.8; width: 1.1rem; display: inline-flex; justify-content: center; }
 .channel-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .count { font-size: 0.75rem; background: var(--bg); border-radius: 999px; padding: 0 0.45rem; }
@@ -119,8 +141,11 @@ h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; colo
 .channel.drop-target > .channel-btn { background: var(--sel); color: var(--text); outline: 1px solid var(--brand); }
 
 /* Dock */
-.dock { background: var(--bg); padding: 0.5rem 0.6rem; border-top: 1px solid var(--line); }
-.dock-voice { padding-bottom: 0.4rem; font-size: 0.875rem; }
+.dock { background: var(--bg); border-top: 1px solid var(--line); }
+.dock > .dock-row { padding: 0.5rem 0.6rem; }
+/* Sprachverbindung: eigener Bereich mit Status, Pegel und Schnellzugriffen oberhalb der Namenszeile */
+.dock-voice { padding: 0.5rem 0.6rem 0.4rem; font-size: 0.875rem; border-bottom: 1px solid var(--line); background: var(--bg2); }
+.dock-controls { margin-top: 0.35rem; }
 .dock-status .ok { color: var(--ok); }
 .dock-status .warn { color: var(--warn); }
 .dock-row { display: flex; align-items: center; gap: 0.2rem; }
@@ -149,7 +174,7 @@ h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; colo
 /* Chat */
 .chat { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .chat.empty { align-items: center; justify-content: center; }
-.chat-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.7rem 1rem; border-bottom: 1px solid var(--line); }
+.chat-head { display: flex; align-items: center; gap: 0.5rem; height: var(--head-h); padding: 0 3rem 0 1rem; border-bottom: 1px solid var(--line); flex-shrink: 0; }   /* rechts Platz fuer den Debug-Knopf */
 .topic { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-left: 1px solid var(--line); padding-left: 0.6rem; color: var(--muted); }
 .messages { flex: 1; overflow-y: auto; padding: 0.75rem 1rem; }
 .day-sep { display: flex; align-items: center; gap: 0.6rem; margin: 1rem 0 0.4rem; color: var(--muted); font-size: 0.75rem; }
@@ -209,7 +234,8 @@ h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; colo
 .debug td { padding: 0.05rem 0.75rem 0.05rem 0; vertical-align: top; }
 .debug td:first-child { color: var(--muted); white-space: nowrap; }
 .wslog { max-height: 10rem; overflow: auto; font-size: 0.72rem; white-space: pre-wrap; word-break: break-all; border: 1px solid var(--line); border-radius: 6px; padding: 0.4rem; margin: 0.2rem 0; }
-.debug-toggle { position: absolute; right: 0.5rem; top: 0.45rem; }
+/* Debug-Knopf: fester Platz rechts in der Kopfzeile des Hauptbereichs, vertikal mittig */
+.debug-toggle { position: absolute; right: 0.6rem; top: calc(var(--head-h) / 2); transform: translateY(-50%); }
 
 /* Bestaetigungs- und Eingabedialoge (Ersatz fuer window.confirm/prompt), liegen ueber allen anderen Modals */
 .dialog-backdrop { z-index: 30; }

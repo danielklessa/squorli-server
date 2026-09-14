@@ -6,6 +6,7 @@ import { Icon } from "./Icon";
 
 type Props = {
   server: ServerState;
+  /** Kanal, der im Hauptbereich angezeigt wird (Textkanal oder die Buehne des Sprachkanals): nur er ist hinterlegt. */
   currentChannelId: string | null;
   voice: Record<string, VoiceMember[]>;
   voiceState: VoiceState;
@@ -43,10 +44,11 @@ export function Sidebar({ server, currentChannelId, voice, voiceState, unread, c
 
   const renderChannel = (c: Channel) => {
     const members = voice[c.id] ?? [];
-    const active = c.kind === "text" ? c.id === currentChannelId : voiceState.channelId === c.id;
+    const active = c.id === currentChannelId;
+    const joined = c.kind === "voice" && voiceState.channelId === c.id;
     const droppable = c.kind === "voice" && dragging !== null && dragging.from !== c.id;
     return (
-      <li key={c.id} className={`channel ${active ? "active" : ""} ${unread[c.id] ? "unread" : ""} ${droppable ? "droppable" : ""} ${dropTarget === c.id ? "drop-target" : ""}`}
+      <li key={c.id} className={`channel ${active ? "active" : ""} ${joined ? "joined" : ""} ${unread[c.id] ? "unread" : ""} ${droppable ? "droppable" : ""} ${dropTarget === c.id ? "drop-target" : ""}`}
         onDragOver={(e) => { if (droppable) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dropTarget !== c.id) setDropTarget(c.id); } }}
         onDragLeave={(e) => { if (dropTarget === c.id && !e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(null); }}
         onDrop={(e) => { if (droppable) { e.preventDefault(); onDrop(c.id); } }}>

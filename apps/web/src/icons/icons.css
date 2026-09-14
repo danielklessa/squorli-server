@@ -5,6 +5,7 @@
 .ic-bug::before { content: "\e20c"; }
 .ic-chevron-down::before { content: "\e06d"; }
 .ic-chevron-up::before { content: "\e070"; }
+.ic-compass::before { content: "\e09b"; }
 .ic-crown::before { content: "\e1d6"; }
 .ic-hash::before { content: "\e0ef"; }
 .ic-headphone-off::before { content: "\e62d"; }

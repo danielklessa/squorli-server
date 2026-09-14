@@ -11,6 +11,8 @@ import { CameraPicker } from "./CameraPicker";
 import { Icon } from "./Icon";
 import { ProfileDialog } from "./ProfileDialog";
 import { applyBranding } from "./branding";
+import { ServerBrowser } from "./ServerBrowser";
+import { ServerRail } from "./ServerRail";
 import { saveVoiceSettings } from "./voice/settings";
 import { Permission, hasPermission } from "@squorli/protocol";
 import { rtcToken } from "./api";
@@ -28,6 +30,7 @@ export function App() {
   const [showDebug, setShowDebug] = useState(() => new URLSearchParams(window.location.search).has("debug"));
   /** Buehne (Kacheln/Bildschirm) statt Chat im Hauptbereich; Sprache laeuft unabhaengig davon weiter. */
   const [stageOpen, setStageOpen] = useState(false);
+  const [showBrowser, setShowBrowser] = useState(false);
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>(() => loadVoiceSettings());
   /** Kamera-Auswahl offen (Liste der Kameras), wenn beim Einschalten mehr als eine vorhanden ist. */
   const [cameraPick, setCameraPick] = useState<MediaDeviceInfo[] | null>(null);
@@ -133,10 +136,12 @@ export function App() {
   const showStage = stageOpen && voiceChannel !== null;
 
   return (
-    <div className="app">
+    <div className={`app ${state.directoryUrl ? "with-rail" : ""}`}>
+      {state.directoryUrl && <ServerRail directoryUrl={state.directoryUrl} servers={state.accountServers} currentHost={state.serverDomain} onDiscover={() => setShowBrowser(true)} />}
+      {showBrowser && state.directoryUrl && <ServerBrowser directoryUrl={state.directoryUrl} currentHost={state.serverDomain} onClose={() => setShowBrowser(false)} />}
       <div className="left">
         <Sidebar
-          server={server} currentChannelId={state.currentChannelId} voice={state.voice} voiceState={voice} unread={state.unread}
+          server={server} currentChannelId={showStage && voiceChannel ? voiceChannel.id : state.currentChannelId} voice={state.voice} voiceState={voice} unread={state.unread}
           connection={state.connection} onSelect={(id) => { store.selectChannel(id); setStageOpen(false); }}
           onJoinVoice={(id) => { void joinVoice(id).catch(() => {}); }} onOpenAdmin={() => setShowAdmin(true)} myUserId={state.userId}
         />
@@ -147,7 +152,7 @@ export function App() {
       <main className="main">
         {showStage && voiceChannel ? (
           <VoiceStage client={client} voice={voice} channel={voiceChannel} members={server.members} myPermissions={server.myPermissions}
-            onToggleCamera={toggleCamera} onToggleBlur={toggleBlur} onLeave={leaveVoice} onClose={() => setStageOpen(false)} />
+            onToggleCamera={toggleCamera} onToggleBlur={toggleBlur} onLeave={leaveVoice} />
         ) : current ? (
           <ChatView
             channel={current} messages={state.messages[current.id] ?? { list: [], hasMore: true, loaded: false, loading: false }}

@@ -1,10 +1,10 @@
 import { ChallengeResponse, DirectoryAccount, ServerRegisterResponse, ServerResolveResponse, directoryServerRegisterMessage } from "@squorli/protocol";
 import * as ed from "@noble/ed25519";
-import { eq, inArray } from "drizzle-orm";
+import { count, eq, inArray } from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
 import type { Config } from "./config";
 import type { Db } from "./db";
-import { serverSettings, users } from "./db/schema";
+import { members, serverSettings, users } from "./db/schema";
 import { SETTINGS_ID } from "./state";
 
 /** So lange gilt der gecachte Verzeichnis-Stand als frisch; danach erneuert GET /api/me ihn (Name von der Kontoseite geaendert). */
@@ -64,9 +64,16 @@ export class DirectoryClient {
       const ch = ChallengeResponse.parse(await chRes.json());
       const health = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(TIMEOUT_MS) }).then((r) => r.json()) as { host?: string };
       if (!health.host) return false;
-      const [s] = await this.db.select({ name: serverSettings.name }).from(serverSettings).where(eq(serverSettings.id, SETTINGS_ID)).limit(1);
+      // Serververzeichnis (M6d): Name, Auflistung, Beschreibung, offener Beitritt und Mitgliederzahl gehen mit; das Icon holt das
+      // Verzeichnis selbst von unserer /api/server-icon. Deshalb registriert sich der Server nach jeder Aenderung daran neu.
+      const [s] = await this.db.select({ name: serverSettings.name, listed: serverSettings.listed, description: serverSettings.description, openJoin: serverSettings.openJoin })
+        .from(serverSettings).where(eq(serverSettings.id, SETTINGS_ID)).limit(1);
+      const [mc] = await this.db.select({ n: count() }).from(members);
       const signature = Buffer.from(await ed.signAsync(new TextEncoder().encode(directoryServerRegisterMessage(health.host, this.host, ch.nonce)), this.privateKey)).toString("hex");
-      const body = { host: this.host, name: s?.name ?? null, publicKey: this.serverKey, challengeId: ch.challengeId, signature, proofUrl: this.config.directoryProofUrl };
+      const body = {
+        host: this.host, name: s?.name ?? null, listed: s?.listed ?? false, description: s?.description ?? null, openJoin: s?.openJoin ?? false, memberCount: mc?.n ?? null,
+        publicKey: this.serverKey, challengeId: ch.challengeId, signature, proofUrl: this.config.directoryProofUrl,
+      };
       // Der Nachweis dauert laenger: das Verzeichnis ruft unsere /api/health auf.
       const res = await fetch(`${url}/api/servers/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) });
       if (!res.ok) {

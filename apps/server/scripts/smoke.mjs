@@ -194,6 +194,25 @@ else check("require account: without directory no effect", noAcc.status === 200,
 const ownerRa = await login(ownerKey);
 check("require account: owner exempt, existing member without account", ownerRa.status === 200 && (await login(keyB)).status === (hra.directoryUrl ? 403 : 200));
 await api("PATCH", "/api/settings", { requireAccount: false }, owner.token);
+
+// ---------- Serververzeichnis (M6d): auflisten + Beschreibung; mit Verzeichnis registriert sich der Server neu und erscheint in dessen Liste
+const [sld] = await api("PATCH", "/api/settings", { listed: true, description: "Rauchtest im Verzeichnis" }, owner.token);
+const [, stLd] = await api("GET", "/api/state", undefined, owner.token);
+check("listing: patch listed + description in state", sld === 200 && stLd.settings.listed === true && stLd.settings.description === "Rauchtest im Verzeichnis");
+if (hra.directoryUrl) {
+  await new Promise((r) => setTimeout(r, 3500)); // entprellte Neuregistrierung (1,5 s) + Abruf
+  const dl = await fetch(`${hra.directoryUrl}/api/servers`).then(async (r) => [r.status, await r.json().catch(() => [])]);
+  const mine = Array.isArray(dl[1]) ? dl[1].find((x) => x.host === health.domain) : null;
+  check("listing: server appears in the directory with description and member count", dl[0] === 200 && !!mine && mine.description === "Rauchtest im Verzeichnis" && typeof mine.memberCount === "number", JSON.stringify(dl[1]));
+  await api("PATCH", "/api/settings", { listed: false }, owner.token);
+  await new Promise((r) => setTimeout(r, 3500));
+  const dl2 = await fetch(`${hra.directoryUrl}/api/servers`).then((r) => r.json()).catch(() => []);
+  check("listing: unlisted -> gone from the directory", Array.isArray(dl2) && !dl2.some((x) => x.host === health.domain));
+} else {
+  await api("PATCH", "/api/settings", { listed: false }, owner.token);
+}
+const [sldBad] = await api("PATCH", "/api/settings", { description: "x".repeat(201) }, owner.token);
+check("listing: description too long -> 400", sldBad === 400);
 await api("PATCH", "/api/me", { displayName: "Bea" }, B.token);
 
 // ---------- Sitzungen / Geraete (M6c): Liste, Bezeichnung aus dem User-Agent, Fernabmeldung (WS-Close 4011), andere, eigene
