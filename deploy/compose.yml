@@ -1,0 +1,75 @@
+# Production. Two operating modes via Compose profiles:
+#   PROXY_MODE=bundled  -> docker compose --env-file ../.env --profile bundled up -d    (Caddy handles TLS on 443)
+#   PROXY_MODE=external -> docker compose --env-file ../.env --profile external up -d   (your proxy, see proxies/README.md)
+# --env-file ../.env is mandatory: otherwise the ${...} placeholders here are only filled from deploy/.env (empty).
+# Media ports (UDP 7882, TCP 7881) go directly to LiveKit in BOTH modes, never through an HTTP proxy.
+
+name: squorli
+
+services:
+  app:
+    build: { context: .., dockerfile: Dockerfile, target: app }
+    image: squorli/app:local
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgres://chat:${POSTGRES_PASSWORD}@postgres:5432/chat
+      LIVEKIT_URL: http://livekit:7880
+      DATA_DIR: /app/data
+      # Directory service (M6): separate repo squorli-directory, runs on its own host, e.g. https://id.example.org. Empty = no directory.
+      DIRECTORY_URL: ${DIRECTORY_URL:-}
+    volumes: [appdata:/app/data]   # attachments
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [internal]
+    profiles: [bundled, external]
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: chat
+      POSTGRES_USER: chat
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chat -d chat"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+    profiles: [bundled, external]
+
+  livekit:
+    image: livekit/livekit-server:latest
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    environment:
+      # Keys via env so they are not in the YAML (format "key: secret").
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+      LIVEKIT_NODE_IP: ${LIVEKIT_NODE_IP:-}
+    volumes: [./livekit/livekit.yaml:/etc/livekit.yaml:ro]
+    ports:
+      - "7881:7881/tcp"   # media fallback via TCP
+      - "7882:7882/udp"   # media via UDP (single-port mux)
+    networks: [internal]
+    profiles: [bundled, external]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    env_file: ../.env
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    networks: [internal]
+    profiles: [bundled]
+
+volumes:
+  pgdata:
+  appdata:
+  caddydata:
+
+networks:
+  internal:

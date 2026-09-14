@@ -1,0 +1,25 @@
+# Development: only Postgres and LiveKit in containers. App server and web client run locally (pnpm dev).
+# Project name since 14.09.2026 is squorli-dev (previously community-chat-dev); the data volume keeps its old name so the dev DB
+# is preserved. Compose requires external: true for that; tools/dev.mjs creates the volume before starting (docker volume create is idempotent).
+name: squorli-dev
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_DB: chat, POSTGRES_USER: chat, POSTGRES_PASSWORD: chat }
+    ports: ["5432:5432"]
+    volumes: [pgdata-dev:/var/lib/postgresql/data]
+  livekit:
+    image: livekit/livekit-server:latest
+    # --dev sets the keys devkey/secret and listens on 7880 (http), 7881 (tcp), 7882 (udp).
+    # --node-ip: address that LiveKit offers browsers as an ICE candidate. Inside the container this would
+    # otherwise be the internal Docker IP, which is unreachable from the host -> no media.
+    # 127.0.0.1 = tests on the same machine. For a second device on the LAN: LIVEKIT_DEV_NODE_IP=<LAN IP of the host>.
+    command: --dev --bind 0.0.0.0 --node-ip ${LIVEKIT_DEV_NODE_IP:-127.0.0.1}
+    environment:
+      # Must match LIVEKIT_API_KEY/SECRET in .env.development, otherwise LiveKit rejects the app server's tokens.
+      LIVEKIT_KEYS: "devkey: secret-secret-secret-secret-secret"
+    ports: ["7880:7880", "7881:7881/tcp", "7882:7882/udp"]
+volumes:
+  pgdata-dev:
+    name: community-chat-dev_pgdata-dev
+    external: true

@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Testmatrix Bildschirmfreigabe (PLAN 3.6)</title>
+<style>
+  :root { color-scheme: dark; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; line-height: 1.45; }
+  body { margin: 0; padding: 1.5rem; background: #313338; color: #dbdee1; max-width: 60rem; margin-inline: auto; }
+  h1 { font-size: 1.3rem; } h2 { font-size: 1rem; text-transform: uppercase; letter-spacing: .04em; color: #949ba4; margin-top: 1.5rem; }
+  button { font: inherit; cursor: pointer; border: 0; border-radius: 4px; padding: .5rem 1rem; background: #5865f2; color: #fff; margin: .2rem .4rem .2rem 0; }
+  button.secondary { background: #383a40; }
+  video { width: 100%; max-height: 22rem; background: #000; border-radius: 6px; margin-top: .6rem; }
+  table { border-collapse: collapse; margin-top: .6rem; width: 100%; } td { padding: .2rem .6rem .2rem 0; vertical-align: top; } td:first-child { color: #949ba4; white-space: nowrap; }
+  .ok { color: #23a559; } .no { color: #f0b232; } .err { color: #f88; }
+  textarea { width: 100%; min-height: 6rem; font: inherit; font-size: .85rem; background: #1e1f22; color: #dbdee1; border: 1px solid #3f4147; border-radius: 4px; padding: .5rem; }
+  p.hint { color: #949ba4; font-size: .9rem; }
+</style>
+</head>
+<body>
+<h1>Testmatrix: Bildschirmfreigabe mit Ton</h1>
+<p class="hint">Diese Seite prueft, ob <code>getDisplayMedia({ audio: true })</code> in diesem Browser einen Ton-Track liefert (PLAN 3.6, Zeilen mit "pruefen").
+Vorgehen: Knopf druecken, im Browser-Dialog nacheinander <strong>Tab</strong>, <strong>Fenster</strong> und <strong>ganzer Bildschirm</strong> waehlen (Audio-Option im Dialog aktivieren, wo angeboten),
+jeweils das Ergebnis unten sammeln und die Zeilen in <code>docs/PLAN.md</code> Abschnitt 3.6 eintragen.</p>
+
+<h2>Umgebung</h2>
+<table><tbody>
+  <tr><td>Browser</td><td id="ua"></td></tr>
+  <tr><td>Plattform</td><td id="platform"></td></tr>
+  <tr><td>getDisplayMedia</td><td id="hasApi"></td></tr>
+  <tr><td>Sicherer Kontext</td><td id="secure"></td></tr>
+</tbody></table>
+
+<h2>Bildschirmfreigabe</h2>
+<button id="share">Bildschirm teilen und Ton anfordern</button>
+<button id="stop" class="secondary" disabled>Beenden</button>
+<table><tbody>
+  <tr><td>Oberflaeche</td><td id="surface">–</td></tr>
+  <tr><td>Bild</td><td id="video">–</td></tr>
+  <tr><td>Ton</td><td id="audio">–</td></tr>
+  <tr><td>Fehler</td><td id="error" class="err">–</td></tr>
+</tbody></table>
+<video id="preview" autoplay playsinline muted></video>
+
+<h2>Kamera (Vergleich)</h2>
+<button id="cam" class="secondary">Kamera testen</button>
+<span id="camResult">–</span>
+
+<h2>Gesammelte Ergebnisse</h2>
+<p class="hint">Jeder Versuch haengt eine Zeile an. Text markieren und in die Tabelle in PLAN 3.6 uebernehmen.</p>
+<textarea id="results" readonly></textarea>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const ua = navigator.userAgentData ? navigator.userAgentData.brands.map((b) => `${b.brand} ${b.version}`).join(", ") : navigator.userAgent;
+  $("ua").textContent = ua;
+  $("platform").textContent = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "?";
+  const hasApi = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+  $("hasApi").textContent = hasApi ? "vorhanden" : "fehlt (Browser zu alt oder mobil)";
+  $("hasApi").className = hasApi ? "ok" : "no";
+  $("secure").textContent = window.isSecureContext ? "ja" : "nein: Bildschirm- und Kamerafreigabe brauchen HTTPS oder localhost";
+  $("secure").className = window.isSecureContext ? "ok" : "err";
+
+  let stream = null;
+  function addResult(line) { $("results").value += line + "\n"; }
+  function stop() {
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = null; $("preview").srcObject = null; $("stop").disabled = true;
+  }
+  $("stop").onclick = stop;
+
+  $("share").onclick = async () => {
+    stop();
+    ["surface", "video", "audio"].forEach((id) => { $(id).textContent = "…"; $(id).className = ""; });
+    $("error").textContent = "–";
+    try {
+      // Chromium-Optionen werden von anderen Browsern ignoriert; audio: true ist der eigentliche Test.
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true, audio: true, systemAudio: "include", selfBrowserSurface: "exclude", surfaceSwitching: "include",
+      });
+      $("preview").srcObject = stream; $("stop").disabled = false;
+      const v = stream.getVideoTracks()[0]; const a = stream.getAudioTracks()[0];
+      const vs = v ? v.getSettings() : {};
+      const surface = vs.displaySurface || "unbekannt (Browser nennt die Oberflaeche nicht)";
+      $("surface").textContent = surface;
+      $("video").textContent = v ? `${vs.width}x${vs.height} @ ${vs.frameRate || "?"} fps` : "kein Video-Track";
+      $("video").className = v ? "ok" : "no";
+      if (a) {
+        const as = a.getSettings();
+        $("audio").textContent = `JA: ${as.channelCount || "?"} Kanaele, ${as.sampleRate || "?"} Hz, Label "${a.label}"`;
+        $("audio").className = "ok";
+      } else {
+        $("audio").textContent = "NEIN: kein Audio-Track (Browser oder Oberflaeche liefert keinen Ton, oder Audio-Option im Dialog war aus)";
+        $("audio").className = "no";
+      }
+      addResult(`${new Date().toISOString().slice(0, 16)} | ${ua} | ${$("platform").textContent} | Oberflaeche: ${surface} | Bild: ${v ? "ja" : "nein"} | Ton: ${a ? "ja" : "nein"}`);
+      v && v.addEventListener("ended", stop);
+    } catch (e) {
+      $("error").textContent = `${e.name}: ${e.message}`;
+      addResult(`${new Date().toISOString().slice(0, 16)} | ${ua} | ${$("platform").textContent} | Fehler: ${e.name} (${e.message})`);
+    }
+  };
+
+  $("cam").onclick = async () => {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } } });
+      const t = s.getVideoTracks()[0]; const st = t.getSettings();
+      $("camResult").textContent = `ok: ${t.label} ${st.width}x${st.height} @ ${st.frameRate || "?"} fps`;
+      $("camResult").className = "ok";
+      s.getTracks().forEach((x) => x.stop());
+    } catch (e) { $("camResult").textContent = `${e.name}: ${e.message}`; $("camResult").className = "err"; }
+  };
+</script>
+</body>
+</html>

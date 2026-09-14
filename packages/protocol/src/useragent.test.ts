@@ -1,0 +1,17 @@
+import { describe, expect, it } from "vitest";
+import { labelFromUserAgent } from "./useragent";
+
+describe("labelFromUserAgent (M6c)", () => {
+  const cases: [string, string | null][] = [
+    ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36", "Chrome auf Windows"],
+    ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0", "Edge auf Windows"],
+    ["Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0", "Firefox auf Linux"],
+    ["Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1", "Safari auf iOS"],
+    ["Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15", "Safari auf macOS"],
+    ["Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36", "Chrome auf Android"],
+    ["node", "Browser"],
+    ["", null],
+  ];
+  for (const [ua, expected] of cases) it(`${ua.slice(0, 40)} -> ${expected}`, () => expect(labelFromUserAgent(ua)).toBe(expected));
+  it("undefined -> null", () => expect(labelFromUserAgent(undefined)).toBeNull());
+});

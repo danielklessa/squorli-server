@@ -1,0 +1,10 @@
+# Overlay for a proxy that runs on the host (nginx, Apache, Caddy outside Docker).
+# Publishes the app server and LiveKit signaling only on localhost; from outside both stay closed.
+#   docker compose --env-file ../.env -f compose.yml -f proxies/nginx.ports.yml --profile external up -d
+services:
+  app:
+    ports:
+      - "127.0.0.1:3000:3000"
+  livekit:
+    ports:
+      - "127.0.0.1:7880:7880"

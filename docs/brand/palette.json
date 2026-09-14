@@ -1,0 +1,91 @@
+{
+  "colors": [
+    {
+      "name": "Squorli Blue",
+      "hex": "#6397FF",
+      "use": "Brand color, icon mark, links and focus"
+    },
+    {
+      "name": "Action",
+      "hex": "#246BFD",
+      "use": "Primary buttons with white text"
+    },
+    {
+      "name": "Action Hover",
+      "hex": "#1856D8",
+      "use": "Hover for primary buttons"
+    },
+    {
+      "name": "Selection",
+      "hex": "#243E68",
+      "use": "Selected channels and active navigation"
+    },
+    {
+      "name": "Raised",
+      "hex": "#1E2D47",
+      "use": "Menus, inputs and raised surfaces"
+    },
+    {
+      "name": "Night",
+      "hex": "#0C1424",
+      "use": "Dark app background"
+    },
+    {
+      "name": "Surface",
+      "hex": "#162238",
+      "use": "Channels and panels"
+    },
+    {
+      "name": "Cloud",
+      "hex": "#F5F8FF",
+      "use": "Primary text and wordmark"
+    },
+    {
+      "name": "Muted",
+      "hex": "#A9B8D2",
+      "use": "Secondary text in Dark Mode"
+    },
+    {
+      "name": "Mint",
+      "hex": "#42D6AE",
+      "use": "Online / success"
+    },
+    {
+      "name": "Amber",
+      "hex": "#FFC568",
+      "use": "Away / notice"
+    },
+    {
+      "name": "Coral",
+      "hex": "#FF7F91",
+      "use": "Error / do not disturb"
+    }
+  ],
+  "contrast_pairs": [
+    {
+      "foreground": "#FFFFFF",
+      "background": "#246BFD",
+      "ratio": 4.57
+    },
+    {
+      "foreground": "#F5F8FF",
+      "background": "#0C1424",
+      "ratio": 17.31
+    },
+    {
+      "foreground": "#A9B8D2",
+      "background": "#162238",
+      "ratio": 7.93
+    },
+    {
+      "foreground": "#6397FF",
+      "background": "#0C1424",
+      "ratio": 6.49
+    },
+    {
+      "foreground": "#F5F8FF",
+      "background": "#243E68",
+      "ratio": 10.06
+    }
+  ]
+}

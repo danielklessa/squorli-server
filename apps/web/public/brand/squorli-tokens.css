@@ -1,0 +1,20 @@
+:root {
+  color-scheme: dark;
+  --sq-bg: #0C1424;
+  --sq-text: #F5F8FF;
+  --sq-squorli-blue: #6397FF;
+  --sq-action: #246BFD;
+  --sq-action-hover: #1856D8;
+  --sq-selection: #243E68;
+  --sq-raised: #1E2D47;
+  --sq-night: #0C1424;
+  --sq-surface: #162238;
+  --sq-cloud: #F5F8FF;
+  --sq-muted: #A9B8D2;
+  --sq-mint: #42D6AE;
+  --sq-amber: #FFC568;
+  --sq-coral: #FF7F91;
+  --sq-radius-control: 12px;
+  --sq-radius-panel: 20px;
+  --sq-space-unit: 4px;
+}

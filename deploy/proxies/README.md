@@ -1,0 +1,101 @@
+# Running behind an existing reverse proxy (PROXY_MODE=external)
+
+Your proxy must:
+
+1. forward `https://chat.example.org/rtc*` (incl. WebSocket) to LiveKit (`livekit:7880`)
+2. forward everything else under `https://chat.example.org` (incl. WebSocket `/api/ws`) to the app server (`app:3000`)
+3. set `X-Forwarded-For` and `X-Forwarded-Proto` and pass the WebSocket upgrade through
+
+In addition, the following must be reachable **directly** (not via the proxy): `7882/udp` and `7881/tcp` on the host.
+Once TURN is active (see `../livekit/livekit.yaml`), also `5349/tcp`.
+
+Only subdomains are supported, no sub-path like `example.org/chat`.
+
+## How the proxy reaches the containers
+
+In external mode `compose.yml` publishes **no** HTTP ports; `app` and `livekit` are only attached to the network `squorli_internal`.
+
+| Proxy runs ... | Solution |
+|---|---|
+| on the host (nginx, Apache, Caddy as a package) | Start with the overlay `nginx.ports.yml`: publishes `127.0.0.1:3000` and `127.0.0.1:7880` |
+| as a container on the same host (Traefik, Nginx Proxy Manager, Caddy) | Attach the proxy container to the network `squorli_internal` or `app`/`livekit` to the proxy network (`npm.network.yml`, `traefik.labels.yml`) and use the container names `app` and `livekit` as targets |
+| on another host | Overlay `remote-proxy.ports.yml`: publishes 3000 and 7880 on `PROXY_BIND_IP`; the target in the proxy is the IP/hostname of the chat host. See section "Proxy on another host" |
+
+## Proxy on another host
+
+Applies to Nginx Proxy Manager, nginx, Traefik etc. on a second machine. What changes:
+
+1. **Open the ports:** In `.env` set `PROXY_BIND_IP` to the LAN/VPN address of the chat host (if unset: all interfaces) and start with
+   ```bash
+   cd deploy && docker compose --env-file ../.env -f compose.yml -f proxies/remote-proxy.ports.yml --profile external up -d
+   ```
+   Then, via the firewall on the chat host, allow `3000/tcp` and `7880/tcp` **only** for the IP of the proxy host. Both ports speak unencrypted HTTP; there should be a private network or VPN between the hosts.
+2. **Target in the proxy:** instead of `app`/`livekit`, the IP or the internal hostname of the chat host, ports 3000 and 7880.
+3. **Media does not go through the proxy host.** Browsers connect directly to the **chat host** for audio: `7882/udp` and `7881/tcp` must be reachable there from the internet (public IP or port forwarding on the router). LiveKit must know this public address: the default is automatic detection (`use_external_ip`); with NAT or multiple addresses set `LIVEKIT_NODE_IP=<public IP of the chat host>` in `.env`. A chat host without its own public reachability does not work, no matter how the proxy is set up.
+4. **`TRUSTED_PROXIES`:** The app server sees the proxy host as the sender. If its IP lies in `10/8`, `172.16/12` or `192.168/16`, the default is sufficient; otherwise add the IP in `.env`. (Under Docker Desktop the sender appears as the Docker gateway `172.x`, also covered.)
+
+
+## nginx
+
+1. `.env`: `PROXY_MODE=external`. `TRUSTED_PROXIES` can stay at the default (Docker networks + 127.0.0.1); the app server sees nginx as a sender from the Docker bridge network.
+2. Start: `cd deploy && docker compose --env-file ../.env -f compose.yml -f proxies/nginx.ports.yml --profile external up -d`
+3. Adopt `nginx.conf` as a server block (`/etc/nginx/sites-available/chat.conf` or similar), adjust `chat.example.org` and the certificate paths, `nginx -t && systemctl reload nginx`.
+4. Firewall: open `443/tcp`, `80/tcp` (redirect), `7881/tcp`, `7882/udp`.
+
+Check:
+
+```bash
+curl -s https://chat.example.org/api/health          # {"ok":true,"proxyMode":"external",...}
+curl -s -o /dev/null -w "%{http_code}\n" https://chat.example.org/rtc/validate   # 401 = request reached LiveKit (expected without a token)
+```
+
+Then log in in the browser, join the lobby and check in the debug view (`?debug`) that packets arrive. If the WebSocket at `/api/ws` does not open, `proxy_set_header Upgrade`/`Connection` is usually missing; if `/rtc` connects but no audio comes through, `7882/udp`/`7881/tcp` are not open or LiveKit does not know its public IP (set `LIVEKIT_NODE_IP` in `.env`).
+
+## Directory service
+
+The directory service (handles, key backup, authenticator) is a separate, unpublished repo (`squorli-directory`) and runs on its own host with its own domain (e.g. `id.example.org`); in the proxy it is a normal host without a path prefix. The chat server only needs `DIRECTORY_URL=https://id.example.org` in `.env`. Nothing in this repo publishes or proxies the service.
+
+## Nginx Proxy Manager (NPM)
+
+NPM on the **same** host: NPM runs as a container and must reach `app` and `livekit` in the Docker network. For that, start with the overlay `npm.network.yml`
+(adjust the network name). NPM on **another** host: follow the section above and in the table below enter the IP of the chat host as Forward Hostname instead of `app`/`livekit`.
+
+```bash
+cd deploy && docker compose --env-file ../.env -f compose.yml -f proxies/npm.network.yml --profile external up -d
+```
+
+Alternatively without overlay: `docker network connect squorli_internal <npm-container>`.
+
+Create a **Proxy Host** in the NPM interface:
+
+| Tab | Field | Value |
+|---|---|---|
+| Details | Domain Names | `chat.example.org` |
+| Details | Scheme / Forward Hostname / Port | `http` / `app` / `3000` |
+| Details | Websockets Support | **on** (required, otherwise no `/api/ws`) |
+| Details | Cache Assets | off |
+| Details | Block Common Exploits | optional |
+| Custom Locations | location `/rtc` | Scheme `http`, Forward Hostname `livekit`, Port `7880` |
+| Custom Locations | gear icon at `/rtc` (Advanced) | `proxy_read_timeout 3600s;` and `proxy_send_timeout 3600s;` |
+| SSL | Certificate | Request Let's Encrypt |
+| SSL | Force SSL, HTTP/2 Support | on |
+
+Mind the order: `/rtc` is a Custom Location of the Proxy Host for `chat.example.org`, not a separate host.
+In older NPM versions Custom Locations do not get the WebSocket upgrade automatically; if joining fails with a
+WebSocket error to `/rtc`, add in the Advanced field of the location:
+
+```nginx
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection "upgrade";
+```
+
+(Add `proxy_http_version 1.1;` only if NPM does not already set it there, otherwise nginx reports a duplicate directive and the host goes offline.)
+
+Firewall as with nginx: `443/tcp`, `80/tcp`, `7881/tcp`, `7882/udp` directly to the host; the media ports do not go through NPM.
+`TRUSTED_PROXIES` in `.env` can stay at the default (NPM comes from a Docker network). Check as above with `/api/health` and `/rtc/validate`.
+
+## Traefik
+
+`traefik.labels.yml` as overlay: `docker compose --env-file ../.env -f compose.yml -f proxies/traefik.labels.yml --profile external up -d`. Adjust the network name and certresolver.
+
+Status: **untested** against real installations. Will be checked against nginx and Traefik in M5 and added to CI.

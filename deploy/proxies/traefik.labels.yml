@@ -1,0 +1,24 @@
+# Example Traefik v3 labels (external mode), as an overlay to compose.yml. Untested, see README.md.
+# docker compose --env-file ../.env -f compose.yml -f proxies/traefik.labels.yml --profile external up -d
+services:
+  app:
+    networks: [internal, proxy]
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.chat.rule: "Host(`chat.example.org`)"
+      traefik.http.routers.chat.entrypoints: websecure
+      traefik.http.routers.chat.tls.certresolver: letsencrypt
+      traefik.http.routers.chat.priority: "1"
+      traefik.http.services.chat.loadbalancer.server.port: "3000"
+  livekit:
+    networks: [internal, proxy]
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.chat-rtc.rule: "Host(`chat.example.org`) && PathPrefix(`/rtc`)"
+      traefik.http.routers.chat-rtc.entrypoints: websecure
+      traefik.http.routers.chat-rtc.tls.certresolver: letsencrypt
+      traefik.http.routers.chat-rtc.priority: "10"
+      traefik.http.services.chat-rtc.loadbalancer.server.port: "7880"
+networks:
+  proxy:
+    external: true   # the network your Traefik is attached to

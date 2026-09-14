@@ -1,0 +1,15 @@
+# Bundled mode: Caddy automatically obtains a Let's Encrypt certificate for PUBLIC_DOMAIN.
+# TURN over 443 is NOT covered by this (would need Caddy with the layer4 plugin). Open item, see docs/PLAN.md 4.2.
+{$PUBLIC_DOMAIN} {
+  encode zstd gzip
+
+  # LiveKit signaling (WebSocket) and validation
+  handle /rtc* {
+    reverse_proxy livekit:7880
+  }
+
+  # Everything else: app server (API, WebSocket, static web client)
+  handle {
+    reverse_proxy app:3000
+  }
+}

@@ -1,0 +1,33 @@
+/* GENERIERT von tools/icons.mjs, nicht von Hand aendern. Lucide Icons, ISC-Lizenz (https://lucide.dev). */
+@font-face { font-family: "lucide"; src: url("./lucide.woff2") format("woff2"); font-weight: normal; font-style: normal; font-display: block; }
+.ic { font-family: "lucide" !important; font-style: normal; font-weight: normal; line-height: 1; display: inline-block; vertical-align: -0.125em; -webkit-font-smoothing: antialiased; }
+.ic-ban::before { content: "\e051"; }
+.ic-bug::before { content: "\e20c"; }
+.ic-chevron-down::before { content: "\e06d"; }
+.ic-chevron-up::before { content: "\e070"; }
+.ic-crown::before { content: "\e1d6"; }
+.ic-hash::before { content: "\e0ef"; }
+.ic-headphone-off::before { content: "\e62d"; }
+.ic-headphones::before { content: "\e0f1"; }
+.ic-key-round::before { content: "\e4a7"; }
+.ic-link::before { content: "\e102"; }
+.ic-mic::before { content: "\e118"; }
+.ic-mic-off::before { content: "\e119"; }
+.ic-monitor::before { content: "\e11d"; }
+.ic-monitor-smartphone::before { content: "\e3a6"; }
+.ic-paperclip::before { content: "\e12d"; }
+.ic-pencil::before { content: "\e1f9"; }
+.ic-phone::before { content: "\e133"; }
+.ic-pin::before { content: "\e259"; }
+.ic-screen-share::before { content: "\e14f"; }
+.ic-screen-share-off::before { content: "\e150"; }
+.ic-server::before { content: "\e153"; }
+.ic-settings::before { content: "\e154"; }
+.ic-shield::before { content: "\e158"; }
+.ic-trash-2::before { content: "\e18e"; }
+.ic-user::before { content: "\e19f"; }
+.ic-video::before { content: "\e1a5"; }
+.ic-video-off::before { content: "\e1a6"; }
+.ic-volume-2::before { content: "\e1ab"; }
+.ic-wand-sparkles::before { content: "\e35b"; }
+.ic-x::before { content: "\e1b2"; }

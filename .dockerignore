@@ -1,0 +1,12 @@
+# Not in the build context: host dependencies and build artifacts are created fresh in the container.
+node_modules
+**/node_modules
+**/dist
+apps/server/public
+.env
+**/.env
+*.log
+.git
+docs
+tools
+**/data
