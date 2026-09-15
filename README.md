@@ -1,7 +1,11 @@
 # Squorli
 
+Homepage: **https://squorli.com**
+
+Official open-source repository: [Squorli Server on GitHub](https://github.com/danielklessa/squorli-server). Licensed under the [Apache License 2.0](LICENSE).
+
 Self-hosted, open-source community chat with voice and video channels. Squorli Server includes the browser client; a desktop client is planned.
-Website: https://squorli.com. The separately operated [Squorli Directory](https://directory.squorli.com) is **not open source**. Shared product identity: [docs/brand/PRODUCT.md](docs/brand/PRODUCT.md). The concrete server license is still pending (see License below).
+Website: https://squorli.com. The separately operated [Squorli Directory](https://directory.squorli.com) is **not open source**. Shared product identity: [docs/brand/PRODUCT.md](docs/brand/PRODUCT.md).
 Modelled on Discord, but every server belongs to its operator. Plan and architecture: [`docs/PLAN.md`](docs/PLAN.md).
 Working guide for developers and AI agents (commands, conventions, pitfalls, test status): [`AGENTS.md`](AGENTS.md).
 
@@ -112,7 +116,7 @@ via `LIVEKIT_CONFIG` (keep it in step with `deploy/livekit/livekit.yaml`).
 
 ## License
 
-Squorli Server is the open-source project. The concrete license (MIT or Apache 2.0) and license file are still pending; no license has been selected by this website/documentation update. Until a license is supplied, the existing all-rights-reserved status applies. Squorli Directory is separate and is not open source.
+Squorli Server is licensed under the [Apache License, Version 2.0](LICENSE) (Copyright 2026 Daniel Klessa, see [NOTICE](NOTICE)). Contributions are accepted under the same license. Squorli Directory is separate and is not open source.
 
 ## Website and shared brand
 

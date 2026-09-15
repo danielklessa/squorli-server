@@ -2,7 +2,9 @@
 
 ## Current product identity (15 September 2026)
 
-Squorli Server is the open-source server and browser client; its specific license remains to be selected. Squorli Directory is a separately operated, non-open-source service at https://directory.squorli.com. The public German/English website for https://squorli.com lives in `../squorli-website` (Astro/Vite) and contains English installation documentation. Shared product wording and synchronization rules: [brand/PRODUCT.md](brand/PRODUCT.md). Keep all three brand packages and runtime asset copies synchronized. Historical milestones and target capacities below are planning records, not current production guarantees; the current implementation status is in AGENTS.md.
+The public open-source server address is https://github.com/danielklessa/squorli-server. Always use it for public repository links and installation examples.
+
+Squorli Server is the open-source server and browser client under the Apache License 2.0 (`LICENSE`). Squorli Directory is a separately operated, non-open-source service at https://directory.squorli.com. The public German/English website for https://squorli.com lives in `../squorli-website` (Astro/Vite) and contains English installation documentation. Shared product wording and synchronization rules: [brand/PRODUCT.md](brand/PRODUCT.md). Keep all three brand packages and runtime asset copies synchronized. Historical milestones and target capacities below are planning records, not current production guarantees; the current implementation status is in AGENTS.md.
 
 Status: 13 September 2026 · Draft v0.3 · Solo development · Open source
 
@@ -17,7 +19,7 @@ Status: 13 September 2026 · Draft v0.3 · Solo development · Open source
 | Clients (Release 1) | Web (browser) and desktop (Windows, macOS, Linux) |
 | Identity | One account for all servers, attached to a later online service |
 | Development | One person, TypeScript/Node, delivered as Docker containers |
-| License | Permissive, MIT or Apache 2.0 (choice between the two, see section 9) |
+| License | Apache 2.0 (decided September 2026, see section 9) |
 | Speaking | Push-to-talk and voice activation, user chooses per device |
 | Screen share with audio | Mandatory in Release 1, browser and desktop (limitations, see 3.6) |
 | Operation | Standalone with bundled proxy **or** behind an existing reverse proxy (see 4.5) |
@@ -342,7 +344,7 @@ Already decided: permissive license, PTT and voice activation both, screen share
 
 ## 10. Next concrete steps
 
-1. Settle the license text (MIT or Apache 2.0) and the project name.
+1. ~~Settle the license text (MIT or Apache 2.0)~~ Done: Apache 2.0, `LICENSE` added September 2026. Settle the project name.
 2. Work through the test matrix from 3.6 with a small test page: getDisplayMedia with `audio: true` in Chrome, Firefox, Safari on all available operating systems; replace the "prüfen" (check) rows with the result. One afternoon.
 3. Start LiveKit locally via Docker, open a room with the bundled example client, put 15 bots in, watch resources. One day. Confirms or refutes the component choice before code is written.
 4. Set up the monorepo, start M0.

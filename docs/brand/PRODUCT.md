@@ -7,12 +7,14 @@ Last updated: 15 September 2026. Keep this file byte-identical in the brand pack
 | Name | Meaning | Official destination |
 | --- | --- | --- |
 | Squorli | The overall brand: a home for community conversations, voice and video | https://squorli.com |
-| Squorli Server | The self-hosted, open-source community server and its web client | https://gitlab.klessa.net/squorli/squorli-server |
+| Squorli Server | The self-hosted, open-source community server and its web client | https://github.com/danielklessa/squorli-server |
 | Squorli Directory | The separately operated identity, discovery and friends service; not open source | https://directory.squorli.com |
 
 The website is being prepared for squorli.com; this statement is not a deployment status claim. The Directory destination was supplied by the project owner. Do not advertise a public source repository for the Directory. Generic deployment examples may use chat.example.org for a community's own server.
 
 ## Product description
+
+Always link the open-source Squorli Server to https://github.com/danielklessa/squorli-server in public copy, documentation and installation examples. Clone using the same URL with `.git`; link individual files using GitHub's `/blob/main/` path. Development remotes and container registries are separate configuration and do not determine the public source address.
 
 Squorli gives gaming, creator and other communities a place for text, voice, video and screen sharing on a server they operate themselves. Roles, invitations and moderation belong to each server. The browser client is implemented; a desktop client is planned.
 
@@ -22,7 +24,7 @@ Only direct messages between friends are described as end-to-end encrypted. Do n
 
 ## Release and licensing wording
 
-The owner identifies Squorli Server as the open-source project and Squorli Directory as not open source. The server repository still needs a concrete license selection and license file before public release. Do not invent an MIT/Apache license or remove that pending decision when writing public copy.
+The owner identifies Squorli Server as the open-source project and Squorli Directory as not open source. Squorli Server is licensed under the Apache License, Version 2.0 (file `LICENSE` in the server repository, copyright Daniel Klessa). Name that license exactly in public copy; do not describe it as MIT or as pending.
 
 Video and screen sharing are implemented; real-camera acceptance and restrictive-network/TURN testing remain pending. Screen audio depends on a supported Chromium browser. Do not present roadmap targets as measured capabilities.
 

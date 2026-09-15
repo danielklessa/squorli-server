@@ -1,6 +1,7 @@
 {
   "name": "squorli",
   "private": true,
+  "license": "Apache-2.0",
   "version": "0.0.1",
   "description": "Selbstgehosteter Community-Chat mit Voice und Video (Server + Client).",
   "packageManager": "pnpm@10.15.0",
