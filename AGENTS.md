@@ -8,6 +8,8 @@ Last check of the complete workflow: 14 September 2026 (all green, see section "
 
 ## 1. What the project is
 
+**Published container documentation (15 September 2026):** The official image is `ghcr.io/danielklessa/squorli-server:latest`, listed at https://github.com/danielklessa/squorli-server/pkgs/container/squorli-server. README and website guides document APP_IMAGE, profile/overlay-aware pull and up --no-build, image pinning and the local-build alternative. Portainer users must explicitly set APP_IMAGE to override the stack's legacy default. This documentation update does not change runtime defaults.
+
 **Public source address:** Always use https://github.com/danielklessa/squorli-server for the open-source server in documentation, website links and clone examples. Internal development remotes and container registry settings are separate; this rule does not change them.
 
 **Website and brand update (15 September 2026):** Squorli Server is the open-source project (Apache License 2.0, see `LICENSE`); Squorli Directory is not open source and is operated at https://directory.squorli.com. The sibling `../squorli-website` uses Astro/Vite for the German/English website at https://squorli.com and German/English technical guides. Read `docs/brand/PRODUCT.md` for shared product wording. Canonical `docs/brand/` must now be mirrored to **both** siblings and all three runtime brand folders. From the website run `pnpm brand:sync`, then `pnpm brand:check`. Update affected README/plan/public-copy descriptions together. Website-only documentation changes do not imply backend or protocol changes.
@@ -128,7 +130,7 @@ All from the repo root:
 | `pnpm smoke` | Smoke test (auth, owner, roles "Gast"/"Mitglied", invites, sessions/devices with remote logout, structure, permissions, messages, attachments, WS, RTC token grants, voice channel moderation, kick/ban, voice profile per channel, appoint/revoke owner, server icon, only-with-account, server directory listing, directory handle and display names if `DIRECTORY_URL` is set; 77 checks without a directory, 86 with), **needs a running server on :3000** (`SMOKE_URL` for others). Remembers the owner key in `apps/server/scripts/.smoke-owner.json`. **Best against a separate test DB** (see pitfalls), because the first login becomes the owner. |
 | `pnpm bots [--audio 15] [--video 0] [--resolution high] [--duration 60s] [--subscribers 0] [--room lobby]` | Put load-test bots into the voice channel; needs the running dev LiveKit. Visible and audible in the web client as "(extern)" (external). `--video 15 --audio 0 --subscribers 1` = bandwidth measurement as in PLAN 4.3 (room = channel UUID so they appear in the client) |
 | `pnpm db:generate` | Generate a Drizzle migration from a schema change |
-| Client URL `?debug` / `?ice=relay` | Show the debug view / force the browser onto TURN (README "Simulating restrictive networks") |
+| Client URL `?debug` / `?ice=relay` | Show the debug view / force the browser onto TURN (`docs/DEVELOPMENT.md` "Simulating restrictive networks") |
 | Client URL `/test/screenshare.html` | Test matrix PLAN 3.6: does this browser deliver an audio track for tab/window/screen? Enter the result in the table |
 | `docker build --target app -t squorli/app:local .` | Build the production image |
 
@@ -141,7 +143,7 @@ Start the built server locally: `node apps/server/dist/index.js` (reads `apps/se
 1. `pnpm typecheck` and `pnpm test` green.
 2. For changes to the server, protocol or auth: start the server and `pnpm --filter @squorli/server smoke` green.
 3. For changes to the Dockerfile, compose, configuration: `docker build` runs through.
-4. Affected documentation updated: `AGENTS.md` (this file), `README.md`, if applicable `docs/PLAN.md` and `.env.example`.
+4. Affected documentation updated: `AGENTS.md` (this file), `README.md` (operators) or `docs/DEVELOPMENT.md` (developers), if applicable `docs/PLAN.md` and `.env.example`.
 5. New environment variables: in `apps/server/src/config.ts` **and** `.env.example` **and** `.env.development` **and** if applicable `deploy/compose.yml`.
 6. For changes to the directory contract or the brand package: copies in `../squorli-directory` synchronized (section 2a), typecheck/test there green.
 
@@ -263,8 +265,8 @@ Start the built server locally: `node apps/server/dist/index.js` (reads `apps/se
 - LiveKit accepts the app server's tokens (`/rtc/validate` -> 200).
 - Load test `pnpm bots --subscribers 1`: 15 audio bots + 1 listener, all 15 tracks subscribed, 0 % packet loss, ~284 kbit/s at the listener, LiveKit 10-15 % CPU / ~90 MB RAM, app server and Postgres unimpressed. The LiveKit log shows "error reading data channel ... User Initiated Abort" during teardown: harmless.
 - **Confirmed by hand (13 September 2026, Daniel):** voice chat from an iPhone (Safari, external) to the dev stack behind router NAT, access via Nginx Proxy Manager on another host, domain community-test.datlicht.eu. Required: `PUBLIC_DOMAIN` = domain, `LIVEKIT_PUBLIC_URL` without port (or omitted), `LIVEKIT_DEV_NODE_IP` = public IP, 7882/udp + 7881/tcp forwarded at the router to the chat host.
-- **Testing restrictive networks:** README section "Simulating restrictive networks" (remove the UDP forwarding -> TCP fallback; `?ice=relay` -> TURN only). The debug view shows the active ICE path from `candidate-pair` statistics (`room.engine.pcManager`, internal API, check after SDK updates).
-- **Deferred (decision of 13 September 2026): remaining M1 acceptance later, M2 begins.** Open points see the next line; procedure in the README section "Simulating restrictive networks".
+- **Testing restrictive networks:** `docs/DEVELOPMENT.md` section "Simulating restrictive networks" (remove the UDP forwarding -> TCP fallback; `?ice=relay` -> TURN only). The debug view shows the active ICE path from `candidate-pair` statistics (`room.engine.pcManager`, internal API, check after SDK updates).
+- **Deferred (decision of 13 September 2026): remaining M1 acceptance later, M2 begins.** Open points see the next line; procedure in the `docs/DEVELOPMENT.md` section "Simulating restrictive networks".
 - **Still open for the M1 acceptance:** a peer in a restrictive network (corporate Wi-Fi, UDP blocked) and thus TURN; device switching and PTT key only checked superficially; the 15-bot test only ran locally.
 - `pnpm docker:dev`: Postgres and LiveKit start, migrations create `users` and `sessions`.
 - `pnpm dev` (wrapper): containers up, server on :3000, Vite on :5173, proxy `/api/health` works. Ctrl+C (a real console event) and a crash of the apps both stop the containers and leave no processes behind on :3000/:5173.
@@ -319,7 +321,7 @@ Fixed in M1: the RTC URL ended in `/rtc` (the SDK appends it itself); the LiveKi
 | 2026-09-13 | Web client: all `confirm`/`prompt` calls replaced by own modals (`dialogs.tsx`), new convention "no browser dialogs". |
 | 2026-09-13 | Static serving: 404 for missing assets instead of the SPA fallback, `no-cache` for index.html, `immutable` for assets. |
 | 2026-09-13 | M2 implemented: protocol v3 (ServerState, structure/message/typing/removed events, permission bitmask), schema with members/categories/channels/roles/invites/bans/messages/attachments (migration 0002), bootstrap, hub, authz, all admin routes, web client completely new (Sidebar, Chat, Members, Admin, VoiceDock, login with invite), smoke test with 44 checks, Compose volume for attachments. |
-| 2026-09-13 | Test aids for restrictive networks: `?ice=relay` (TURN only), ICE path in the debug view, README section "Simulating restrictive networks". |
+| 2026-09-13 | Test aids for restrictive networks: `?ice=relay` (TURN only), ICE path in the debug view, `docs/DEVELOPMENT.md` section "Simulating restrictive networks". |
 | 2026-09-13 | First voice chat over the internet confirmed (iPhone Safari external, NPM on another host, dev stack behind router NAT). |
 | 2026-09-13 | `tools/dev.mjs` loads `apps/server/.env` for Compose (`LIVEKIT_DEV_NODE_IP`), reports the advertised media address at startup. |
 | 2026-09-13 | Explain the disconnect reason (DisconnectReason) in the client, room event log in the debug view, `voice.leave` on unexpected disconnect. |

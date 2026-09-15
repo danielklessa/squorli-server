@@ -2,6 +2,8 @@
 
 ## Current product identity (15 September 2026)
 
+The server container is published at https://github.com/danielklessa/squorli-server/pkgs/container/squorli-server as `ghcr.io/danielklessa/squorli-server:latest`. Production documentation now supports pulling the prebuilt app with APP_IMAGE and Compose --no-build, with source builds retained as an alternative. Check the package page for existing tags/digests; latest is mutable.
+
 The public open-source server address is https://github.com/danielklessa/squorli-server. Always use it for public repository links and installation examples.
 
 Squorli Server is the open-source server and browser client under the Apache License 2.0 (`LICENSE`). Squorli Directory is a separately operated, non-open-source service at https://directory.squorli.com. The public German/English website for https://squorli.com lives in `../squorli-website` (Astro/Vite) and contains English installation documentation. Shared product wording and synchronization rules: [brand/PRODUCT.md](brand/PRODUCT.md). Keep all three brand packages and runtime asset copies synchronized. Historical milestones and target capacities below are planning records, not current production guarantees; the current implementation status is in AGENTS.md.

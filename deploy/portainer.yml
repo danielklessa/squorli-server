@@ -5,7 +5,8 @@
 #   required: PUBLIC_DOMAIN, POSTGRES_PASSWORD, LIVEKIT_API_KEY, LIVEKIT_API_SECRET (32+ characters)
 #   usually:  LIVEKIT_NODE_IP (public IP of this host), DIRECTORY_URL, TRUSTED_PROXIES (IP of the proxy), PROXY_BIND_IP
 #   optional: APP_IMAGE, SERVER_NAME, OWNER_PUBLIC_KEY, MAX_UPLOAD_MB, LIVEKIT_PUBLIC_URL, DIRECTORY_PROOF_URL, REQUIRE_ACCOUNT (true/false)
-# The image comes from the GitLab registry (.gitlab-ci.yml); register the registry in Portainer with a deploy token (read_registry).
+# Set APP_IMAGE=ghcr.io/danielklessa/squorli-server:latest to use the public GitHub Container Registry image.
+# This overrides the legacy registry default below; see the Portainer section in README.md.
 # Firewall: 7881/tcp + 7882/udp open to the world (media); 3000 + 7880 only for the proxy host (HTTP, no TLS).
 
 services:

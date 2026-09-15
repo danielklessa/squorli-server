@@ -14,6 +14,8 @@ The website is being prepared for squorli.com; this statement is not a deploymen
 
 ## Product description
 
+The official published server container is `ghcr.io/danielklessa/squorli-server:latest`. Its package page is https://github.com/danielklessa/squorli-server/pkgs/container/squorli-server. This image includes the server and web client, not the separately operated Directory. Use the package page for available tags/digests; do not invent versions or architecture support. `latest` is mutable. Compose installation uses `APP_IMAGE`, the matching profile, `pull`, and `up -d --no-build`; a source build remains an alternative.
+
 Always link the open-source Squorli Server to https://github.com/danielklessa/squorli-server in public copy, documentation and installation examples. Clone using the same URL with `.git`; link individual files using GitHub's `/blob/main/` path. Development remotes and container registries are separate configuration and do not determine the public source address.
 
 Squorli gives gaming, creator and other communities a place for text, voice, video and screen sharing on a server they operate themselves. Roles, invitations and moderation belong to each server. The browser client is implemented; a desktop client is planned.
