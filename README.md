@@ -2,9 +2,9 @@
 
 Homepage: **https://squorli.com**
 
-Self-hosted, open-source community chat with text, voice and video channels. Modelled on Discord, but every server belongs to its operator. Squorli Server includes the browser client; a desktop client is planned.
+Self-hosted, open-source community chat with text, voice and video channels, similar to Discord. Every server belongs to the person who runs it. Squorli Server includes the browser client; a desktop client is planned.
 
-Official repository: [Squorli Server on GitHub](https://github.com/danielklessa/squorli-server). Licensed under the [Apache License 2.0](LICENSE). The separately operated [Squorli Directory](https://directory.squorli.com) (global handles, friends, encrypted direct messages) is optional and **not open source**.
+Official repository: [Squorli Server on GitHub](https://github.com/danielklessa/squorli-server). Licensed under the [Apache License 2.0](LICENSE). A server can optionally connect to the [Squorli Directory](https://directory.squorli.com), a separately operated service that gives users a global handle, lets them find friends across servers and exchange end-to-end encrypted direct messages. Without a directory, a server works completely on its own.
 
 This README explains how to run your own Squorli server. Working on the code: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
@@ -128,7 +128,7 @@ docker compose --env-file ../.env --profile bundled up -d --build   # or the ext
 
 ## License
 
-Squorli Server is licensed under the [Apache License, Version 2.0](LICENSE) (Copyright 2026 Daniel Klessa, see [NOTICE](NOTICE)). Contributions are accepted under the same license. Squorli Directory is separate and is not open source.## Production (standard: published Docker image, no Git clone)
+Squorli Server is licensed under the [Apache License, Version 2.0](LICENSE) (Copyright 2026 Daniel Klessa, see [NOTICE](NOTICE)). Contributions are accepted under the same license. The Squorli Directory is a separately operated service and is not part of this repository.## Production (standard: published Docker image, no Git clone)
 
 Requirements: Docker Engine with the Compose plugin, curl and OpenSSL on a Linux host. You do not need Git, Node.js or a local application build. Point your domain to the host and open 80/tcp, 443/tcp, 7881/tcp and 7882/udp. Follow the complete guide in [English](https://squorli.com/en/docs/install/) or [German](https://squorli.com/de/docs/install/).
 
