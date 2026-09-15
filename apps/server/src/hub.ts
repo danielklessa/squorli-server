@@ -2,13 +2,13 @@ import type { ServerEvent } from "@squorli/protocol";
 import type { WebSocket } from "ws";
 
 /**
- * Alle authentifizierten WebSocket-Verbindungen, nach Nutzer gruppiert.
- * Praesenz (online) = mindestens eine Verbindung. Ein Knoten, in-memory.
+ * All authenticated WebSocket connections, grouped by user.
+ * Presence (online) = at least one connection. Single node, in memory.
  */
 export class Hub {
   private readonly byUser = new Map<string, Set<WebSocket>>();
   private readonly userOf = new Map<WebSocket, string>();
-  /** Sitzung je Verbindung, damit eine Fernabmeldung (M6c) genau diese Verbindung schliesst. */
+  /** Session per connection, so a remote sign-out (M6c) closes exactly that connection. */
   private readonly sessionOf = new Map<WebSocket, string>();
   private readonly listeners = new Set<(userId: string, online: boolean) => void>();
 
@@ -61,7 +61,7 @@ export class Hub {
     for (const ws of this.userOf.keys()) if (ws !== except && ws.readyState === ws.OPEN) ws.send(text);
   }
 
-  /** Nutzer rauswerfen: Ereignis senden, dann alle seine Verbindungen schliessen. */
+  /** Throw a user out: send the event, then close all of their connections. */
   disconnectUser(userId: string, e: ServerEvent, code = 4010) {
     for (const ws of [...(this.byUser.get(userId) ?? [])]) {
       this.send(ws, e);
@@ -69,7 +69,7 @@ export class Hub {
     }
   }
 
-  /** Fernabmeldung (M6c): nur die Verbindungen dieser Sitzung schliessen. Der Client erkennt den Code und geht zum Login. */
+  /** Remote sign-out (M6c): close only the connections of this session. The client recognizes the code and goes to the login. */
   disconnectSession(sessionId: string, code = 4011, reason = "session_revoked") {
     for (const [ws, sid] of [...this.sessionOf]) if (sid === sessionId) ws.close(code, reason);
   }

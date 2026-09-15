@@ -1,10 +1,10 @@
 import { z } from "zod";
-// KOPIE-HINWEIS: liegt byte-identisch auch im Repo squorli-directory (packages/protocol/src); Quelle ist squorli-server, nach Aenderung kopieren.
+// COPY NOTE: also exists byte-identically in the squorli-directory repo (packages/protocol/src); the source is squorli-server, copy it over after any change.
 
-/** Grundbausteine, die Chat-Protokoll und Verzeichnisdienst teilen. */
+/** Basic building blocks shared by the chat protocol and the directory service. */
 export const Uuid = z.string().uuid();
 export const Iso = z.string().datetime();
-/** Oeffentlicher Schluessel als 64 Hex-Zeichen (32 Byte). */
+/** Public key as 64 hex characters (32 bytes). */
 export const PublicKey = z.string().regex(/^[0-9a-f]{64}$/, "64 hex chars");
-/** Signatur als 128 Hex-Zeichen (64 Byte). */
+/** Signature as 128 hex characters (64 bytes). */
 export const Signature = z.string().regex(/^[0-9a-f]{128}$/, "128 hex chars");

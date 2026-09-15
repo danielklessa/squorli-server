@@ -6,9 +6,9 @@ describe("VoiceGate", () => {
     const g = new VoiceGate(0.1, 300);
     expect(g.update(0.05, 0)).toBe(false);
     expect(g.update(0.2, 100)).toBe(true);
-    expect(g.update(0.01, 200)).toBe(true); // innerhalb der Nachlaufzeit
+    expect(g.update(0.01, 200)).toBe(true); // within the hangover time
     expect(g.update(0.01, 399)).toBe(true);
-    expect(g.update(0.01, 400)).toBe(false); // 300 ms nach dem letzten Pegel ueber der Schwelle
+    expect(g.update(0.01, 400)).toBe(false); // 300 ms after the last level above the threshold
   });
 
   it("extends the hangover while speech continues", () => {

@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * Entwicklungsstart mit Aufraeumen.
+ * Development start with cleanup.
  *
- *   pnpm dev            -> Container (Postgres, LiveKit) starten, App-Server + Web-Client starten,
- *                          beim Beenden (Ctrl+C, Absturz, Fenster zu) die Container wieder stoppen.
- *   pnpm dev --no-docker-> Container nicht anfassen (wenn du sie selbst verwaltest).
- *   pnpm dev --down     -> beim Beenden "compose down" statt "compose stop" (Container entfernen, Volume bleibt).
+ *   pnpm dev            -> start the containers (Postgres, LiveKit), start the app server + web client,
+ *                          and stop the containers again on exit (Ctrl+C, crash, window closed).
+ *   pnpm dev --no-docker-> do not touch the containers (when you manage them yourself).
+ *   pnpm dev --down     -> "compose down" instead of "compose stop" on exit (remove the containers, keep the volume).
  *
- * Plattformneutral (Windows/macOS/Linux), ohne Abhaengigkeiten. Windows-Besonderheit: Kindprozesse
- * (tsx watch, vite) haengen nicht am Prozessbaum, deshalb wird dort per taskkill /T aufgeraeumt.
+ * Platform-neutral (Windows/macOS/Linux), without dependencies. Windows quirk: child processes
+ * (tsx watch, vite) do not hang off the process tree, which is why cleanup there uses taskkill /T.
  */
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -17,8 +17,8 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-// Nur LIVEKIT_DEV_NODE_IP aus apps/server/.env fuer Compose lesen. Bewusst NICHT die ganze Datei in process.env laden:
-// die Apps erben unsere Umgebung, und fremde Werte (PORT, DATABASE_URL) landen sonst in jedem Kindprozess. Jede App laedt ihre eigene .env selbst.
+// Read only LIVEKIT_DEV_NODE_IP from apps/server/.env for Compose. Deliberately do NOT load the whole file into process.env:
+// the apps inherit our environment, and foreign values (PORT, DATABASE_URL) would otherwise land in every child process. Each app loads its own .env itself.
 const serverEnv = join(root, "apps", "server", ".env");
 const composeEnv = { ...process.env };
 if (!composeEnv.LIVEKIT_DEV_NODE_IP && existsSync(serverEnv)) {
@@ -36,8 +36,8 @@ const isWin = process.platform === "win32";
 const compose = (...a) =>
   spawnSync("docker", ["compose", "-f", composeFile, ...a], { cwd: root, stdio: "inherit", shell: isWin, env: composeEnv });
 
-// 1. Container hochfahren. Das Datenvolume traegt noch den Namen des frueheren Projekts (community-chat-dev) und ist in
-// compose.dev.yml als external deklariert; hier einmal anlegen, falls es fehlt (idempotent), sonst bricht compose up ab.
+// 1. Bring up the containers. The data volume still carries the former project's name (community-chat-dev) and is declared
+// as external in compose.dev.yml; create it here once if it is missing (idempotent), otherwise compose up fails.
 if (useDocker) {
   spawnSync("docker", ["volume", "create", "community-chat-dev_pgdata-dev"], { cwd: root, stdio: "ignore", shell: isWin });
   console.log("[dev] docker compose up -d (Postgres, LiveKit)");
@@ -48,17 +48,17 @@ if (useDocker) {
   }
 }
 
-// 2. Apps starten (Server + Web parallel). Der Verzeichnisdienst hat sein eigenes Repo (squorli-directory, dort pnpm dev).
-// Wird das Skript ueber "pnpm dev" aufgerufen, zeigt npm_execpath auf pnpms JS-Einstieg: dann pnpm direkt
-// mit node starten statt ueber pnpm.cmd + cmd.exe (das erzeugt bei Ctrl+C die Nachfrage "Batchvorgang abbrechen?").
+// 2. Start the apps (server + web in parallel). The directory service has its own repo (squorli-directory, run pnpm dev there).
+// When the script is invoked via "pnpm dev", npm_execpath points at pnpm's JS entry point: then start pnpm directly
+// with node instead of via pnpm.cmd + cmd.exe (which produces the "Terminate batch job?" prompt on Ctrl+C).
 const pnpmArgs = ["-r", "--parallel", "--filter", "./apps/*", "dev"];
 const viaNode = process.env.npm_execpath && /\.[cm]?js$/.test(process.env.npm_execpath);
 const apps = viaNode
   ? spawn(process.execPath, [process.env.npm_execpath, ...pnpmArgs], { cwd: root, stdio: "inherit", detached: !isWin })
   : spawn("pnpm", pnpmArgs, { cwd: root, stdio: "inherit", shell: isWin, detached: !isWin });
-// detached unter POSIX = eigene Prozessgruppe, damit process.kill(-pid) alle Kinder trifft.
+// detached on POSIX = its own process group, so process.kill(-pid) reaches all children.
 
-// 3. Aufraeumen, genau einmal
+// 3. Clean up, exactly once
 let cleaned = false;
 function cleanup(reason, code = 0) {
   if (cleaned) return;
@@ -67,7 +67,7 @@ function cleanup(reason, code = 0) {
 
   if (apps.exitCode === null && apps.pid) {
     if (isWin) spawnSync("taskkill", ["/T", "/F", "/PID", String(apps.pid)], { stdio: "ignore" });
-    else { try { process.kill(-apps.pid, "SIGTERM"); } catch { /* schon weg */ } }
+    else { try { process.kill(-apps.pid, "SIGTERM"); } catch { /* already gone */ } }
   }
 
   if (useDocker) {

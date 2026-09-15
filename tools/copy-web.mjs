@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Kopiert den gebauten Web-Client (apps/web/dist) nach apps/server/public, damit
- * `node apps/server/dist/index.js` ohne Docker den Client ausliefert. Teil von `pnpm build`.
- * Im Docker-Image macht das der Dockerfile-Schritt COPY ... ./public.
+ * Copies the built web client (apps/web/dist) to apps/server/public so that
+ * `node apps/server/dist/index.js` serves the client without Docker. Part of `pnpm build`.
+ * In the Docker image this is done by the Dockerfile step COPY ... ./public.
  */
 import { cpSync, existsSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";

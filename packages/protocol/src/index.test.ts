@@ -52,7 +52,7 @@ describe("permissions", () => {
     expect(hasPermission(Permission.ADMINISTRATOR, Permission.BAN_MEMBERS)).toBe(true);
   });
   it("checks masks", () => {
-    // Gast: nur sehen und Sprache; Mitglied: schreiben und streamen
+    // Guest: view and voice only; member: post and stream
     expect(hasPermission(DEFAULT_EVERYONE_PERMISSIONS, Permission.VIEW_CHANNELS)).toBe(true);
     expect(hasPermission(DEFAULT_EVERYONE_PERMISSIONS, Permission.CONNECT_VOICE)).toBe(true);
     expect(hasPermission(DEFAULT_EVERYONE_PERMISSIONS, Permission.SEND_MESSAGES)).toBe(false);
@@ -60,7 +60,7 @@ describe("permissions", () => {
     expect(hasPermission(DEFAULT_MEMBER_PERMISSIONS, Permission.SEND_MESSAGES)).toBe(true);
     expect(hasPermission(DEFAULT_MEMBER_PERMISSIONS, Permission.STREAM_VIDEO)).toBe(true);
     expect(hasPermission(DEFAULT_MEMBER_PERMISSIONS, Permission.KICK_MEMBERS)).toBe(false);
-    // Bitwerte sind Teil der Migrationen (0003/0004); nie umnummerieren.
+    // The bit values are part of the migrations (0003/0004); never renumber them.
     expect(DEFAULT_EVERYONE_PERMISSIONS).toBe(1152);
     expect(DEFAULT_MEMBER_PERMISSIONS).toBe(7616);
     expect(permissionNames(Permission.KICK_MEMBERS | Permission.BAN_MEMBERS)).toEqual(["KICK_MEMBERS", "BAN_MEMBERS"]);

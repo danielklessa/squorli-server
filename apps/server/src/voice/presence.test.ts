@@ -12,7 +12,7 @@ describe("VoicePresence", () => {
     expect(p.members("lobby").map((m) => m.displayName)).toEqual(["A", "B"]);
     p.leave("c1");
     expect(p.members("lobby")).toEqual([b]);
-    p.leave("c1"); // doppelt ist harmlos
+    p.leave("c1"); // doing it twice is harmless
     expect(p.channelOf("c2")).toBe("lobby");
   });
 

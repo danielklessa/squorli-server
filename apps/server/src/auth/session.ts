@@ -7,10 +7,10 @@ import { actorOf } from "../state";
 
 export type SessionUser = { userId: string; sessionId: string; publicKey: string; displayName: string | null; handle: string | null; handleCheckedAt: Date | null };
 
-/** last_used_at hoechstens alle 5 Minuten schreiben (Geraeteliste, M6c); nicht auf jeder Anfrage. */
+/** Write last_used_at at most every 5 minutes (device list, M6c); not on every request. */
 const TOUCH_INTERVAL_MS = 5 * 60_000;
 
-/** Wird von WS-Handshake und geschuetzten Routen genutzt. Liefert den Nutzer hinter einem Session-Token. */
+/** Used by the WS handshake and by protected routes. Returns the user behind a session token. */
 export async function resolveSession(db: Db, token: string): Promise<SessionUser | null> {
   const [row] = await db
     .select({ userId: sessions.userId, sessionId: sessions.id, expiresAt: sessions.expiresAt, lastUsedAt: sessions.lastUsedAt, publicKey: users.publicKey, displayName: users.displayName, handle: users.handle, handleCheckedAt: users.handleCheckedAt })
@@ -20,7 +20,7 @@ export async function resolveSession(db: Db, token: string): Promise<SessionUser
     .limit(1);
   if (!row || row.expiresAt.getTime() < Date.now()) return null;
   if (!row.lastUsedAt || Date.now() - row.lastUsedAt.getTime() > TOUCH_INTERVAL_MS) {
-    void db.update(sessions).set({ lastUsedAt: new Date() }).where(eq(sessions.token, token)).catch(() => { /* nur Anzeige, kein Grund zum Abbruch */ });
+    void db.update(sessions).set({ lastUsedAt: new Date() }).where(eq(sessions.token, token)).catch(() => { /* display only, no reason to abort */ });
   }
   return { userId: row.userId, sessionId: row.sessionId, publicKey: row.publicKey, displayName: row.displayName, handle: row.handle, handleCheckedAt: row.handleCheckedAt };
 }
@@ -30,7 +30,7 @@ function bearer(req: FastifyRequest): string | null {
   return auth?.startsWith("Bearer ") ? auth.slice(7) : null;
 }
 
-/** Bearer-Token aus dem Authorization-Header; antwortet selbst mit 401, wenn nichts Gueltiges da ist. */
+/** Bearer token from the Authorization header; sends a 401 itself if nothing valid is present. */
 export async function requireSession(db: Db, req: FastifyRequest, reply: FastifyReply): Promise<SessionUser | null> {
   const token = bearer(req);
   const session = token ? await resolveSession(db, token) : null;
@@ -43,7 +43,7 @@ export async function requireSession(db: Db, req: FastifyRequest, reply: Fastify
 
 export type MemberContext = SessionUser & { actor: Actor };
 
-/** Wie requireSession, zusaetzlich Mitgliedschaft und Rechte. 403 not_member, wenn gekickt/gebannt. */
+/** Like requireSession, plus membership and permissions. 403 not_member if kicked/banned. */
 export async function requireMember(db: Db, req: FastifyRequest, reply: FastifyReply): Promise<MemberContext | null> {
   const s = await requireSession(db, req, reply);
   if (!s) return null;

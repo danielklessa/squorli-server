@@ -13,7 +13,7 @@ import { compact } from "../util";
 const Params = { type: "object", properties: { id: { type: "string", format: "uuid" } }, required: ["id"] } as const;
 
 export async function registerChannelRoutes(app: FastifyInstance, db: Db, hub: Hub, presence: VoicePresence) {
-  // ---- Kategorien
+  // ---- Categories
   app.post("/api/categories", async (req, reply) => {
     const m = await requireMember(db, req, reply);
     if (!m) return;
@@ -44,11 +44,11 @@ export async function registerChannelRoutes(app: FastifyInstance, db: Db, hub: H
     if (!can(m.actor, Permission.MANAGE_CHANNELS)) return reply.code(403).send({ error: "forbidden" });
     const gone = await db.delete(categories).where(eq(categories.id, req.params.id)).returning({ id: categories.id });
     if (!gone.length) return reply.code(404).send({ error: "not_found" });
-    await broadcastStructure(db, hub, ["categories", "channels"]); // Kanaele verlieren ihre Kategorie (FK set null)
+    await broadcastStructure(db, hub, ["categories", "channels"]); // channels lose their category (FK set null)
     return { ok: true };
   });
 
-  // ---- Kanaele
+  // ---- Channels
   app.post("/api/channels", async (req, reply) => {
     const m = await requireMember(db, req, reply);
     if (!m) return;

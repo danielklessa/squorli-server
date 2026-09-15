@@ -11,7 +11,7 @@ export function createDb(url: string) {
   return { db, client };
 }
 
-/** Migrationen liegen in ./drizzle und werden beim Start eingespielt. */
+/** Migrations live in ./drizzle and are applied at startup. */
 export async function runMigrations(db: Db, folder: string) {
   await migrate(db, { migrationsFolder: folder });
 }

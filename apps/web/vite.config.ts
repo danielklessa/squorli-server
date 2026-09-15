@@ -1,8 +1,8 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// Im Dev laeuft der App-Server auf 3000; alles unter /api wird dorthin durchgereicht,
-// damit Cookies/Origin wie in Produktion aussehen (eine Domain).
+// In dev the app server runs on 3000; everything under /api is proxied there
+// so cookies/origin look like they do in production (a single domain).
 export default defineConfig({
   plugins: [react()],
   server: {

@@ -4,35 +4,36 @@ import { loadVoiceSettings, saveVoiceSettings, type VoiceSettings } from "./voic
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 import { Icon } from "./Icon";
 import { BLUR_OPTIONS } from "./CameraPicker";
+import { t, tOr } from "./i18n";
 
 type Props = {
   client: VoiceClient;
   voice: VoiceState;
   channel: Channel | null;
-  /** Name des Servers der Sprachverbindung, wenn gerade ein anderer Server angezeigt wird (Multi-Server-Client); sonst null. */
+  /** Name of the voice connection's server when a different server is currently displayed (multi-server client); otherwise null. */
   serverName: string | null;
   displayName: string;
   onLeave: () => Promise<void>;
   onOpenProfile: () => void;
-  /** Buehne (Kacheln) im Hauptbereich zeigen; null, wenn sie schon offen ist. */
+  /** Show the stage (tiles) in the main area; null when it is already open. */
   onOpenStage: (() => void) | null;
   canStream: boolean;
-  /** Aenderungen an den Einstellungen nach oben melden (Kamera-Geraet/Qualitaet braucht die Buehne). */
+  /** Report settings changes upwards (the stage needs the camera device/quality). */
   onSettings?: (s: VoiceSettings) => void;
   onToggleCamera: () => Promise<void>;
 };
 
 type SettingsTab = "voice" | "devices" | "camera";
 const SETTINGS_TABS: { id: SettingsTab; label: string; icon: string }[] = [
-  { id: "voice", label: "Sprechen", icon: "mic" },
-  { id: "devices", label: "Geräte", icon: "headphones" },
-  { id: "camera", label: "Kamera", icon: "video" },
+  { id: "voice", label: t("settings.tab.voice"), icon: "mic" },
+  { id: "devices", label: t("settings.tab.devices"), icon: "headphones" },
+  { id: "camera", label: t("settings.tab.camera"), icon: "video" },
 ];
 
 const isTypingTarget = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
 
-/** Unterer Bereich der Seitenleiste: eigener Name, Sprachstatus, Stumm, Verlassen, Einstellungen. */
+/** Bottom area of the sidebar: your own name, voice status, mute, leave, settings. */
 export function VoiceDock({ client, voice, channel, serverName, displayName, onLeave, onOpenProfile, onOpenStage, canStream, onSettings, onToggleCamera }: Props) {
   const [settings, setSettings] = useState<VoiceSettings>(() => loadVoiceSettings());
   const [showSettings, setShowSettings] = useState(false);
@@ -67,7 +68,7 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, onL
     return () => { alive = false; navigator.mediaDevices?.removeEventListener("devicechange", load); };
   }, [showSettings, joined]);
 
-  // Push-to-Talk: nur solange der Tab den Fokus hat (Plattformgrenze im Browser, PLAN 3.5).
+  // Push-to-talk: only while the tab has focus (a platform limit in the browser, PLAN 3.5).
   useEffect(() => {
     if (!joined || settings.mode !== "ptt") { client.setPttHeld(false); return; }
     const down = (e: KeyboardEvent) => {
@@ -96,38 +97,38 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, onL
       {joined && (
         <div className="dock-voice">
           <div className="dock-status">
-            <span className={voice.status === "connected" ? "ok" : "warn"}>{voice.status === "connected" ? "Sprache verbunden" : voice.status}</span>
+            <span className={voice.status === "connected" ? "ok" : "warn"}>{voice.status === "connected" ? t("dock.connected") : tOr(`conn.${voice.status}`, voice.status)}</span>
             <span className="muted"> · <Icon name="volume-2" /> {serverName ? `${serverName} / ` : ""}{channel?.name ?? "…"}</span>
-            {!voice.canPlayback && <button className="small warn" title="Der Browser blockiert die Wiedergabe bis zu einem Klick" onClick={() => client.startAudio()}>Ton freigeben</button>}
-            {voice.status === "connected" && voice.audioContext !== "running" && voice.audioContext !== "none" && <button className="small warn" title="Der Browser hat den Audio-Kontext angehalten; Klick gibt Mikrofon und Sprecheranzeige frei" onClick={() => client.prepareAudio()}>Mikrofon freigeben</button>}
-            {onOpenStage && <button className="small secondary" title="Kacheln und Bildschirmfreigaben anzeigen" onClick={onOpenStage}>Ansicht</button>}
+            {!voice.canPlayback && <button className="small warn" title={t("dock.unblockAudioHint")} onClick={() => client.startAudio()}>{t("dock.unblockAudio")}</button>}
+            {voice.status === "connected" && voice.audioContext !== "running" && voice.audioContext !== "none" && <button className="small warn" title={t("dock.unblockMicHint")} onClick={() => client.prepareAudio()}>{t("dock.unblockMic")}</button>}
+            {onOpenStage && <button className="small secondary" title={t("dock.stageHint")} onClick={onOpenStage}>{t("dock.stage")}</button>}
           </div>
           {voice.error && <p className="error small">{voice.error}</p>}
-          {voice.notice && <p className="warn-box small">{voice.notice} <button className="icon" title="Ausblenden" onClick={() => client.setNotice(null)}><Icon name="x" /></button></p>}
-          <div className="meter small-meter" title="Mikrofonpegel">
+          {voice.notice && <p className="warn-box small">{voice.notice} <button className="icon" title={t("common.dismiss")} onClick={() => client.setNotice(null)}><Icon name="x" /></button></p>}
+          <div className="meter small-meter" title={t("dock.micLevel")}>
             <div className="meter-fill" style={{ width: `${levelPct}%` }} />
             {settings.mode === "vad" && <div className="meter-threshold" style={{ left: `${thresholdPct}%` }} />}
           </div>
-          {/* Schnellzugriffe der Sprachverbindung: eigener Bereich oberhalb der Namenszeile */}
+          {/* quick actions of the voice connection: its own area above the name row */}
           <div className="dock-row dock-controls">
-            <button className={`icon ${voice.micMuted ? "danger" : ""}`} title={voice.micMuted ? (voice.deafened ? "Ton und Mikrofon wieder an" : "Mikrofon wieder an") : "Mikrofon stummschalten"} onClick={() => client.setMuted(!voice.micMuted)}><Icon name={voice.micMuted ? "mic-off" : "mic"} /></button>
-            <button className={`icon ${voice.deafened ? "danger" : ""}`} title={voice.deafened ? "Ton wieder an" : "Ton aus (schaltet auch das Mikrofon stumm)"} onClick={() => client.setDeafened(!voice.deafened)}><Icon name={voice.deafened ? "headphone-off" : "headphones"} /></button>
-            {canStream && <button className={`icon ${voice.cameraOn ? "on" : ""}`} title={voice.cameraOn ? "Kamera aus" : "Kamera an"} onClick={() => { void onToggleCamera(); }}><Icon name={voice.cameraOn ? "video" : "video-off"} /></button>}
+            <button className={`icon ${voice.micMuted ? "danger" : ""}`} title={voice.micMuted ? (voice.deafened ? t("voice.unmuteAll") : t("voice.unmute")) : t("voice.mute")} onClick={() => client.setMuted(!voice.micMuted)}><Icon name={voice.micMuted ? "mic-off" : "mic"} /></button>
+            <button className={`icon ${voice.deafened ? "danger" : ""}`} title={voice.deafened ? t("voice.undeafen") : t("voice.deafen")} onClick={() => client.setDeafened(!voice.deafened)}><Icon name={voice.deafened ? "headphone-off" : "headphones"} /></button>
+            {canStream && <button className={`icon ${voice.cameraOn ? "on" : ""}`} title={voice.cameraOn ? t("voice.cameraOff") : t("voice.cameraOnBtn")} onClick={() => { void onToggleCamera(); }}><Icon name={voice.cameraOn ? "video" : "video-off"} /></button>}
             <span className="spacer" />
-            <button className="icon hangup" title="Sprachkanal verlassen (auflegen)" onClick={() => onLeave()}><Icon name="phone" rotate={135} /></button>
+            <button className="icon hangup" title={t("voice.leave")} onClick={() => onLeave()}><Icon name="phone" rotate={135} /></button>
           </div>
         </div>
       )}
       {!joined && voice.error && <p className="error small">{voice.error}</p>}
       <div className="dock-row">
-        <button className="dock-name" onClick={onOpenProfile} title="Anzeigename ändern">{displayName}</button>
-        <button className="icon" title="Spracheinstellungen" onClick={() => setShowSettings(true)}><Icon name="settings" /></button>
+        <button className="dock-name" onClick={onOpenProfile} title={t("dock.changeName")}>{displayName}</button>
+        <button className="icon" title={t("dock.settings")} onClick={() => setShowSettings(true)}><Icon name="settings" /></button>
       </div>
 
       {showSettings && (
         <div className="modal-backdrop" onMouseDown={() => setShowSettings(false)}>
         <div className="modal settings-modal" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
-        <header className="modal-head"><h2>Einstellungen</h2><span className="spacer" /><button className="icon" title="Schließen" onClick={() => setShowSettings(false)}><Icon name="x" /></button></header>
+        <header className="modal-head"><h2>{t("settings.title")}</h2><span className="spacer" /><button className="icon" title={t("common.close")} onClick={() => setShowSettings(false)}><Icon name="x" /></button></header>
         <div className="settings-layout">
           <nav className="settings-nav">
             {SETTINGS_TABS.map((t) => (
@@ -137,33 +138,33 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, onL
           <div className="settings-body stack">
             {tab === "voice" && (
               <>
-                <h3>Sprechen</h3>
+                <h3>{t("settings.tab.voice")}</h3>
                 <div className="row">
-                  <label className="check"><input type="radio" checked={settings.mode === "vad"} onChange={() => update({ mode: "vad" })} /> Sprachaktivierung</label>
-                  <label className="check"><input type="radio" checked={settings.mode === "ptt"} onChange={() => update({ mode: "ptt" })} /> Push-to-Talk</label>
+                  <label className="check"><input type="radio" checked={settings.mode === "vad"} onChange={() => update({ mode: "vad" })} /> {t("settings.vad")}</label>
+                  <label className="check"><input type="radio" checked={settings.mode === "ptt"} onChange={() => update({ mode: "ptt" })} /> {t("settings.ptt")}</label>
                 </div>
                 {settings.mode === "vad" ? (
                   <>
                     <label className="stack">
-                      Schwelle
+                      {t("settings.threshold")}
                       <input type="range" min={0.005} max={0.25} step={0.005} value={settings.vadThreshold} onChange={(e) => update({ vadThreshold: Number(e.target.value) })} />
                     </label>
                     {joined && (
-                      <div className="meter" title="Mikrofonpegel">
+                      <div className="meter" title={t("dock.micLevel")}>
                         <div className="meter-fill" style={{ width: `${levelPct}%` }} />
                         <div className="meter-threshold" style={{ left: `${thresholdPct}%` }} />
                       </div>
                     )}
                     <label className="stack">
-                      Nachlauf ({settings.vadHangoverMs} ms)
+                      {t("settings.hangover", { ms: settings.vadHangoverMs })}
                       <input type="range" min={100} max={1500} step={50} value={settings.vadHangoverMs} onChange={(e) => update({ vadHangoverMs: Number(e.target.value) })} />
-                      <span className="muted small">Wie lange das Mikrofon nach dem letzten Wort offen bleibt, damit Wortenden nicht abgeschnitten werden.</span>
+                      <span className="muted small">{t("settings.hangoverHint")}</span>
                     </label>
                   </>
                 ) : (
                   <div className="stack">
-                    <span>Taste: <kbd>{settings.pttKey}</kbd> <button className="secondary small" onClick={() => setCapturingKey(true)}>{capturingKey ? "Taste drücken …" : "ändern"}</button></span>
-                    <span className="muted small">Im Browser nur, solange dieser Tab den Fokus hat. Globales Tastenkürzel: Desktop-Client (M4).</span>
+                    <span>{t("settings.key")} <kbd>{settings.pttKey}</kbd> <button className="secondary small" onClick={() => setCapturingKey(true)}>{capturingKey ? t("settings.pressKey") : t("settings.change")}</button></span>
+                    <span className="muted small">{t("settings.pttHint")}</span>
                   </div>
                 )}
               </>
@@ -171,66 +172,66 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, onL
 
             {tab === "devices" && (
               <>
-                <h3>Eingabe</h3>
+                <h3>{t("settings.input")}</h3>
                 <label className="stack">
-                  Mikrofon
+                  {t("settings.microphone")}
                   <select value={voice.inputDeviceId ?? settings.inputDeviceId ?? ""}
                     onChange={(e) => { const id = e.target.value || null; update({ inputDeviceId: id }); void client.setInputDevice(id); }}>
-                    <option value="">Standard</option>
+                    <option value="">{t("settings.default")}</option>
                     {devices.inputs.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId}</option>)}
                   </select>
                 </label>
-                <h3>Ausgabe</h3>
+                <h3>{t("settings.output")}</h3>
                 <label className="stack">
-                  Sprache
+                  {t("settings.voiceOut")}
                   <select value={settings.outputDeviceId ?? ""} disabled={devices.outputs.length === 0}
                     onChange={(e) => { const id = e.target.value || null; update({ outputDeviceId: id }); if (id) void client.setOutputDevice(id); }}>
-                    <option value="">Standard</option>
+                    <option value="">{t("settings.default")}</option>
                     {devices.outputs.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId}</option>)}
                   </select>
-                  {devices.outputs.length === 0 && <span className="muted small">Ausgabegerät wählen: nur Chromium.</span>}
+                  {devices.outputs.length === 0 && <span className="muted small">{t("settings.outputChromium")}</span>}
                 </label>
                 <label className="stack">
-                  Bildschirm-Ton
+                  {t("settings.screenAudio")}
                   <select value={settings.screenOutputDeviceId ?? ""} disabled={devices.outputs.length === 0}
                     onChange={(e) => { const id = e.target.value || null; update({ screenOutputDeviceId: id }); void client.setScreenOutputDevice(id); }}>
-                    <option value="">Wie Sprache</option>
+                    <option value="">{t("settings.sameAsVoice")}</option>
                     {devices.outputs.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId}</option>)}
                   </select>
-                  <span className="muted small">Ton geteilter Bildschirme getrennt ausgeben, z. B. auf die Lautsprecher statt ins Headset.</span>
+                  <span className="muted small">{t("settings.screenAudioHint")}</span>
                 </label>
-                {!joined && <span className="muted small">Geräte-Namen erscheinen nach der ersten Mikrofonfreigabe.</span>}
+                {!joined && <span className="muted small">{t("settings.deviceNamesHint")}</span>}
               </>
             )}
 
             {tab === "camera" && (
               <>
-                <h3>Gerät</h3>
+                <h3>{t("settings.device")}</h3>
                 <label className="stack">
-                  Kamera
+                  {t("settings.tab.camera")}
                   <select value={settings.cameraDeviceId ?? ""}
                     onChange={(e) => { const id = e.target.value || null; update({ cameraDeviceId: id }); void client.setCameraDevice(id); }}>
-                    <option value="">Standard</option>
+                    <option value="">{t("settings.default")}</option>
                     {devices.cameras.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId}</option>)}
                   </select>
-                  <span className="muted small">Vorauswahl. Beim Einschalten fragt der Client nach Kamera und Hintergrund.</span>
+                  <span className="muted small">{t("settings.cameraPreselect")}</span>
                 </label>
-                <h3>Bild</h3>
+                <h3>{t("settings.picture")}</h3>
                 <label className="stack">
-                  Qualität
+                  {t("settings.quality")}
                   <select value={settings.cameraQuality} onChange={(e) => { const q = e.target.value as "360p" | "720p"; update({ cameraQuality: q }); if (voice.cameraOn) void client.setCameraEnabled(true, undefined, q); }}>
-                    <option value="720p">720p (Standard, bis ~1,7 Mbit/s)</option>
-                    <option value="360p">360p (schwache Leitung, bis ~0,4 Mbit/s)</option>
+                    <option value="720p">{t("settings.q720")}</option>
+                    <option value="360p">{t("settings.q360")}</option>
                   </select>
-                  <span className="muted small">Empfänger bekommen automatisch die Stufe, die zu ihrer Kachelgröße passt (Simulcast).</span>
+                  <span className="muted small">{t("settings.qualityHint")}</span>
                 </label>
                 <label className="stack">
-                  Hintergrund
+                  {t("settings.background")}
                   <select value={settings.cameraBlur} disabled={!VoiceClient.supportsBlur()}
                     onChange={(e) => { const v = Number(e.target.value); update({ cameraBlur: v }); if (voice.cameraOn) void client.setCameraBlur(v); }}>
                     {BLUR_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
-                  <span className="muted small">{VoiceClient.supportsBlur() ? "Rechnet im Browser (MediaPipe); kostet etwas CPU. Modell wird beim ersten Einschalten geladen." : "Dieser Browser unterstützt keine Hintergrund-Effekte."}</span>
+                  <span className="muted small">{VoiceClient.supportsBlur() ? t("settings.blurHint") : t("settings.noBlur")}</span>
                 </label>
               </>
             )}

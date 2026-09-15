@@ -2,6 +2,7 @@ import { Permission, displayNameOf, hasPermission, type Channel, type Member } f
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { VoiceClient, explainScreenAudio, isChromium, type VideoTile, type VoiceParticipant, type VoiceState } from "./voice/voiceClient";
 import { Icon } from "./Icon";
+import { t } from "./i18n";
 
 type Props = {
   client: VoiceClient;
@@ -9,7 +10,7 @@ type Props = {
   channel: Channel;
   members: Member[];
   myPermissions: number;
-  /** Kamera an/aus; fragt bei mehreren Kameras nach (App.tsx). */
+  /** Camera on/off; asks when there are several cameras (App.tsx). */
   onToggleCamera: () => Promise<void>;
   onToggleBlur: () => Promise<void>;
   onLeave: () => Promise<void>;
@@ -19,20 +20,20 @@ type Layout = "grid" | "focus";
 type Item = { key: string; participant: VoiceParticipant; tile: VideoTile | null; kind: "camera" | "screen" };
 
 /**
- * Buehne eines Sprachkanals (M3): eine Kachel je Teilnehmer (Kamera oder Avatar) plus eine je Bildschirmfreigabe.
- * Standard ist die Kachelansicht; die Kachelgroesse wird so berechnet, dass alle in den sichtbaren Bereich passen
- * (kein Scrollen). Klick auf eine Kachel vergroessert sie (Fokus), Klick auf die grosse Kachel fuehrt zurueck.
- * "Sprecher" folgt ohne Anheften dem aktiven Sprecher bzw. der neuesten Bildschirmfreigabe.
- * Die Empfangsqualitaet folgt der Kachelgroesse (adaptiveStream im Sprach-Kern), hier muss nur das <video> passend gross sein.
+ * Stage of a voice channel (M3): one tile per participant (camera or avatar) plus one per screen share.
+ * The default is the tile view; the tile size is computed so that all of them fit into the visible area
+ * (no scrolling). Clicking a tile enlarges it (focus), clicking the large tile goes back.
+ * "Speaker" follows the active speaker or the newest screen share without pinning.
+ * Receive quality follows the tile size (adaptiveStream in the voice core); here the <video> only has to have the right size.
  */
 export function VoiceStage({ client, voice, channel, members, myPermissions, onToggleCamera, onToggleBlur, onLeave }: Props) {
-  // Namen aus der Mitgliederliste des Servers (kommt bei jeder Umbenennung sofort per WS), nicht aus dem LiveKit-Token,
-  // das nur beim Beitritt entsteht. Unbekannte Identitaeten (Bots, "extern") behalten den LiveKit-Namen.
+  // Names from the server's member list (arrives via WS immediately on every rename), not from the LiveKit token,
+  // which is only created on joining. Unknown identities (bots, "external") keep the LiveKit name.
   const participants = voice.participants.map((p) => {
     const m = members.find((x) => x.userId === p.identity);
     return m ? { ...p, name: displayNameOf(m) } : p;
   });
-  const [layout, setLayout] = useState<Layout>("grid"); // immer mit Kacheln starten
+  const [layout, setLayout] = useState<Layout>("grid"); // always start with tiles
   const [pinned, setPinned] = useState<string | null>(null);
   const [lastSpeaker, setLastSpeaker] = useState<string | null>(null);
   const canStream = hasPermission(myPermissions, Permission.STREAM_VIDEO);
@@ -51,7 +52,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, onT
     const participant = participants.find((p) => p.identity === t.identity);
     if (participant) items.push({ key: t.id, participant, tile: t, kind: "screen" });
   }
-  // Neue Bildschirmfreigabe rueckt automatisch in den Fokus, solange nichts angeheftet ist.
+  // A new screen share automatically moves into focus as long as nothing is pinned.
   const screens = items.filter((i) => i.kind === "screen");
   const lastScreen = screens[screens.length - 1];
   const focusKey = (pinned && items.some((i) => i.key === pinned) ? pinned : null)
@@ -65,7 +66,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, onT
   const screenHint = explainScreenAudio(voice);
   const grid = useFittedGrid(items.length);
 
-  // Klick auf eine Kachel: gross zeigen. Klick auf die grosse Kachel: zurueck zu den Kacheln.
+  // Click a tile: show it large. Click the large tile: back to the tiles.
   const focusOn = (key: string) => { setPinned(key); setLayout("focus"); };
   const unfocus = () => { setPinned(null); setLayout("grid"); };
 
@@ -73,21 +74,21 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, onT
     <section className="stage">
       <header className="chat-head">
         <span className="channel-icon"><Icon name="volume-2" /></span><strong>{channel.name}</strong>
-        <span className="muted small">· {voice.participants.length} Teilnehmer{voice.audioProfile && ` · Opus ${voice.audioProfile.bitrate} kbit/s ${voice.audioProfile.stereo ? "Stereo" : "Mono"}`}</span>
+        <span className="muted small">· {t("stage.participants", { n: voice.participants.length })}{voice.audioProfile && ` · Opus ${voice.audioProfile.bitrate} kbit/s ${voice.audioProfile.stereo ? t("stage.stereo") : t("stage.mono")}`}</span>
         <span className="spacer" />
         <div className="seg">
-          <button className={layout === "focus" ? "active" : ""} title="Sprecher gross, andere klein" onClick={() => setLayout("focus")}>Sprecher</button>
-          <button className={layout === "grid" ? "active" : ""} title="Alle gleich gross" onClick={() => setLayout("grid")}>Kacheln</button>
+          <button className={layout === "focus" ? "active" : ""} title={t("stage.speakerHint")} onClick={() => setLayout("focus")}>{t("stage.speaker")}</button>
+          <button className={layout === "grid" ? "active" : ""} title={t("stage.gridHint")} onClick={() => setLayout("grid")}>{t("stage.grid")}</button>
         </div>
       </header>
 
       {voice.error && <p className="error small stage-hint">{voice.error}</p>}
-      {voice.notice && <p className="warn-box small stage-hint">{voice.notice} <button className="icon" title="Ausblenden" onClick={() => client.setNotice(null)}><Icon name="x" /></button></p>}
+      {voice.notice && <p className="warn-box small stage-hint">{voice.notice} <button className="icon" title={t("common.dismiss")} onClick={() => client.setNotice(null)}><Icon name="x" /></button></p>}
       {screenHint && <p className="warn-box small stage-hint">{screenHint}</p>}
-      {!voice.canPlayback && <p className="warn-box small stage-hint">Ton ist blockiert, bis du einmal klickst. <button className="small" onClick={() => client.startAudio()}>Ton freigeben</button></p>}
+      {!voice.canPlayback && <p className="warn-box small stage-hint">{t("stage.audioBlocked")} <button className="small" onClick={() => client.startAudio()}>{t("dock.unblockAudio")}</button></p>}
 
       {items.length === 0 ? (
-        <div className="stage-empty muted">Noch niemand im Kanal.</div>
+        <div className="stage-empty muted">{t("stage.empty")}</div>
       ) : layout === "grid" || !focus ? (
         <div className="stage-grid" ref={grid.ref}>
           <div className="stage-grid-inner" style={{ gridTemplateColumns: `repeat(${grid.cols}, ${grid.tileWidth}px)` }}>
@@ -106,25 +107,25 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, onT
       )}
 
       <footer className="stage-bar">
-        <button className={`bar-btn ${voice.micMuted ? "off" : ""}`} title={voice.micMuted ? (voice.deafened ? "Ton und Mikrofon wieder an" : "Mikrofon wieder an") : "Mikrofon stummschalten"} onClick={() => client.setMuted(!voice.micMuted)}><Icon name={voice.micMuted ? "mic-off" : "mic"} /></button>
-        <button className={`bar-btn ${voice.deafened ? "off" : ""}`} title={voice.deafened ? "Ton wieder an" : "Ton aus (schaltet auch das Mikrofon stumm)"} onClick={() => client.setDeafened(!voice.deafened)}><Icon name={voice.deafened ? "headphone-off" : "headphones"} /></button>
-        <button className={`bar-btn ${voice.cameraOn ? "on" : ""}`} disabled={!canStream} title={canStream ? (voice.cameraOn ? "Kamera aus" : "Kamera an") : "Kein Recht: Kamera und Bildschirm teilen"}
+        <button className={`bar-btn ${voice.micMuted ? "off" : ""}`} title={voice.micMuted ? (voice.deafened ? t("voice.unmuteAll") : t("voice.unmute")) : t("voice.mute")} onClick={() => client.setMuted(!voice.micMuted)}><Icon name={voice.micMuted ? "mic-off" : "mic"} /></button>
+        <button className={`bar-btn ${voice.deafened ? "off" : ""}`} title={voice.deafened ? t("voice.undeafen") : t("voice.deafen")} onClick={() => client.setDeafened(!voice.deafened)}><Icon name={voice.deafened ? "headphone-off" : "headphones"} /></button>
+        <button className={`bar-btn ${voice.cameraOn ? "on" : ""}`} disabled={!canStream} title={canStream ? (voice.cameraOn ? t("voice.cameraOff") : t("voice.cameraOnBtn")) : t("stage.noStreamPermission")}
           onClick={() => { void onToggleCamera(); }}><Icon name={voice.cameraOn ? "video" : "video-off"} /></button>
         {voice.cameraOn && VoiceClient.supportsBlur() && (
-          <button className={`bar-btn ${voice.cameraBlur > 0 ? "on" : ""}`} title={voice.cameraBlur > 0 ? "Hintergrund wieder scharf" : "Hintergrund unscharf machen"} onClick={() => { void onToggleBlur(); }}><Icon name="wand-sparkles" /></button>
+          <button className={`bar-btn ${voice.cameraBlur > 0 ? "on" : ""}`} title={voice.cameraBlur > 0 ? t("stage.unblur") : t("stage.blur")} onClick={() => { void onToggleBlur(); }}><Icon name="wand-sparkles" /></button>
         )}
-        <button className={`bar-btn ${voice.screenOn ? "on" : ""}`} disabled={!canStream} title={canStream ? (voice.screenOn ? "Bildschirmfreigabe beenden" : isChromium() ? "Bildschirm teilen (mit Ton)" : "Bildschirm teilen (ohne Ton in diesem Browser)") : "Kein Recht: Kamera und Bildschirm teilen"}
+        <button className={`bar-btn ${voice.screenOn ? "on" : ""}`} disabled={!canStream} title={canStream ? (voice.screenOn ? t("stage.stopShare") : isChromium() ? t("stage.shareWithAudio") : t("stage.shareNoAudio")) : t("stage.noStreamPermission")}
           onClick={() => client.setScreenShareEnabled(!voice.screenOn)}><Icon name={voice.screenOn ? "screen-share-off" : "screen-share"} /></button>
-        <button className="bar-btn leave" title="Sprachkanal verlassen (auflegen)" onClick={() => onLeave()}><Icon name="phone" rotate={135} /></button>
+        <button className="bar-btn leave" title={t("voice.leave")} onClick={() => onLeave()}><Icon name="phone" rotate={135} /></button>
       </footer>
     </section>
   );
 }
 
-/** Berechnet Spalten und Kachelbreite (16:9), damit n Kacheln ohne Scrollen in den Container passen. */
+/** Computes columns and tile width (16:9) so n tiles fit into the container without scrolling. */
 function useFittedGrid(n: number) {
-  // Callback-Ref statt useRef: der Container wird erst eingehaengt, wenn Teilnehmer da sind, und beim Umschalten
-  // der Ansicht neu erzeugt. Nur so wird jedes Mal gemessen (sonst blieben die Kacheln auf der Notgroesse).
+  // Callback ref instead of useRef: the container is only mounted once participants are there, and is recreated
+  // when switching views. Only this way is it measured every time (otherwise the tiles would stay at the fallback size).
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const ref = useCallback((node: HTMLDivElement | null) => setEl(node), []);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -138,7 +139,7 @@ function useFittedGrid(n: number) {
   }, [el]);
   const gap = 8, pad = 12;
   const W = Math.max(0, size.w - 2 * pad), H = Math.max(0, size.h - 2 * pad);
-  // Ohne gemessene Hoehe (erster Frame) nur nach Breite aufteilen, damit nie 0 px herauskommen.
+  // Without a measured height (first frame) divide by width only, so the result is never 0 px.
   let best = { cols: Math.max(1, Math.ceil(Math.sqrt(n))), tileWidth: Math.max(160, Math.floor(W / Math.max(1, Math.ceil(Math.sqrt(n))))) };
   if (n > 0 && W > 0 && H > 0) {
     let bestArea = 0;
@@ -158,24 +159,24 @@ function Tile({ item, client, big, pinned, onClick }: { item: Item; client: Voic
   const [volume, setVolume] = useState(1);
   const cls = ["tile", item.kind, p.speaking && item.kind === "camera" ? "speaking" : "", big ? "big" : "", tile ? "" : "avatar"].join(" ");
   return (
-    <div className={cls} onClick={onClick} title={big ? "Klick: zurück zu den Kacheln" : "Klick: groß anzeigen"}>
+    <div className={cls} onClick={onClick} title={big ? t("stage.backToGrid") : t("stage.enlarge")}>
       {tile ? <Video tile={tile} /> : <div className="avatar-circle">{initials(p.name)}</div>}
       <div className="tile-label">
-        <span>{item.kind === "screen" && <><Icon name="monitor" /> </>}{p.isLocal ? `${p.name} (du)` : p.name}</span>
-        {item.kind === "camera" && p.micMuted && <> <Icon name="mic-off" title="Mikrofon stumm" /></>}
-        {item.kind === "camera" && p.deafened && <> <Icon name="headphone-off" title="Ton aus" /></>}
-        {item.kind === "screen" && tile?.hasAudio && <> <Icon name="volume-2" title="mit Ton" /></>}
-        {pinned && <> <Icon name="pin" title="angeheftet" /></>}
+        <span>{item.kind === "screen" && <><Icon name="monitor" /> </>}{p.isLocal ? `${p.name} ${t("members.you")}` : p.name}</span>
+        {item.kind === "camera" && p.micMuted && <> <Icon name="mic-off" title={t("voice.micMuted")} /></>}
+        {item.kind === "camera" && p.deafened && <> <Icon name="headphone-off" title={t("voice.deafened")} /></>}
+        {item.kind === "screen" && tile?.hasAudio && <> <Icon name="volume-2" title={t("stage.withAudio")} /></>}
+        {pinned && <> <Icon name="pin" title={t("stage.pinned")} /></>}
       </div>
       {item.kind === "screen" && tile?.audio && (
-        <input className="tile-volume" type="range" min={0} max={1} step={0.05} value={volume} title="Lautstärke des Bildschirm-Tons"
+        <input className="tile-volume" type="range" min={0} max={1} step={0.05} value={volume} title={t("stage.screenVolume")}
           onClick={(e) => e.stopPropagation()} onChange={(e) => { const v = Number(e.target.value); setVolume(v); client.setScreenAudioVolume(p.identity, v); }} />
       )}
     </div>
   );
 }
 
-/** Haengt den LiveKit-Track an ein <video>; adaptiveStream misst dessen Groesse fuer die Simulcast-Stufe. */
+/** Attaches the LiveKit track to a <video>; adaptiveStream measures its size to pick the simulcast layer. */
 function Video({ tile }: { tile: VideoTile }) {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {

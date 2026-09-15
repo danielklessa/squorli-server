@@ -13,7 +13,7 @@ describe("dm (M7): E2E-Verschluesselung", () => {
     const kB = await deriveDmKey(seedB, pubB, pubA);
     const sealed = await sealDm(kA, pubA, pubB, ID, { text: "Hallo Bö" });
     expect(await openDm(kB, { ...sealed, from: pubA, to: pubB, id: ID })).toEqual({ text: "Hallo Bö" });
-    // Der Absender liest seine eigene Nachricht (Verlauf auf allen Geraeten).
+    // The sender reads their own message (history on all devices).
     expect(await openDm(kA, { ...sealed, from: pubA, to: pubB, id: ID })).toEqual({ text: "Hallo Bö" });
   });
   it("rejects a third party and any swapped field (AAD)", async () => {

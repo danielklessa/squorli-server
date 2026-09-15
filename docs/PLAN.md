@@ -1,5 +1,9 @@
 # Project Plan: Self-Hosted Community Chat with Voice and Video
 
+## Current product identity (15 September 2026)
+
+Squorli Server is the open-source server and browser client; its specific license remains to be selected. Squorli Directory is a separately operated, non-open-source service at https://directory.squorli.com. The public German/English website for https://squorli.com lives in `../squorli-website` (Astro/Vite) and contains English installation documentation. Shared product wording and synchronization rules: [brand/PRODUCT.md](brand/PRODUCT.md). Keep all three brand packages and runtime asset copies synchronized. Historical milestones and target capacities below are planning records, not current production guarantees; the current implementation status is in AGENTS.md.
+
 Status: 13 September 2026 · Draft v0.3 · Solo development · Open source
 
 ---

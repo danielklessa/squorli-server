@@ -7,9 +7,9 @@ import type { Db } from "./db";
 import { members, serverSettings, users } from "./db/schema";
 import { SETTINGS_ID } from "./state";
 
-/** So lange gilt der gecachte Verzeichnis-Stand als frisch; danach erneuert GET /api/me ihn (Name von der Kontoseite geaendert). */
+/** For this long the cached directory state counts as fresh; after that GET /api/me refreshes it (name changed on the account page). */
 const REFRESH_AFTER_MS = 5 * 60_000;
-/** Periodischer Abgleich aller Nutzer (Namen, die auf der Kontoseite geaendert wurden, kommen so ohne Neuladen an). */
+/** Periodic reconciliation of all users (names changed on the account page arrive without a reload this way). */
 export const SYNC_INTERVAL_MS = 5 * 60_000;
 const SYNC_CHUNK = 200;
 const TIMEOUT_MS = 2500;
@@ -18,15 +18,15 @@ export type DirectoryProfile = { handle: string | null; displayName: string | nu
 const hexToBytes = (h: string) => Uint8Array.from(Buffer.from(h, "hex"));
 
 /**
- * Anbindung an den Verzeichnisdienst (M6). Der Server hat einen eigenen Ed25519-Schluessel (server_settings.directory_private_key,
- * beim Start erzeugt) und registriert sich damit beim Verzeichnis: Signatur ueber Host + Nonce, dazu weist das Verzeichnis
- * ueber /api/health (serverKey) nach, dass der Server seinen Host kontrolliert. Das ausgegebene Token (nur im Speicher)
- * erlaubt, Handle und Anzeigename der eigenen Nutzer zu lesen (`?server=PUBLIC_DOMAIN`); ohne Token liefert das
- * Verzeichnis nur Handle und Schluessel. Bei 401 wird einmal neu registriert. Best effort mit kurzem Timeout; ist der Dienst
- * nicht erreichbar, bleibt der letzte bekannte Stand. Der Chat-Server haengt zur Laufzeit nie vom Dienst ab (PLAN 3.2).
+ * Integration with the directory service (M6). The server has its own Ed25519 key (server_settings.directory_private_key,
+ * generated at startup) and registers with the directory using it: signature over host + nonce, and the directory verifies
+ * via /api/health (serverKey) that the server controls its host. The issued token (kept in memory only)
+ * allows reading the handle and display name of its own users (`?server=PUBLIC_DOMAIN`); without a token the
+ * directory returns only handle and key. On a 401 it re-registers once. Best effort with a short timeout; if the service
+ * is unreachable, the last known state stays. The chat server never depends on the service at runtime (PLAN 3.2).
  */
 export class DirectoryClient {
-  /** Oeffentlicher Server-Schluessel (hex), in /api/health veroeffentlicht; null vor init(). */
+  /** Public server key (hex), published in /api/health; null before init(). */
   serverKey: string | null = null;
   private privateKey: Uint8Array | null = null;
   private token: string | null = null;
@@ -37,7 +37,7 @@ export class DirectoryClient {
   get enabled(): boolean { return !!this.config.DIRECTORY_URL; }
   private get host(): string { return this.config.PUBLIC_DOMAIN.toLowerCase(); }
 
-  /** Server-Schluessel laden oder einmalig erzeugen (bleibt ueber Neustarts gleich; das Verzeichnis bindet den Host daran). */
+  /** Load the server key or generate it once (stays the same across restarts; the directory binds the host to it). */
   async init(): Promise<void> {
     const [s] = await this.db.select({ key: serverSettings.directoryPrivateKey }).from(serverSettings).where(eq(serverSettings.id, SETTINGS_ID)).limit(1);
     let hex = s?.key ?? null;
@@ -50,7 +50,7 @@ export class DirectoryClient {
     this.serverKey = Buffer.from(await ed.getPublicKeyAsync(this.privateKey)).toString("hex");
   }
 
-  /** Beim Verzeichnis registrieren und ein Token holen. Nach app.listen aufrufen: das Verzeichnis liest /api/health zurueck. */
+  /** Register with the directory and fetch a token. Call after app.listen: the directory reads /api/health back. */
   register(): Promise<boolean> {
     if (!this.registering) this.registering = this.doRegister().finally(() => { this.registering = null; });
     return this.registering;
@@ -64,8 +64,8 @@ export class DirectoryClient {
       const ch = ChallengeResponse.parse(await chRes.json());
       const health = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(TIMEOUT_MS) }).then((r) => r.json()) as { host?: string };
       if (!health.host) return false;
-      // Serververzeichnis (M6d): Name, Auflistung, Beschreibung, offener Beitritt und Mitgliederzahl gehen mit; das Icon holt das
-      // Verzeichnis selbst von unserer /api/server-icon. Deshalb registriert sich der Server nach jeder Aenderung daran neu.
+      // Server directory (M6d): name, listing, description, open join and member count are sent along; the icon is fetched by the
+      // directory itself from our /api/server-icon. That is why the server re-registers after every change to it.
       const [s] = await this.db.select({ name: serverSettings.name, listed: serverSettings.listed, description: serverSettings.description, openJoin: serverSettings.openJoin })
         .from(serverSettings).where(eq(serverSettings.id, SETTINGS_ID)).limit(1);
       const [mc] = await this.db.select({ n: count() }).from(members);
@@ -74,7 +74,7 @@ export class DirectoryClient {
         host: this.host, name: s?.name ?? null, listed: s?.listed ?? false, description: s?.description ?? null, openJoin: s?.openJoin ?? false, memberCount: mc?.n ?? null,
         publicKey: this.serverKey, challengeId: ch.challengeId, signature, proofUrl: this.config.directoryProofUrl,
       };
-      // Der Nachweis dauert laenger: das Verzeichnis ruft unsere /api/health auf.
+      // The proof takes longer: the directory calls our /api/health.
       const res = await fetch(`${url}/api/servers/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) });
       if (!res.ok) {
         const err = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
@@ -93,8 +93,8 @@ export class DirectoryClient {
   }
 
   /**
-   * Schluessel -> Handle und Anzeigename nachschlagen und am Nutzer cachen. Anzeigename: der im Verzeichnis fuer diesen Server
-   * gesetzte, sonst der globale; ist keiner gesetzt (oder gibt es kein Token), bleibt der lokale Name unveraendert.
+   * Look up key -> handle and display name and cache it on the user. Display name: the one set in the directory for this
+   * server, otherwise the global one; if none is set (or there is no token), the local name stays unchanged.
    */
   async refresh(user: { id: string; publicKey: string; displayName: string | null }): Promise<DirectoryProfile | null> {
     const url = this.config.DIRECTORY_URL;
@@ -103,12 +103,12 @@ export class DirectoryClient {
       if (!this.token) await this.register();
       let res = await this.lookup(url, user.publicKey);
       if (res.status === 401 && this.token) {
-        // Token abgelaufen (24 h) oder Verzeichnis neu aufgesetzt: einmal neu registrieren.
+        // Token expired (24 h) or directory reinstalled: re-register once.
         this.token = null;
         if (await this.register()) res = await this.lookup(url, user.publicKey);
       }
       if (res.status === 401 || res.status === 403) {
-        // Ohne gueltiges Token wenigstens das Handle (oeffentlich).
+        // Without a valid token, at least the handle (which is public).
         this.log.warn({ status: res.status }, "Verzeichnis: kein gueltiges Server-Token, nur Handle wird uebernommen");
         this.token = null;
         res = await fetch(`${url}/api/keys/${user.publicKey}`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -128,8 +128,8 @@ export class DirectoryClient {
     }
   }
   /**
-   * Alle Nutzer mit dem Verzeichnis abgleichen (Sammelabfrage mit Token): geaenderte Handles/Namen werden gespeichert und
-   * ueber onChanged gemeldet (Aufrufer: Sprachpraesenz umbenennen, Mitgliederliste senden). Liefert die Zahl der Aenderungen.
+   * Reconcile all users with the directory (bulk query with a token): changed handles/names are stored and
+   * reported via onChanged (callers: rename voice presence, send the member list). Returns the number of changes.
    */
   async syncAll(onChanged: (u: { userId: string; publicKey: string; handle: string | null; displayName: string | null }) => void): Promise<number> {
     const url = this.config.DIRECTORY_URL;
@@ -147,7 +147,7 @@ export class DirectoryClient {
         const now = new Date();
         for (const u of chunk) {
           const acc = byKey.get(u.publicKey);
-          if (!acc) continue; // kein Konto: lokaler Stand bleibt
+          if (!acc) continue; // no account: the local state stays
           const displayName = acc.serverDisplayName ?? acc.displayName ?? u.displayName;
           if (acc.handle === u.handle && displayName === u.displayName) continue;
           await this.db.update(users).set({ handle: acc.handle, displayName, handleCheckedAt: now }).where(eq(users.id, u.id));
@@ -163,7 +163,7 @@ export class DirectoryClient {
     if (changed) this.log.info({ changed }, "Namen aus dem Verzeichnis uebernommen");
     return changed;
   }
-  /** Push vom Verzeichnis (POST /api/directory/notify): einen Nutzer per Sammelabfrage neu laden (zaehlt nicht als Login). */
+  /** Push from the directory (POST /api/directory/notify): reload one user via a bulk query (does not count as a sign-in). */
   async syncOne(publicKey: string, onChanged: (u: { userId: string; publicKey: string; handle: string | null; displayName: string | null }) => void): Promise<boolean> {
     const url = this.config.DIRECTORY_URL;
     if (!url) return false;
@@ -199,7 +199,7 @@ export class DirectoryClient {
   }
 }
 
-/** Ob der gecachte Stand alt genug ist, um ihn bei GET /api/me zu erneuern. */
+/** Whether the cached state is old enough to be refreshed on GET /api/me. */
 export function directoryStale(checkedAt: Date | null): boolean {
   return checkedAt === null || Date.now() - checkedAt.getTime() > REFRESH_AFTER_MS;
 }

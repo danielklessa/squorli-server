@@ -35,7 +35,7 @@ export async function registerMessageRoutes(app: FastifyInstance, db: Db, hub: H
     return c && c.kind === "text" ? c : null;
   }
 
-  /** Verlauf, neueste zuerst geladen, aelteste-zuerst geliefert. ?before=<seq> blaettert zurueck. */
+  /** History, loaded newest-first and returned oldest-first. ?before=<seq> pages backwards. */
   app.get<{ Params: { id: string }; Querystring: { before?: string; limit?: string } }>(
     "/api/channels/:id/messages", { schema: { params: Params } }, async (req, reply) => {
       const m = await requireMember(db, req, reply);
@@ -66,7 +66,7 @@ export async function registerMessageRoutes(app: FastifyInstance, db: Db, hub: H
     const attIds = body.data.attachmentIds ?? [];
     if (attIds.length) {
       if (!can(m.actor, Permission.ATTACH_FILES)) return reply.code(403).send({ error: "forbidden" });
-      // Nur eigene, noch nicht verknuepfte Uploads.
+      // Only your own uploads that are not linked yet.
       const mine = await db.select({ id: attachments.id }).from(attachments)
         .where(and(inArray(attachments.id, attIds), eq(attachments.uploaderId, m.userId), isNull(attachments.messageId)));
       if (mine.length !== new Set(attIds).size) return reply.code(400).send({ error: "unknown_attachment" });
@@ -86,7 +86,7 @@ export async function registerMessageRoutes(app: FastifyInstance, db: Db, hub: H
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
     const [row] = await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1);
     if (!row) return reply.code(404).send({ error: "not_found" });
-    if (row.authorId !== m.userId) return reply.code(403).send({ error: "forbidden" }); // Bearbeiten nur der Autor
+    if (row.authorId !== m.userId) return reply.code(403).send({ error: "forbidden" }); // Only the author may edit
     const [updated] = await db.update(messages).set({ content: body.data.content, editedAt: new Date() }).where(eq(messages.id, row.id)).returning();
     const [msg] = await loadMessages(db, [updated!]);
     hub.broadcast({ type: "message.update", message: msg! });
@@ -100,7 +100,7 @@ export async function registerMessageRoutes(app: FastifyInstance, db: Db, hub: H
     if (!row) return reply.code(404).send({ error: "not_found" });
     if (row.authorId !== m.userId && !can(m.actor, Permission.MANAGE_MESSAGES)) return reply.code(403).send({ error: "forbidden" });
     const files = await db.select({ id: attachments.id }).from(attachments).where(eq(attachments.messageId, row.id));
-    await db.delete(messages).where(eq(messages.id, row.id)); // Anhaenge kaskadieren in der DB
+    await db.delete(messages).where(eq(messages.id, row.id)); // Attachments cascade in the DB
     await app.removeAttachmentFiles(files.map((f) => f.id));
     hub.broadcast({ type: "message.delete", channelId: row.channelId, id: row.id });
     return { ok: true };

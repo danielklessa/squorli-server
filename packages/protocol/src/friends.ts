@@ -2,49 +2,49 @@ import { z } from "zod";
 import { DisplayName, Handle } from "./directory";
 import { Iso, PublicKey, Signature, Uuid } from "./primitives";
 
-// KOPIE-HINWEIS: liegt byte-identisch auch im Repo squorli-directory (packages/protocol/src); Quelle ist squorli-server, nach Aenderung kopieren.
+// COPY NOTE: also exists byte-identically in the squorli-directory repo (packages/protocol/src); the source is squorli-server, copy it over after any change.
 /**
- * Freunde und Direktnachrichten (M7): beides lebt beim Verzeichnisdienst, weil nur er beiden Konten gemeinsam ist.
- * Der Chat-Client haelt eine zweite WebSocket-Verbindung zum Verzeichnis (GET /api/ws): das Verzeichnis schickt eine
- * Challenge, der Client antwortet mit einer Signatur seines Schluessels, danach ist der Socket die Identitaet.
- * Freundschaft = eine Zeile je Paar; sie gilt erst, wenn die eingeladene Seite angenommen hat (pending_in -> accepted).
- * Nachrichten sind Ende-zu-Ende verschluesselt (dm.ts); das Verzeichnis sieht und speichert nur Chiffretext und Metadaten.
+ * Friends and direct messages (M7): both live at the directory service, because it is the only thing both accounts share.
+ * The chat client holds a second WebSocket connection to the directory (GET /api/ws): the directory sends a
+ * challenge, the client replies with a signature from its key, and from then on the socket is the identity.
+ * Friendship = one row per pair; it only counts once the invited side has accepted (pending_in -> accepted).
+ * Messages are end-to-end encrypted (dm.ts); the directory only sees and stores ciphertext and metadata.
  */
 
-/** Version des Verzeichnis-Sockets; der Dienst lehnt aeltere Clients mit error `version` ab. */
+/** Version of the directory socket; the service rejects older clients with error `version`. */
 export const DIRECTORY_WS_VERSION = 1;
 
-/** Signatur beim Verbindungsaufbau: an den Host des Verzeichnisses gebunden wie alle anderen Signaturen. */
+/** Signature on connect: bound to the directory's host like every other signature. */
 export function directoryWsAuthMessage(directoryHost: string, nonce: string): string {
   return `community-directory-ws\n${directoryHost}\n${nonce}`;
 }
 
-/** Aus meiner Sicht: ich habe angefragt (pending_out), ich wurde angefragt (pending_in), bestaetigt, von mir blockiert. */
+/** From my point of view: I sent a request (pending_out), I was asked (pending_in), confirmed, blocked by me. */
 export const FriendState = z.enum(["pending_out", "pending_in", "accepted", "blocked"]);
 export type FriendState = z.infer<typeof FriendState>;
-/** Ein Freund oder eine offene Anfrage. Den globalen Anzeigenamen gibt es nur fuer bestaetigte Freunde, sonst nur das Handle. */
+/** A friend or an open request. The global display name is only available for confirmed friends, otherwise just the handle. */
 export const Friend = z.object({
   handle: Handle,
   publicKey: PublicKey,
   displayName: DisplayName.nullable(),
   state: FriendState,
-  /** Zeitpunkt der Anfrage bzw. der Bestaetigung. */
+  /** Time of the request or of the confirmation. */
   since: Iso,
-  /** Praesenz ueber das Verzeichnis (Nutzerentscheidung 14.09.2026): mindestens ein Socket verbunden; nur fuer bestaetigte Freunde, sonst false. */
+  /** Presence via the directory (user decision 2026-09-14): at least one socket connected; only for confirmed friends, otherwise false. */
   online: z.boolean().default(false),
 });
 export type Friend = z.infer<typeof Friend>;
 
-/** Oeffentliche Handle-Suche (GET /api/handles?q=<prefix>): nur Handle und Schluessel, hoechstens 10 Treffer. */
+/** Public handle search (GET /api/handles?q=<prefix>): handle and key only, at most 10 hits. */
 export const FriendSearchResult = z.object({ handle: Handle, publicKey: PublicKey });
 export const FriendSearchResponse = z.array(FriendSearchResult);
 export type FriendSearchResult = z.infer<typeof FriendSearchResult>;
 
-/** Chiffretext (base64) bis 16 KB; das Verzeichnis prueft nur die Laenge. */
+/** Ciphertext (base64) up to 16 KB; the directory only checks the length. */
 export const DM_MAX_CIPHERTEXT_CHARS = 22_000;
 const DmIv = z.string().regex(/^[0-9a-f]{24}$/, "24 hex chars");
 const DmCiphertext = z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/).max(DM_MAX_CIPHERTEXT_CHARS);
-/** Eine gespeicherte Nachricht: `seq` vergibt das Verzeichnis (Reihenfolge und Cursor), alles andere kommt vom Absender. */
+/** A stored message: `seq` is assigned by the directory (ordering and cursor), everything else comes from the sender. */
 export const DmMessage = z.object({
   id: Uuid,
   seq: z.number().int().nonnegative(),
@@ -55,58 +55,58 @@ export const DmMessage = z.object({
   sentAt: Iso,
 });
 export type DmMessage = z.infer<typeof DmMessage>;
-/** Gespraech mit einem Freund aus Sicht des Kontos: letzte Nachricht und Ungelesenes (Lesecursor liegt beim Verzeichnis, gilt fuer alle Geraete). */
+/** Conversation with a friend from the account's point of view: last message and unread count (the read cursor lives at the directory and applies to all devices). */
 export const DmConversation = z.object({ peer: PublicKey, lastSeq: z.number().int(), lastAt: Iso, unread: z.number().int().nonnegative() });
 export type DmConversation = z.infer<typeof DmConversation>;
 
-// ---- Client -> Verzeichnis
+// ---- Client -> directory
 export const DirectoryClientAuth = z.object({ type: z.literal("auth"), publicKey: PublicKey, signature: Signature, version: z.number().int() });
 export const DirectoryClientPing = z.object({ type: z.literal("ping"), t: z.number() });
-/** Anfrage an einen Schluessel (der Client hat Handle -> Schluessel vorher aufgeloest). Liegt schon eine Anfrage der Gegenseite vor, wird sie damit angenommen. */
+/** Request to a key (the client has resolved handle -> key beforehand). If a request from the other side is already open, this accepts it. */
 export const FriendRequest = z.object({ type: z.literal("friends.request"), publicKey: PublicKey });
 export const FriendAction = z.object({ type: z.enum(["friends.accept", "friends.decline", "friends.remove", "friends.block", "friends.unblock"]), publicKey: PublicKey });
 export const DmSend = z.object({ type: z.literal("dm.send"), to: PublicKey, id: Uuid, iv: DmIv, ciphertext: DmCiphertext, sentAt: Iso });
 export const DmHistoryRequest = z.object({ type: z.literal("dm.history"), peer: PublicKey, before: z.number().int().optional(), limit: z.number().int().min(1).max(100).optional() });
 export const DmReadRequest = z.object({ type: z.literal("dm.read"), peer: PublicKey, seq: z.number().int().nonnegative() });
 /**
- * Nachricht loeschen (Nutzerentscheidung 14.09.2026): der Absender loescht innerhalb von DM_DELETE_BOTH_MS fuer beide Seiten,
- * danach (und der Empfaenger immer) nur fuer sich; die Gegenseite behaelt dann ihre Kopie.
+ * Delete a message (user decision 2026-09-14): within DM_DELETE_BOTH_MS the sender deletes it for both sides,
+ * after that (and the recipient always) only for themselves; the other side then keeps its copy.
  */
 export const DM_DELETE_BOTH_MS = 5 * 60_000;
 export const DmDeleteRequest = z.object({ type: z.literal("dm.delete"), peer: PublicKey, id: Uuid });
-/** Ganzes Gespraech fuer mich loeschen (die Gegenseite behaelt ihre Kopie). */
+/** Delete a whole conversation for me (the other side keeps its copy). */
 export const DmClearRequest = z.object({ type: z.literal("dm.clear"), peer: PublicKey });
 export const DirectoryClientEvent = z.discriminatedUnion("type", [DirectoryClientAuth, DirectoryClientPing, FriendRequest, DmSend, DmHistoryRequest, DmReadRequest, DmDeleteRequest, DmClearRequest])
   .or(FriendAction);
 export type DirectoryClientEvent = z.infer<typeof DirectoryClientEvent>;
 
-// ---- Verzeichnis -> Client
+// ---- Directory -> client
 export const DirectoryChallengeEvent = z.object({ type: z.literal("challenge"), nonce: z.string().regex(/^[0-9a-f]{64}$/), host: z.string() });
 export const DirectoryWelcomeEvent = z.object({ type: z.literal("welcome"), friends: z.array(Friend), conversations: z.array(DmConversation), serverTime: Iso });
 export const DirectoryPongEvent = z.object({ type: z.literal("pong") });
-/** Freund bzw. Anfrage geaendert; `friend: null` = Eintrag weg (entfernt, abgelehnt, zurueckgezogen, von der Gegenseite blockiert). */
+/** Friend or request changed; `friend: null` = entry gone (removed, declined, withdrawn, blocked by the other side). */
 export const FriendUpdateEvent = z.object({ type: z.literal("friends.update"), publicKey: PublicKey, friend: Friend.nullable() });
-/** Live-Zustellung; geht auch an die anderen Geraete des Absenders. */
+/** Live delivery; also goes to the sender's other devices. */
 export const DmMessageEvent = z.object({ type: z.literal("dm.message"), message: DmMessage });
 export const DmHistoryEvent = z.object({ type: z.literal("dm.history"), peer: PublicKey, messages: z.array(DmMessage), more: z.boolean() });
-/** Lesecursor auf einem anderen Geraet bewegt. */
+/** Read cursor moved on another device. */
 export const DmReadEvent = z.object({ type: z.literal("dm.read"), peer: PublicKey, seq: z.number().int() });
-/** Nachricht weg: `both` = auch beim Peer geloescht (Absender innerhalb der Frist), sonst nur bei mir (geht an meine anderen Geraete). */
+/** Message gone: `both` = deleted at the peer as well (sender within the time limit), otherwise only for me (goes to my other devices). */
 export const DmDeletedEvent = z.object({ type: z.literal("dm.deleted"), peer: PublicKey, id: Uuid, both: z.boolean() });
 export const DmClearedEvent = z.object({ type: z.literal("dm.cleared"), peer: PublicKey });
-/** Ein bestaetigter Freund ist online gegangen oder weg. */
+/** A confirmed friend has come online or gone. */
 export const FriendPresenceEvent = z.object({ type: z.literal("friends.presence"), publicKey: PublicKey, online: z.boolean() });
 export const DirectoryErrorCode = z.enum(["version", "unauthorized", "bad_message", "unknown_account", "self", "not_friends", "blocked", "declined_recently", "rate_limited", "too_large", "duplicate", "not_found"]);
 export type DirectoryErrorCode = z.infer<typeof DirectoryErrorCode>;
-/** `ref` = id der Nachricht (dm.send) bzw. Schluessel (friends.*), auf die sich der Fehler bezieht. */
+/** `ref` = id of the message (dm.send) or key (friends.*) the error refers to. */
 export const DirectoryErrorEvent = z.object({ type: z.literal("error"), code: DirectoryErrorCode, message: z.string(), ref: z.string().nullable().default(null) });
 export const DirectoryServerEvent = z.discriminatedUnion("type", [
   DirectoryChallengeEvent, DirectoryWelcomeEvent, DirectoryPongEvent, FriendUpdateEvent, FriendPresenceEvent, DmMessageEvent, DmHistoryEvent, DmReadEvent, DmDeletedEvent, DmClearedEvent, DirectoryErrorEvent,
 ]);
 export type DirectoryServerEvent = z.infer<typeof DirectoryServerEvent>;
 
-// ---- Kontoseite (ohne Socket): dieselben Freundesaktionen als signierte Kontoaktion "friends" (POST /api/friends), Antwort = die
-// Liste danach. Nutzlast der Signatur "<op>\n<publicKey|leer>", damit weder Aktion noch Ziel ausgetauscht werden koennen.
+// ---- Account page (without a socket): the same friend actions as a signed account action "friends" (POST /api/friends), response = the
+// list afterwards. The signature's payload is "<op>\n<publicKey|empty>" so that neither action nor target can be swapped out.
 export const FriendOp = z.enum(["list", "request", "accept", "decline", "remove", "block", "unblock"]);
 export type FriendOp = z.infer<typeof FriendOp>;
 export function directoryFriendsPayload(op: FriendOp, publicKey: string | null): string {

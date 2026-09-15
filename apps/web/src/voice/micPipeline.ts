@@ -1,11 +1,11 @@
 import { VoiceGate, rmsLevel } from "./gate";
 
 /**
- * Mikrofon-Pipeline: getUserMedia -> AudioContext -> [Analyser fuer Pegel] + [Gain als Tor] -> Ausgangs-Track.
+ * Microphone pipeline: getUserMedia -> AudioContext -> [analyser for the level] + [gain as the gate] -> output track.
  *
- * Das Tor (Sprachaktivierung oder Push-to-Talk) arbeitet lokal ueber den Gain, der publizierte Track bleibt
- * durchgehend veroeffentlicht und "unmuted". So gibt es keine Signalisierung bei jedem Wort und das
- * Wieder-Einschalten ist verzoegerungsfrei (PLAN 3.5). Der Stumm-Knopf ist davon getrennt (LiveKit mute).
+ * The gate (voice activation or push-to-talk) works locally through the gain; the published track stays
+ * published and "unmuted" throughout. That way there is no signalling on every word and
+ * switching back on is instant (PLAN 3.5). The mute button is separate from this (LiveKit mute).
  */
 export type GateMode = "vad" | "ptt";
 
@@ -22,30 +22,30 @@ export class MicPipeline {
   private mode: GateMode = "vad";
   private pttHeld = false;
   private forcedOpen = false;
-  /** Aktueller Pegel (0..1) und ob das Tor offen ist; fuer die Anzeige. */
+  /** Current level (0..1) and whether the gate is open; for the display. */
   readonly state = { level: 0, open: false };
   onState: ((s: { level: number; open: boolean }) => void) | null = null;
 
   private ownsCtx: boolean;
 
-  /** @param ctx geteilter AudioContext (vom VoiceClient in einer Nutzergeste angelegt); ohne ihn legt die Pipeline einen eigenen an. */
+  /** @param ctx shared AudioContext (created by the VoiceClient inside a user gesture); without it the pipeline creates its own. */
   constructor(threshold: number, hangoverMs: number, ctx?: AudioContext) {
     this.gate = new VoiceGate(threshold, hangoverMs);
     this.ctx = ctx ?? null;
     this.ownsCtx = !ctx;
   }
 
-  /** Zustand des AudioContext ("running" noetig, sonst bleibt das Mikrofon stumm). */
+  /** State of the AudioContext ("running" is required, otherwise the microphone stays silent). */
   contextState(): string { return this.ctx?.state ?? "none"; }
 
-  /** Startet die Aufnahme. Liefert den Track, der bei LiveKit publiziert wird. */
+  /** Starts the capture. Returns the track that is published to LiveKit. */
   async start(deviceId: string | null, stereo = false): Promise<MediaStreamTrack> {
     await this.stopCapture();
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-        // Browser-eigene Verarbeitung nutzen (PLAN 7: "Browser-eigene Echo-/Rauschunterdrueckung").
-        // Stereo (Musik-Kanaele): Verarbeitung aus, denn Echo-/Rauschunterdrueckung mischt auf Mono herunter.
+        // Use the browser's own processing (PLAN 7: "browser-native echo/noise suppression").
+        // Stereo (music channels): processing off, because echo/noise suppression downmixes to mono.
         echoCancellation: !stereo,
         noiseSuppression: !stereo,
         autoGainControl: !stereo,
@@ -53,8 +53,8 @@ export class MicPipeline {
       },
     });
     if (!this.ctx || this.ctx.state === "closed") { this.ctx = new AudioContext(); this.ownsCtx = true; }
-    // resume() haengt in manchen Browsern ohne Nutzergeste ewig; nicht darauf warten, der Klick-Fallback im
-    // VoiceClient holt es nach. Bis dahin liefert die Pipeline Stille (Pegel 0).
+    // resume() hangs forever in some browsers without a user gesture; do not wait for it, the click fallback in the
+    // VoiceClient catches up on it. Until then the pipeline delivers silence (level 0).
     if (this.ctx.state === "suspended") await Promise.race([this.ctx.resume().catch(() => {}), new Promise((r) => setTimeout(r, 300))]);
 
     this.source = this.ctx.createMediaStreamSource(this.stream);
@@ -76,7 +76,7 @@ export class MicPipeline {
     return track;
   }
 
-  /** Aktuelles Aufnahmegeraet (deviceId), wie es der Browser tatsaechlich gewaehlt hat. */
+  /** Current capture device (deviceId), as the browser actually picked it. */
   activeDeviceId(): string | null {
     return this.stream?.getAudioTracks()[0]?.getSettings().deviceId ?? null;
   }
@@ -85,7 +85,7 @@ export class MicPipeline {
   setThreshold(t: number) { this.gate.threshold = t; }
   setHangover(ms: number) { this.gate.hangoverMs = ms; }
   setPttHeld(held: boolean) { this.pttHeld = held; this.apply(); }
-  /** Tor dauerhaft offen (z. B. Mikrofon-Test). */
+  /** Keep the gate permanently open (e.g. a microphone test). */
   setForcedOpen(v: boolean) { this.forcedOpen = v; this.apply(); }
 
   private tick() {
@@ -99,7 +99,7 @@ export class MicPipeline {
   private apply() {
     const open = this.forcedOpen || (this.mode === "ptt" ? this.pttHeld : this.gate.isOpen());
     if (this.gain) {
-      // Kurze Rampe statt hartem Schnitt: vermeidet Klicken.
+      // Short ramp instead of a hard cut: avoids clicks.
       const t = this.ctx!.currentTime;
       this.gain.gain.cancelScheduledValues(t);
       this.gain.gain.setTargetAtTime(open ? 1 : 0, t, 0.01);

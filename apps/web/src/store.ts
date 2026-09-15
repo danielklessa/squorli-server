@@ -6,52 +6,53 @@ import * as api from "./api";
 import { DirectoryLink, type LinkStatus } from "./directoryLink";
 import { loadOrCreateIdentity, storeIdentity, type Identity } from "./identity";
 import { ServerConnection, type ServerConnState } from "./serverConnection";
+import { t } from "./i18n";
 
 export type { ChannelMessages, Connection, RawLogEntry, ServerConnState } from "./serverConnection";
 
 /**
- * Client-Zustand ohne UI-Abhaengigkeit (PLAN 3.4). Multi-Server-Client: eine `ServerConnection` je Server (eigener Server =
- * der, der den Client ausliefert, Schluessel `homeHost`; fremde Server aus der Server-Leiste ueber ihre Origin, Schluessel =
- * Host aus dem Verzeichnis). Die Server-Leiste wechselt `activeHost`, ohne die Seite zu verlassen; laufende Verbindungen
- * (und damit die Sprachverbindung) bleiben bestehen. Dazu Identitaet, Verzeichnis (M6), Freunde und Direktnachrichten (M7).
+ * Client state without a UI dependency (PLAN 3.4). Multi-server client: one `ServerConnection` per server (own server =
+ * the one serving the client, key `homeHost`; foreign servers from the server rail via their origin, key =
+ * the host from the directory). The server rail switches `activeHost` without leaving the page; running connections
+ * (and with them the voice connection) survive. Plus identity, directory (M6), friends and direct messages (M7).
  */
 
-/** Entschluesselte Direktnachricht (M7); text = null, wenn sie sich nicht oeffnen liess (fremder Schluessel, beschaedigt). */
+/** Decrypted direct message (M7); text = null if it could not be opened (foreign key, corrupted). */
 export type Dm = { id: string; seq: number; from: string; to: string; sentAt: string; text: string | null };
 export type DmThread = { list: Dm[]; hasMore: boolean; loaded: boolean; loading: boolean };
 
 export type State = {
   identity: Identity | null;
-  /** Schluessel des eigenen Servers in `servers` (Host der Adressleiste). */
+  /** Key of your own server in `servers` (the host in the address bar). */
   homeHost: string;
-  /** Server, der im Hauptbereich gezeigt wird (Server-Leiste). */
+  /** The server shown in the main area (server rail). */
   activeHost: string;
-  /** Zustand je Server; der eigene Server ist immer vorhanden. */
+  /** State per server; your own server is always present. */
   servers: Record<string, ServerConnState>;
-  /** Verzeichnisdienst (M6), den der eigene Server nennt; null = keiner. */
+  /** Directory service (M6) named by your own server; null = none. */
   directoryUrl: string | null;
-  /** Konto beim Verzeichnis fuer den eigenen Schluessel; undefined = noch nicht geprueft, null = nicht registriert. */
+  /** Account at the directory for your own key; undefined = not checked yet, null = not registered. */
   directoryAccount: DirectoryAccount | null | undefined;
   directoryError: string | null;
-  /** Server, auf denen sich das Handle angemeldet hat (Verzeichnis, AccountStatus.servers): Server-Leiste. null = unbekannt/kein Konto. */
+  /** Servers the handle has signed in on (directory, AccountStatus.servers): the server rail. null = unknown/no account. */
   accountServers: AccountServer[] | null;
-  // ---- M7: Freunde und Direktnachrichten ueber den Verzeichnis-Socket
-  /** Verbindung zum Verzeichnis-Socket; "idle" auch ohne Verzeichnis oder ohne Konto. */
+  // ---- M7: friends and direct messages over the directory socket
+  /** Connection to the directory socket; "idle" also when there is no directory or no account. */
   directoryLink: LinkStatus;
   directoryLinkError: string | null;
-  /** Freunde und offene Anfragen (aus meiner Sicht); null = noch nichts vom Verzeichnis. */
+  /** Friends and open requests (from my point of view); null = nothing from the directory yet. */
   friends: Friend[] | null;
-  /** Gespraeche je Freund (Schluessel des Freundes) mit Ungelesenem; kommt mit dem welcome und wird live nachgefuehrt. */
+  /** Conversations per friend (the friend's key) with unread counts; arrives with the welcome and is kept up to date live. */
   conversations: Record<string, DmConversation>;
   dms: Record<string, DmThread>;
-  /** Startansicht (Squorli-Symbol in der Leiste): Freundesliste und Direktnachrichten statt der Server-Spalten. */
+  /** Home view (the Squorli mark in the rail): friends list and direct messages instead of the server columns. */
   homeOpen: boolean;
   currentPeer: string | null;
-  /** Letzter Fehler einer Freundes- oder Nachrichtenaktion (inline anzeigen). */
+  /** Last error from a friend or message action (shown inline). */
   friendsError: string | null;
 };
 
-/** Sitzungen je Server (Token bleibt geheim); v1 hielt nur die des eigenen Servers und wird einmalig uebernommen. */
+/** Sessions per server (the token stays secret); v1 held only the own server's and is migrated once. */
 const SESSIONS_KEY = "chat.sessions.v2";
 const SESSION_KEY_V1 = "chat.session.v1";
 type StoredSessions = { publicKey: string; tokens: Record<string, string> };
@@ -64,12 +65,12 @@ export class Store {
   state: State;
   private conns = new Map<string, ServerConnection>();
   private link: DirectoryLink | null = null;
-  /** Paarschluessel je Freund (M7), abgeleitet aus dem eigenen Seed und dem Schluessel des Freundes; bei Identitaetswechsel leeren. */
+  /** Pair key per friend (M7), derived from your own seed and the friend's key; clear it on an identity switch. */
   private dmKeys = new Map<string, Promise<CryptoKey>>();
   private listeners = new Set<(s: State) => void>();
-  /** Wird vom Sprach-Client gesetzt: Kick/Sitzungsverlust auf `host` beendet die Sprachverbindung, falls sie dort laeuft. */
+  /** Set by the voice client: a kick/session loss on `host` ends the voice connection if it runs there. */
   onRemoved: ((host: string) => void) | null = null;
-  /** Moderation (M3) auf `host`: Verschieben in einen anderen Sprachkanal (null = raus) und Beenden von Kamera/Bildschirm. */
+  /** Moderation (M3) on `host`: moving to another voice channel (null = out) and stopping camera/screen. */
   onVoiceMoved: ((host: string, channelId: string | null, by: string) => void) | null = null;
   onVoiceStop: ((host: string, what: { camera: boolean; screen: boolean }, by: string) => void) | null = null;
 
@@ -85,7 +86,7 @@ export class Store {
   subscribe(fn: (s: State) => void) { this.listeners.add(fn); fn(this.state); return () => { this.listeners.delete(fn); }; }
   private set(p: Partial<State>) { this.state = { ...this.state, ...p }; for (const fn of this.listeners) fn(this.state); }
 
-  /** Verbindung zu einem Server (eigener Server immer vorhanden). */
+  /** Connection to a server (your own server is always present). */
   connection(host: string): ServerConnection | null { return this.conns.get(host) ?? null; }
   get home(): ServerConnection { return this.conns.get(this.homeHost)!; }
   get active(): ServerConnection { return this.conns.get(this.state.activeHost) ?? this.home; }
@@ -112,7 +113,7 @@ export class Store {
     if (token) await this.home.resume(token);
   }
 
-  // ---------- Sitzungen je Server im localStorage
+  // ---------- Sessions per server in localStorage
   private readSessions(): StoredSessions | null {
     try {
       const raw = localStorage.getItem(SESSIONS_KEY);
@@ -125,7 +126,7 @@ export class Store {
         localStorage.removeItem(SESSION_KEY_V1);
         return migrated;
       }
-    } catch { /* kein localStorage */ }
+    } catch { /* no localStorage */ }
     return null;
   }
   private storedToken(host: string): string | null {
@@ -140,18 +141,18 @@ export class Store {
       const tokens = prev && prev.publicKey === pk ? { ...prev.tokens } : {};
       if (token) tokens[host] = token; else delete tokens[host];
       localStorage.setItem(SESSIONS_KEY, JSON.stringify({ publicKey: pk, tokens } satisfies StoredSessions));
-    } catch { /* egal */ }
+    } catch { /* never mind */ }
   }
-  private forgetAllTokens() { try { localStorage.removeItem(SESSIONS_KEY); localStorage.removeItem(SESSION_KEY_V1); } catch { /* egal */ } }
+  private forgetAllTokens() { try { localStorage.removeItem(SESSIONS_KEY); localStorage.removeItem(SESSION_KEY_V1); } catch { /* never mind */ } }
 
-  // ---------- Server-Leiste: Server wechseln und fremde Server oeffnen
-  /** Host aus dem Verzeichnis (PUBLIC_DOMAIN) auf den Schluessel in `servers` abbilden: der eigene Server heisst hier `homeHost`. */
+  // ---------- Server rail: switching servers and opening foreign servers
+  /** Map a host from the directory (PUBLIC_DOMAIN) onto the key in `servers`: your own server is called `homeHost` here. */
   hostFor(directoryHost: string): string {
     const h = directoryHost.toLowerCase();
     const home = homeState(this.state);
     return h === home.serverDomain || h === this.homeHost.toLowerCase() || h === window.location.hostname.toLowerCase() ? this.homeHost : h;
   }
-  /** Server im Hauptbereich zeigen; ein fremder Server wird beim ersten Mal verbunden (Anmeldung mit dem eigenen Schluessel). */
+  /** Show a server in the main area; a foreign server is connected on first use (signing in with your own key). */
   openServer(directoryHost: string) {
     const host = this.hostFor(directoryHost);
     this.set({ activeHost: host, homeOpen: false });
@@ -164,19 +165,19 @@ export class Store {
     const st = conn.state;
     if (st.connection === "idle" && !st.removed) void this.connectForeign(conn);
   }
-  /** Erneut versuchen (nach Fehler oder Entfernung). */
+  /** Try again (after an error or a removal). */
   retryServer(host: string) {
     const conn = this.conns.get(host);
     if (conn && host !== this.homeHost) void this.connectForeign(conn);
   }
   private async connectForeign(conn: ServerConnection) {
     const health = await conn.refreshHealth();
-    if (!health) { conn.state = { ...conn.state, connection: "error", error: `Der Server ${conn.state.base} ist nicht erreichbar oder erlaubt keinen Zugriff aus anderen Clients.` }; this.set({ servers: { ...this.state.servers, [conn.state.host]: conn.state } }); return; }
+    if (!health) { conn.state = { ...conn.state, connection: "error", error: t("err.serverUnreachableShort", { base: conn.state.base }) }; this.set({ servers: { ...this.state.servers, [conn.state.host]: conn.state } }); return; }
     const token = this.storedToken(conn.state.host);
     if (token && await conn.resume(token)) return;
-    try { await conn.login(health.domain.toLowerCase()); } catch { /* Meldung steht im Zustand des Servers */ }
+    try { await conn.login(health.domain.toLowerCase()); } catch { /* the message is kept in the server's state */ }
   }
-  /** Fremden Server schliessen und aus der Leiste des Clients nehmen (Sitzung bleibt gespeichert). */
+  /** Close a foreign server and remove it from the client's rail (the session stays stored). */
   closeServer(host: string) {
     if (host === this.homeHost) return;
     const conn = this.conns.get(host);
@@ -185,7 +186,7 @@ export class Store {
     const servers = { ...this.state.servers }; delete servers[host];
     this.set({ servers, activeHost: this.state.activeHost === host ? this.homeHost : this.state.activeHost });
   }
-  /** Sitzung auf `host` weg: eigener Server = zurueck zum Login (alle Verbindungen zu), fremder = nur dort abgemeldet. */
+  /** Session on `host` gone: own server = back to the login (all connections closed), foreign = signed out there only. */
   private sessionLost(host: string, _message: string) {
     if (host !== this.homeHost) return;
     this.closeAllForeign();
@@ -195,7 +196,7 @@ export class Store {
     this.set({ servers: { [this.homeHost]: this.home.state }, activeHost: this.homeHost });
   }
 
-  /** Verzeichnis-URL vom eigenen Server holen und nachsehen, ob der eigene Schluessel dort ein Handle hat. */
+  /** Fetch the directory URL from your own server and check whether your key has a handle there. */
   async refreshDirectory(): Promise<void> {
     const health = await this.home.refreshHealth();
     const directoryUrl = health?.directoryUrl ?? null;
@@ -208,8 +209,8 @@ export class Store {
     void this.connectDirectory();
   }
 
-  // ---------- M7: Verzeichnis-Socket (Freunde, Praesenz, Direktnachrichten)
-  /** Socket zum Verzeichnis aufbauen, sobald Verzeichnis, Konto und Schluessel da sind; sonst schliessen. */
+  // ---------- M7: directory socket (friends, presence, direct messages)
+  /** Open the socket to the directory as soon as directory, account and key are present; otherwise close it. */
   private async connectDirectory() {
     const id = this.state.identity; const url = this.state.directoryUrl;
     this.link?.close(); this.link = null;
@@ -243,7 +244,7 @@ export class Store {
       case "welcome": {
         const conversations: Record<string, DmConversation> = {};
         for (const c of e.conversations) conversations[c.peer] = c;
-        // Nach einer Wiederverbindung den offenen Verlauf neu laden, es koennten Nachrichten fehlen.
+        // After a reconnect, reload the open history; messages could be missing.
         this.set({ friends: e.friends, conversations, dms: {} });
         if (this.state.currentPeer) void this.loadDmHistory(this.state.currentPeer);
         break;
@@ -293,7 +294,7 @@ export class Store {
         break;
       }
       case "error":
-        if (e.code === "version" || e.code === "unauthorized" || e.code === "unknown_account") break; // Verbindungsfehler, steht in directoryLinkError
+        if (e.code === "version" || e.code === "unauthorized" || e.code === "unknown_account") break; // connection error, recorded in directoryLinkError
         this.set({ friendsError: explainDirectoryCode(e.code) });
         break;
       case "pong": case "challenge":
@@ -301,7 +302,7 @@ export class Store {
     }
   }
   openHome(open = true) { this.set({ homeOpen: open, friendsError: null }); }
-  /** Gespraech mit einem Freund oeffnen: Startansicht, Verlauf laden, als gelesen melden. */
+  /** Open a conversation with a friend: home view, load the history, report it as read. */
   selectPeer(peer: string) {
     this.set({ homeOpen: true, currentPeer: peer, friendsError: null });
     if (!this.state.dms[peer]?.loaded) void this.loadDmHistory(peer);
@@ -330,25 +331,25 @@ export class Store {
   removeFriend(publicKey: string) { this.friendAction("friends.remove", publicKey); }
   blockFriend(publicKey: string) { this.friendAction("friends.block", publicKey); }
   unblockFriend(publicKey: string) { this.friendAction("friends.unblock", publicKey); }
-  /** Direktnachricht verschluesseln und senden; die Anzeige kommt ueber das Echo des Verzeichnisses (dm.message). */
+  /** Encrypt and send a direct message; it is displayed via the directory's echo (dm.message). */
   async sendDm(peer: string, text: string) {
     const id = this.state.identity;
     if (!id) return;
     const msgId = crypto.randomUUID();
     const sealed = await sealDm(await this.dmKey(peer), id.publicKey, peer, msgId, { text });
-    if (!this.link?.send({ type: "dm.send", to: peer, id: msgId, ...sealed, sentAt: new Date().toISOString() })) throw new Error("Keine Verbindung zum Verzeichnis.");
+    if (!this.link?.send({ type: "dm.send", to: peer, id: msgId, ...sealed, sentAt: new Date().toISOString() })) throw new Error(t("dir.noLink"));
   }
   deleteDm(peer: string, id: string) { this.link?.send({ type: "dm.delete", peer, id }); }
   clearDm(peer: string) { this.link?.send({ type: "dm.clear", peer }); }
-  /** Handle-Suche beim Verzeichnis (Praefix); Fehler sind hier kein Drama, dann eben keine Treffer. */
+  /** Handle search at the directory (prefix); errors are no big deal here, they just mean no hits. */
   searchHandles(q: string) { const url = this.state.directoryUrl; return url ? api.directorySearchHandles(url, q).catch(() => []) : Promise.resolve([]); }
-  /** Zustand eines Schluessels in meiner Freundesliste; null = kein Eintrag; undefined = kein Verzeichnis-Socket. */
+  /** State of a key in my friends list; null = no entry; undefined = no directory socket. */
   friendState(publicKey: string): Friend["state"] | null | undefined {
     if (!this.state.friends) return undefined;
     return this.state.friends.find((f) => f.publicKey === publicKey)?.state ?? null;
   }
 
-  /** Server-Leiste: Serverliste des Kontos beim Verzeichnis holen (signiert). Nur mit Handle; Fehler sind kein Login-Problem. */
+  /** Server rail: fetch the account's server list from the directory (signed). Only with a handle; errors are not a sign-in problem. */
   async refreshAccountServers(): Promise<void> {
     const id = this.state.identity; const url = this.state.directoryUrl;
     if (!id || !url || !this.state.directoryAccount) { this.set({ accountServers: null }); return; }
@@ -356,7 +357,7 @@ export class Store {
     catch (err) { console.warn("Serverliste vom Verzeichnis nicht verfuegbar", err); }
   }
 
-  /** Handle beim Verzeichnis registrieren (M6a). */
+  /** Register a handle at the directory (M6a). */
   async registerHandle(handle: string): Promise<boolean> {
     const id = this.state.identity; const url = this.state.directoryUrl;
     if (!id || !url) return false;
@@ -372,8 +373,8 @@ export class Store {
   }
 
   /**
-   * M6b: Anmeldung mit Handle + Passwort. Holt den Schluessel vom Verzeichnis, ersetzt den Geraeteschluessel, meldet dann normal an.
-   * M6c: bei aktivem Authenticator wirft der erste Versuch `totp_required`; der Login-Bildschirm fragt dann den Code ab.
+   * M6b: sign-in with handle + password. Fetches the key from the directory, replaces the device key, then signs in normally.
+   * M6c: with an active authenticator the first attempt throws `totp_required`; the login screen then asks for the code.
    */
   async loginWithHandle(handle: string, password: string, invite?: string, code?: string): Promise<void> {
     const url = this.state.directoryUrl;
@@ -385,7 +386,7 @@ export class Store {
     try { id = await api.directoryRestore(url, handle, password, code); }
     catch (err) {
       const errCode = err instanceof api.ApiError ? err.code : null;
-      // totp_required ist kein Fehler, sondern der naechste Schritt: Meldung neutral halten.
+      // totp_required is not an error but the next step: keep the message neutral.
       home.state = { ...home.state, connection: errCode === "totp_required" ? "idle" : "error", error: api.explainDirectoryError(err) };
       this.set({ servers: { ...this.state.servers, [this.homeHost]: home.state } });
       throw Object.assign(new Error("restore failed"), { code: errCode });
@@ -400,17 +401,17 @@ export class Store {
     await this.login(invite);
   }
 
-  /** Anzeigename im Verzeichnis setzen (server = null: global, sonst dieser Server); wirft bei Fehlern (Meldung uebersetzt). */
+  /** Set the display name in the directory (server = null: global, otherwise this server); throws on errors (message translated). */
   async setDirectoryName(server: string | null, displayName: string | null): Promise<void> {
     const id = this.state.identity; const url = this.state.directoryUrl;
-    if (!id || !url) throw new Error("Kein Verzeichnis.");
+    if (!id || !url) throw new Error(t("dir.none"));
     try { await api.directorySetDisplayName(url, id, server, displayName); }
     catch (err) { throw new Error(api.explainDirectoryError(err)); }
     const acc = this.state.directoryAccount;
     if (acc && server === null) this.set({ directoryAccount: { ...acc, displayName } });
   }
 
-  /** M6b: Passwort-Backup fuer den Geraeteschluessel beim Verzeichnis ablegen. */
+  /** M6b: store a password backup of the device key at the directory. */
   async createBackup(password: string): Promise<boolean> {
     const id = this.state.identity; const url = this.state.directoryUrl;
     if (!id || !url) return false;
@@ -426,12 +427,12 @@ export class Store {
     }
   }
 
-  /** Am eigenen Server anmelden (Signatur ueber den Hostnamen der Adressleiste = PUBLIC_DOMAIN), optional mit Einladung. */
+  /** Sign in on your own server (signature over the hostname in the address bar = PUBLIC_DOMAIN), optionally with an invite. */
   async login(invite?: string): Promise<void> {
     await this.home.login(window.location.hostname, invite);
   }
 
-  /** Abmelden: alle Server (der Client haengt an der Sitzung des eigenen Servers). */
+  /** Sign out: all servers (the client hangs off your own server's session). */
   logout() {
     this.closeAllForeign();
     this.home.logout();
@@ -448,18 +449,11 @@ export class Store {
   }
 }
 
-/** Fehlercodes des Verzeichnis-Sockets (M7) in Saetze. */
+/** Turns error codes from the directory socket (M7) into sentences. */
 function explainDirectoryCode(code: string): string {
   switch (code) {
-    case "self": return "Das bist du selbst.";
-    case "unknown_account": return "Dieses Konto gibt es beim Verzeichnis nicht.";
-    case "not_friends": return "Ihr seid keine Freunde; Nachrichten gehen nur an bestätigte Freunde.";
-    case "blocked": return "Diese Person hat dich blockiert, oder du sie.";
-    case "declined_recently": return "Die Anfrage wurde vor Kurzem abgelehnt; bitte später noch einmal.";
-    case "rate_limited": return "Zu viele Aktionen, bitte kurz warten.";
-    case "too_large": return "Die Nachricht ist zu groß.";
-    case "duplicate": return "Diese Nachricht wurde schon gesendet.";
-    case "not_found": return "Nicht gefunden.";
-    default: return `Verzeichnis: ${code}`;
+    case "self": case "unknown_account": case "not_friends": case "blocked": case "declined_recently": case "rate_limited": case "too_large": case "duplicate": case "not_found":
+      return t(`dirws.${code}`);
+    default: return t("dirws.default", { code });
   }
 }

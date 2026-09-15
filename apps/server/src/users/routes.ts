@@ -9,13 +9,13 @@ import type { Hub } from "../hub";
 import { broadcastStructure } from "../state";
 import type { VoicePresence } from "../voice/presence";
 
-/** Profil des angemeldeten Nutzers (M2: Anzeigename) und seine Sitzungen (M6c: Geraeteverwaltung). Funktioniert auch ohne Mitgliedschaft. */
+/** Profile of the signed-in user (M2: display name) and their sessions (M6c: device management). Works without a membership too. */
 export async function registerUserRoutes(app: FastifyInstance, db: Db, directory: DirectoryClient, hub: Hub, presence: VoicePresence) {
   app.get("/api/me", async (req, reply) => {
     const s = await requireSession(db, req, reply);
     if (!s) return;
     let { displayName, handle } = s;
-    // Anzeigename aus dem Verzeichnis (global oder fuer diesen Server) ohne neuen Login uebernehmen: der Client ruft /api/me beim Oeffnen.
+    // Adopt the display name from the directory (global or for this server) without a new sign-in: the client calls /api/me on open.
     if (directory.enabled && directoryStale(s.handleCheckedAt)) {
       const fresh = await directory.refresh({ id: s.userId, publicKey: s.publicKey, displayName: s.displayName });
       if (fresh && (fresh.displayName !== s.displayName || fresh.handle !== s.handle)) {
@@ -35,7 +35,7 @@ export async function registerUserRoutes(app: FastifyInstance, db: Db, directory
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
 
     await db.update(users).set({ displayName: body.data.displayName }).where(eq(users.id, s.userId));
-    // Wer gerade in einem Sprachkanal sitzt, soll dort sofort mit neuem Namen erscheinen.
+    // Anyone currently sitting in a voice channel should appear there with the new name immediately.
     presence.rename(s.userId, { displayName: body.data.displayName, publicKey: s.publicKey, handle: s.handle });
     await broadcastStructure(db, hub, ["members"]);
 
@@ -43,11 +43,11 @@ export async function registerUserRoutes(app: FastifyInstance, db: Db, directory
     return me;
   });
 
-  // ---- M6c: Sitzungen (Geraete). Das Token wird nie zurueckgegeben, nur die Kennung `id`.
+  // ---- M6c: sessions (devices). The token is never returned, only the identifier `id`.
   app.get("/api/me/sessions", async (req, reply) => {
     const s = await requireSession(db, req, reply);
     if (!s) return;
-    // Abgelaufene Sitzungen bei Gelegenheit aufraeumen; resolveSession lehnt sie ohnehin ab.
+    // Clean up expired sessions opportunistically; resolveSession rejects them anyway.
     await db.delete(sessions).where(and(eq(sessions.userId, s.userId), lt(sessions.expiresAt, new Date())));
     const rows = await db
       .select({ id: sessions.id, label: sessions.label, createdAt: sessions.createdAt, lastUsedAt: sessions.lastUsedAt, expiresAt: sessions.expiresAt })
@@ -60,7 +60,7 @@ export async function registerUserRoutes(app: FastifyInstance, db: Db, directory
     return list;
   });
 
-  /** Alle anderen Geraete abmelden; deren WebSockets werden mit 4011 geschlossen. */
+  /** Sign out all other devices; their WebSockets are closed with 4011. */
   app.delete("/api/me/sessions/others", async (req, reply) => {
     const s = await requireSession(db, req, reply);
     if (!s) return;
@@ -70,7 +70,7 @@ export async function registerUserRoutes(app: FastifyInstance, db: Db, directory
     return { ok: true, revoked: gone.length };
   });
 
-  /** Eigene Sitzung serverseitig beenden (Abmelden im Client). */
+  /** End your own session server-side (signing out in the client). */
   app.delete("/api/me/sessions/current", async (req, reply) => {
     const s = await requireSession(db, req, reply);
     if (!s) return;
@@ -83,7 +83,7 @@ export async function registerUserRoutes(app: FastifyInstance, db: Db, directory
     if (!s) return;
     const id = Uuid.safeParse(req.params.id);
     if (!id.success) return reply.code(400).send({ error: "bad_request" });
-    // Nur eigene Sitzungen; fremde Kennungen sehen aus wie unbekannte.
+    // Only your own sessions; other people's identifiers look like unknown ones.
     const gone = await db.delete(sessions).where(and(eq(sessions.id, id.data), eq(sessions.userId, s.userId))).returning({ id: sessions.id });
     if (gone.length === 0) return reply.code(404).send({ error: "not_found" });
     hub.disconnectSession(id.data);

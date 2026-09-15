@@ -3,27 +3,28 @@ import { VideoPresets, createLocalVideoTrack, type LocalVideoTrack } from "livek
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { VoiceClient } from "./voice/voiceClient";
+import { t } from "./i18n";
 
 type Props = {
   cameras: MediaDeviceInfo[];
-  /** Vorauswahl (zuletzt benutzte Kamera), sonst die erste. */
+  /** Preselection (last used camera), otherwise the first one. */
   initial: string | null;
-  /** Vorauswahl der Hintergrund-Unschaerfe (0 = aus). */
+  /** Preselected background blur (0 = off). */
   initialBlur: number;
   onPick: (deviceId: string, blur: number) => void;
   onCancel: () => void;
 };
 
 export const BLUR_OPTIONS: { value: number; label: string }[] = [
-  { value: 0, label: "Normal" },
-  { value: 10, label: "Leicht unscharf" },
-  { value: 20, label: "Stark unscharf" },
+  { value: 0, label: t("blur.normal") },
+  { value: 10, label: t("blur.light") },
+  { value: 20, label: t("blur.strong") },
 ];
 
 /**
- * Kamera-Auswahl beim Einschalten (Vorgabe des Nutzers: bei mehreren Kameras immer fragen), inklusive Hintergrund.
- * Eigenes Modal mit Live-Vorschau; die Vorschau ist ein unpublizierter LiveKit-Track, damit die Unschaerfe
- * (BackgroundBlur-Prozessor) genauso aussieht wie spaeter im Kanal. Kein Browser-Dialog.
+ * Camera picker at switch-on time (as the user specified: always ask when there are several cameras), including the background.
+ * Own modal with a live preview; the preview is an unpublished LiveKit track so the blur
+ * (BackgroundBlur processor) looks exactly as it later will in the channel. No browser dialog.
  */
 export function CameraPicker({ cameras, initial, initialBlur, onPick, onCancel }: Props) {
   const [selected, setSelected] = useState(() => (initial && cameras.some((c) => c.deviceId === initial) ? initial : cameras[0]?.deviceId ?? ""));
@@ -34,7 +35,7 @@ export function CameraPicker({ cameras, initial, initialBlur, onPick, onCancel }
   const processor = useRef<BackgroundProcessorWrapper | null>(null);
   const canBlur = VoiceClient.supportsBlur();
 
-  // Vorschau der markierten Kamera; beim Wechsel und beim Schliessen die Kamera wieder freigeben.
+  // Preview of the highlighted camera; release the camera again when switching and when closing.
   useEffect(() => {
     let alive = true;
     let created: LocalVideoTrack | null = null;
@@ -50,7 +51,7 @@ export function CameraPicker({ cameras, initial, initialBlur, onPick, onCancel }
     };
   }, [selected]);
 
-  // Unschaerfe auf die Vorschau anwenden (derselbe Prozessor wie im Kanal).
+  // Apply the blur to the preview (the same processor as in the channel).
   useEffect(() => {
     if (!track || !canBlur) return;
     let cancelled = false;
@@ -59,47 +60,47 @@ export function CameraPicker({ cameras, initial, initialBlur, onPick, onCancel }
         if (blur <= 0) { if (processor.current) { await track.stopProcessor(); processor.current = null; } }
         else if (processor.current) await processor.current.switchTo({ mode: "background-blur", blurRadius: blur });
         else { const p = BackgroundBlur(blur); await track.setProcessor(p); if (!cancelled) processor.current = p; }
-      } catch (e) { if (!cancelled) setErr(`Hintergrund: ${e instanceof Error ? e.message : String(e)}`); }
+      } catch (e) { if (!cancelled) setErr(t("camera.bgError", { err: e instanceof Error ? e.message : String(e) })); }
     })();
     return () => { cancelled = true; };
   }, [track, blur, canBlur]);
 
-  // Erst die Vorschau freigeben, dann einschalten: sonst greift die Kamera doppelt.
+  // Release the preview first, then switch on: otherwise the camera is grabbed twice.
   const pick = () => { if (!selected) return; setTrack(null); onPick(selected, blur); };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); if (e.key === "Enter" && selected) pick(); };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }); // absichtlich ohne Abhaengigkeiten: greift immer auf den aktuellen Stand zu
+  }); // deliberately without dependencies: always reads the current state
 
   return (
     <div className="modal-backdrop dialog-backdrop" onMouseDown={onCancel}>
       <div className="modal dialog camera-picker" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
-        <h2>Kamera einschalten</h2>
+        <h2>{t("camera.title")}</h2>
         <div className="camera-preview">
           <video ref={videoRef} autoPlay playsInline muted className="mirror" />
           {err && <p className="error small">{err}</p>}
         </div>
-        <h3>Kamera</h3>
+        <h3>{t("camera.camera")}</h3>
         <ul className="camera-list">
           {cameras.map((c, i) => (
             <li key={c.deviceId}>
               <button className={`camera-option ${selected === c.deviceId ? "active" : ""}`} onClick={() => setSelected(c.deviceId)} onDoubleClick={pick}>
-                <Icon name="video" />{c.label || `Kamera ${i + 1}`}
+                <Icon name="video" />{c.label || t("camera.n", { n: i + 1 })}
               </button>
             </li>
           ))}
         </ul>
-        <h3>Hintergrund</h3>
+        <h3>{t("camera.background")}</h3>
         {canBlur ? (
           <div className="seg wide">
             {BLUR_OPTIONS.map((o) => <button key={o.value} className={blur === o.value ? "active" : ""} onClick={() => setBlur(o.value)}>{o.label}</button>)}
           </div>
-        ) : <p className="muted small">Dieser Browser unterstützt keine Hintergrund-Effekte (Chrome, Edge oder Brave nötig).</p>}
+        ) : <p className="muted small">{t("camera.noBlur")}</p>}
         <div className="dialog-actions">
-          <button className="secondary" onClick={onCancel}>Abbrechen</button>
-          <button disabled={!selected} onClick={pick}>Kamera einschalten</button>
+          <button className="secondary" onClick={onCancel}>{t("common.cancel")}</button>
+          <button disabled={!selected} onClick={pick}>{t("camera.title")}</button>
         </div>
       </div>
     </div>

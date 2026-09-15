@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { RawLogEntry } from "./store";
 import type { AudioStats, VoiceClient, VoiceState } from "./voice/voiceClient";
+import { fmtTime, t } from "./i18n";
 
 /**
- * Protokoll-Inspektor (PLAN 5): WebSocket-Ereignisse und LiveKit-Statistiken live.
- * Sichtbar ueber den Kaefer-Knopf oder ?debug in der URL. M3: Video-Bitraten je Simulcast-Stufe und je Empfangsspur
- * (Messgrundlage fuer PLAN 4.3).
+ * Protocol inspector (PLAN 5): WebSocket events and LiveKit statistics, live.
+ * Shown via the bug button or ?debug in the URL. M3: video bitrates per simulcast layer and per received track
+ * (measurement basis for PLAN 4.3).
  */
 const POLL_MS = 2000;
 const EMPTY: AudioStats = { path: { publisher: null, subscriber: null }, sender: null, receivers: [], videoSend: [], videoRecv: [] };
@@ -22,7 +23,7 @@ export function DebugPanel({ log, client, voice }: { log: RawLogEntry[]; client:
     const id = setInterval(() => {
       void client.stats().then((s) => {
         setStats(s);
-        // Bitrate aus der Differenz kumulierter Bytes seit der letzten Messung.
+        // Bitrate from the difference in cumulative bytes since the last measurement.
         const now = performance.now();
         const bytes: Record<string, number> = {}; const frames: Record<string, number> = {};
         for (const v of s.videoSend) { bytes[`s:${v.source}:${v.rid}`] = v.bytesSent; }
@@ -50,41 +51,41 @@ export function DebugPanel({ log, client, voice }: { log: RawLogEntry[]; client:
 
   return (
     <section className="debug">
-      <h3>Sprache und Video</h3>
+      <h3>{t("debug.heading")}</h3>
       <table>
         <tbody>
-          <tr><td>Status</td><td>{voice.status}</td></tr>
-          <tr><td>Kanal</td><td>{voice.channelId ?? "–"}</td></tr>
+          <tr><td>{t("debug.status")}</td><td>{voice.status}</td></tr>
+          <tr><td>{t("debug.channel")}</td><td>{voice.channelId ?? "–"}</td></tr>
           <tr><td>LiveKit-URL</td><td>{voice.rtcUrl ?? "–"}</td></tr>
-          <tr><td>Audio</td><td title="Web-Audio-Kontext muss running sein (Mikrofon-Tor, Pegel); Wiedergabe = Autoplay der <audio>-Elemente">Kontext {voice.audioContext} · Wiedergabe {voice.canPlayback ? "frei" : "blockiert"}</td></tr>
-          <tr><td>ICE-Weg</td><td title="Protokoll und Kandidatentyp: host = direkt, srflx = hinter NAT, relay = TURN">senden {stats.path.publisher ?? "–"} · empfangen {stats.path.subscriber ?? "–"}</td></tr>
-          <tr><td>Pegel / Tor</td><td>{voice.level.toFixed(3)} / {voice.gateOpen ? "offen" : "zu"}</td></tr>
-          <tr><td>Mikrofon</td><td>{voice.inputDeviceId ?? "–"}</td></tr>
-          <tr><td>Bildschirm-Ton Ausgabe</td><td>{voice.screenSink.deviceId ? `Gerät ${voice.screenSink.deviceId.slice(0, 12)}…` : "wie Sprache"} · {voice.screenSink.tracks} Spur(en){voice.screenSink.error ? ` · Fehler: ${voice.screenSink.error}` : ""}</td></tr>
-          <tr><td>Kamera / Bildschirm</td><td>{voice.cameraOn ? "an" : "aus"} / {voice.screenOn ? (voice.screenAudio ? "an, mit Ton" : "an, ohne Ton") : "aus"}</td></tr>
-          <tr><td>Summe</td><td>↑ {fmtKbps(totalUp)} · ↓ {fmtKbps(totalDown)} (alle Spuren, gemessen alle {POLL_MS / 1000} s)</td></tr>
-          <tr><td>Audio senden</td><td>{stats.sender ? `${fmtKbps(rates["s:audio"]?.kbps)}, ${stats.sender.packetsSent ?? "?"} Pakete, ${stats.sender.packetsLost ?? 0} verloren, Jitter ${fmtMs(stats.sender.jitter)}, RTT ${fmtMs(stats.sender.roundTripTime)}` : "–"}</td></tr>
+          <tr><td>{t("debug.audio")}</td><td title={t("debug.audioHint")}>{t("debug.audioRow", { ctx: voice.audioContext, playback: voice.canPlayback ? t("debug.free") : t("debug.blocked") })}</td></tr>
+          <tr><td>{t("debug.icePath")}</td><td title={t("debug.iceHint")}>{t("debug.iceRow", { pub: stats.path.publisher ?? "–", sub: stats.path.subscriber ?? "–" })}</td></tr>
+          <tr><td>{t("debug.levelGate")}</td><td>{voice.level.toFixed(3)} / {voice.gateOpen ? t("debug.open") : t("debug.closed")}</td></tr>
+          <tr><td>{t("debug.microphone")}</td><td>{voice.inputDeviceId ?? "–"}</td></tr>
+          <tr><td>{t("debug.screenOut")}</td><td>{voice.screenSink.deviceId ? t("debug.device", { id: voice.screenSink.deviceId.slice(0, 12) }) : t("debug.sameAsVoice")} · {t("debug.tracks", { n: voice.screenSink.tracks })}{voice.screenSink.error ? ` · ${t("debug.error", { err: voice.screenSink.error })}` : ""}</td></tr>
+          <tr><td>{t("debug.camScreen")}</td><td>{voice.cameraOn ? t("debug.on") : t("debug.off")} / {voice.screenOn ? (voice.screenAudio ? t("debug.onWithAudio") : t("debug.onNoAudio")) : t("debug.off")}</td></tr>
+          <tr><td>{t("debug.total")}</td><td>{t("debug.totalRow", { up: fmtKbps(totalUp), down: fmtKbps(totalDown), s: POLL_MS / 1000 })}</td></tr>
+          <tr><td>{t("debug.audioSend")}</td><td>{stats.sender ? t("debug.audioSendRow", { rate: fmtKbps(rates["s:audio"]?.kbps), sent: stats.sender.packetsSent ?? "?", lost: stats.sender.packetsLost ?? 0, jitter: fmtMs(stats.sender.jitter), rtt: fmtMs(stats.sender.roundTripTime) }) : "–"}</td></tr>
           {stats.videoSend.map((v) => (
-            <tr key={`${v.source}${v.rid}`}><td>{v.source === "screen" ? "Bildschirm" : "Kamera"} senden {v.rid}</td>
-              <td>{fmtKbps(rates[`s:${v.source}:${v.rid}`]?.kbps)}, {v.width}×{v.height} @ {Math.round(v.fps)} fps{v.limitation && v.limitation !== "none" ? `, begrenzt durch ${v.limitation}` : ""}</td></tr>
+            <tr key={`${v.source}${v.rid}`}><td>{v.source === "screen" ? t("debug.screen") : t("debug.camera")} {t("debug.send")} {v.rid}</td>
+              <td>{fmtKbps(rates[`s:${v.source}:${v.rid}`]?.kbps)}, {v.width}×{v.height} @ {Math.round(v.fps)} fps{v.limitation && v.limitation !== "none" ? t("debug.limitedBy", { what: v.limitation }) : ""}</td></tr>
           ))}
           {stats.receivers.map((r) => (
-            <tr key={r.identity}><td>Audio von {r.identity.slice(0, 8)}</td><td>{fmtKbps(rates[`r:${r.identity}:audio`]?.kbps)}, {r.packetsReceived ?? "?"} Pakete, {r.packetsLost ?? 0} verloren, Jitter {fmtMs(r.jitter)}</td></tr>
+            <tr key={r.identity}><td>{t("debug.audioFrom", { id: r.identity.slice(0, 8) })}</td><td>{t("debug.audioRecvRow", { rate: fmtKbps(rates[`r:${r.identity}:audio`]?.kbps), recv: r.packetsReceived ?? "?", lost: r.packetsLost ?? 0, jitter: fmtMs(r.jitter) })}</td></tr>
           ))}
           {stats.videoRecv.map((v) => (
-            <tr key={`${v.identity}${v.source}`}><td>{v.source === "screen" ? "Bildschirm" : "Kamera"} von {v.identity.slice(0, 8)}</td>
-              <td>{fmtKbps(rates[`r:${v.identity}:${v.source}`]?.kbps)}, {v.width ?? "?"}×{v.height ?? "?"} @ {rates[`r:${v.identity}:${v.source}`]?.fps ?? "?"} fps, {v.packetsLost ?? 0} verloren</td></tr>
+            <tr key={`${v.identity}${v.source}`}><td>{v.source === "screen" ? t("debug.screen") : t("debug.camera")} {t("debug.from")} {v.identity.slice(0, 8)}</td>
+              <td>{t("debug.videoRecvRow", { rate: fmtKbps(rates[`r:${v.identity}:${v.source}`]?.kbps), w: v.width ?? "?", h: v.height ?? "?", fps: rates[`r:${v.identity}:${v.source}`]?.fps ?? "?", lost: v.packetsLost ?? 0 })}</td></tr>
           ))}
           {voice.participants.map((p) => (
-            <tr key={p.identity}><td>{p.isLocal ? "ich" : p.name}</td><td>{p.identity.slice(0, 8)} · {p.speaking ? "spricht" : "still"} · {p.micMuted ? "stumm" : "offen"}{p.cameraOn ? " · Kamera" : ""}{p.screenOn ? " · Bildschirm" : ""} · {p.quality}</td></tr>
+            <tr key={p.identity}><td>{p.isLocal ? t("debug.me") : p.name}</td><td>{p.identity.slice(0, 8)} · {p.speaking ? t("debug.speaking") : t("debug.silent")} · {p.micMuted ? t("debug.muted") : t("debug.unmuted")}{p.cameraOn ? ` · ${t("debug.camera")}` : ""}{p.screenOn ? ` · ${t("debug.screen")}` : ""} · {p.quality}</td></tr>
           ))}
         </tbody>
       </table>
-      <h3>Sprach-Ereignisse (letzte {voice.events.length})</h3>
+      <h3>{t("debug.voiceEvents", { n: voice.events.length })}</h3>
       <pre className="wslog">{voice.events.join("\n")}</pre>
-      <h3>WebSocket (letzte {log.length})</h3>
+      <h3>{t("debug.wsEvents", { n: log.length })}</h3>
       <pre className="wslog">
-        {log.map((e) => `${new Date(e.at).toLocaleTimeString()} ${e.dir === "in" ? "<-" : "->"} ${e.text}`).join("\n")}
+        {log.map((e) => `${fmtTime(new Date(e.at).toISOString())} ${e.dir === "in" ? "<-" : "->"} ${e.text}`).join("\n")}
       </pre>
     </section>
   );

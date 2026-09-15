@@ -27,13 +27,13 @@ export async function registerInviteRoutes(app: FastifyInstance, db: Db) {
     if (!can(m.actor, Permission.CREATE_INVITES)) return reply.code(403).send({ error: "forbidden" });
     const body = CreateInviteRequest.safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
-    const code = randomBytes(9).toString("base64url"); // 12 Zeichen
+    const code = randomBytes(9).toString("base64url"); // 12 characters
     const expiresAt = body.data.expiresInHours ? new Date(Date.now() + body.data.expiresInHours * 3_600_000) : null;
     const [row] = await db.insert(invites).values({ code, createdBy: m.userId, expiresAt, maxUses: body.data.maxUses ?? null }).returning();
     return toInvite(row!);
   });
 
-  /** Eigene Einladungen; mit MANAGE_SERVER alle. */
+  /** Your own invites; with MANAGE_SERVER, all of them. */
   app.get("/api/invites", async (req, reply) => {
     const m = await requireMember(db, req, reply);
     if (!m) return;
@@ -56,7 +56,7 @@ export async function registerInviteRoutes(app: FastifyInstance, db: Db) {
     return { ok: true };
   });
 
-  /** Oeffentliche Vorschau fuer die Einladungsseite, ohne Anmeldung. */
+  /** Public preview for the invite page, without signing in. */
   app.get<{ Params: { code: string } }>("/api/invites/:code", async (req, reply) => {
     const code = InviteCode.safeParse(req.params.code);
     if (!code.success) return reply.code(400).send({ error: "bad_request" });

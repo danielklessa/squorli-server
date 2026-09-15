@@ -1,8 +1,8 @@
 /**
- * Sprachaktivierungs-Gate: reine Logik ohne Browser-APIs, damit sie testbar ist.
+ * Voice activation gate: pure logic without browser APIs, so it stays testable.
  *
- * Offen, sobald der Pegel die Schwelle ueberschreitet; schliesst erst, wenn der Pegel
- * fuer die Nachlaufzeit (hangover) unter der Schwelle geblieben ist.
+ * Open as soon as the level exceeds the threshold; closes only once the level
+ * has stayed below the threshold for the hangover time.
  */
 export class VoiceGate {
   private open = false;
@@ -10,7 +10,7 @@ export class VoiceGate {
 
   constructor(public threshold: number, public hangoverMs: number) {}
 
-  /** @param level RMS 0..1  @param now Zeitstempel in ms  @returns ob das Gate jetzt offen ist */
+  /** @param level RMS 0..1  @param now timestamp in ms  @returns whether the gate is open now */
   update(level: number, now: number): boolean {
     if (level >= this.threshold) {
       this.lastAbove = now;
@@ -31,7 +31,7 @@ export class VoiceGate {
   }
 }
 
-/** RMS-Pegel 0..1 aus Zeitbereichs-Samples (Float32, -1..1). */
+/** RMS level 0..1 from time-domain samples (Float32, -1..1). */
 export function rmsLevel(samples: Float32Array): number {
   let sum = 0;
   for (let i = 0; i < samples.length; i++) sum += samples[i]! * samples[i]!;

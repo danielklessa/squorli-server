@@ -1,16 +1,16 @@
-// Rauchtest gegen einen laufenden Server auf :3000 (pnpm dev oder node dist/index.js).
-// Deckt ab: Auth, Eigentuemer, Einladungen, Struktur (Kategorien/Kanaele/Rollen), Rechte-Hierarchie,
-// Nachrichten mit Verlauf und Anhang, WebSocket (welcome/state, voice, typing), Kick, Ban, Protokollversion.
+// Smoke test against a running server on :3000 (pnpm dev or node dist/index.js).
+// Covers: auth, owners, invites, structure (categories/channels/roles), permission hierarchy,
+// messages with history and attachment, WebSocket (welcome/state, voice, typing), kick, ban, protocol version.
 //
-// Der Eigentuemer-Schluessel wird in scripts/.smoke-owner.json gemerkt (gitignored), damit der Test
-// auf derselben Datenbank wiederholbar ist. Beim allerersten Lauf wird er automatisch Eigentuemer.
+// The owner key is remembered in scripts/.smoke-owner.json (gitignored) so the test
+// is repeatable against the same database. On the very first run it automatically becomes the owner.
 import * as ed from "@noble/ed25519";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 
-const PROTOCOL_VERSION = 4; // muss zu packages/protocol passen
+const PROTOCOL_VERSION = 4; // must match packages/protocol
 const BASE = process.env.SMOKE_URL ?? "http://localhost:3000";
 const OWNER_FILE = join(dirname(fileURLToPath(import.meta.url)), ".smoke-owner.json");
 const hex = (b) => Buffer.from(b).toString("hex");
@@ -33,7 +33,7 @@ async function newKey() {
   const priv = ed.utils.randomPrivateKey();
   return { priv, publicKey: hex(await ed.getPublicKeyAsync(priv)) };
 }
-// Domain, an die der Server Signaturen bindet (PUBLIC_DOMAIN), aus /api/health statt fest "localhost".
+// Domain the server binds signatures to (PUBLIC_DOMAIN), taken from /api/health instead of a hardcoded "localhost".
 const [, health] = await api("GET", "/api/health");
 const DOMAIN = health.domain ?? "localhost";
 
@@ -46,7 +46,7 @@ async function login(key, invite, userAgent) {
   return { status, body, token: body.sessionToken, userId: body.userId };
 }
 
-// WebSocket-Client mit Ereignispuffer
+// WebSocket client with an event buffer
 async function connectWs(token) {
   const ws = new WebSocket(BASE.replace(/^http/, "ws") + "/api/ws");
   const events = [];
@@ -62,14 +62,14 @@ async function connectWs(token) {
   ws.on("close", (code) => { isClosed = true; closeCode = code; });
   const send = (e) => ws.send(JSON.stringify(e));
   const close = () => new Promise((r) => { if (isClosed) return r(); ws.once("close", r); ws.close(); });
-  /** Wartet auf das Schliessen und liefert den Close-Code (null bei Timeout). */
+  /** Waits for the close and returns the close code (null on timeout). */
   const closed = (ms = 4000) => new Promise((r) => { if (isClosed) return r(closeCode); ws.once("close", (code) => r(code)); setTimeout(() => r(null), ms); });
   send({ type: "hello", protocolVersion: PROTOCOL_VERSION, sessionToken: token });
   const welcome = await waitFor((e) => e.type === "welcome" || e.type === "error");
   return { ws, events, waitFor, send, close, closed, welcome };
 }
 
-// ---------- Eigentuemer
+// ---------- Owner
 let ownerKey;
 if (existsSync(OWNER_FILE)) {
   const j = JSON.parse(readFileSync(OWNER_FILE, "utf8"));
@@ -78,7 +78,7 @@ if (existsSync(OWNER_FILE)) {
   ownerKey = await newKey();
   writeFileSync(OWNER_FILE, JSON.stringify({ priv: hex(ownerKey.priv), publicKey: ownerKey.publicKey }));
 }
-// Verzeichnisdienst (M6): wenn der Server einen nennt, dem Eigentuemer-Schluessel dort ein Handle geben (201 oder schon vorhanden: 409).
+// Directory service (M6): if the server names one, give the owner key a handle there (201, or 409 if it already exists).
 {
   const [, h] = await api("GET", "/api/health");
   if (h.directoryUrl) {
@@ -106,10 +106,10 @@ const [, ownerState] = await api("GET", "/api/state", undefined, owner.token);
 check("owner login + state", ownerState.settings?.ownerId === owner.userId && (ownerState.myPermissions & P.ADMINISTRATOR) !== 0, `owner ${owner.userId.slice(0, 8)}`);
 const [, health0] = await api("GET", "/api/health");
 check("health names directory (null or url)", "directoryUrl" in health0 && ("handle" in ownerState.members.find((m) => m.userId === owner.userId)), `directory ${health0.directoryUrl ?? "keins"}`);
-// Mit Verzeichnisdienst (M6): Handle des Eigentuemers wurde beim Login nachgeschlagen (registriert weiter oben).
+// With a directory service (M6): the owner's handle was looked up at sign-in (registered further above).
 if (health0.directoryUrl) check("owner handle resolved via directory", typeof ownerState.members.find((m) => m.userId === owner.userId)?.handle === "string", ownerState.members.find((m) => m.userId === owner.userId)?.handle);
 check("health publishes serverKey (directory registration)", /^[0-9a-f]{64}$/.test(health0.serverKey ?? ""));
-// Anzeigename aus dem Verzeichnis: der Server ist dort registriert (Token) und uebernimmt global/je Server beim Login; ohne Eintrag bleibt der lokale.
+// Display name from the directory: the server is registered there (token) and adopts the global/per-server name at sign-in; without an entry the local one stays.
 if (health0.directoryUrl) {
   const dir = health0.directoryUrl;
   const dj = async (method, path, body) => { const r = await fetch(dir + path, { method, headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined }); return [r.status, await r.json().catch(() => ({}))]; };
@@ -131,7 +131,7 @@ if (health0.directoryUrl) {
   check("directory: name change is pushed to the server without a new login", spush === 200 && stPush.members.find((m) => m.userId === owner.userId)?.displayName === "Smoke Push", stPush.members.find((m) => m.userId === owner.userId)?.displayName);
   await setName(health0.domain.toLowerCase(), null);
   await setName(null, null);
-  await new Promise((r) => setTimeout(r, 800)); // Pushes abwarten, bevor der lokale Name geleert wird
+  await new Promise((r) => setTimeout(r, 800)); // wait for the pushes before clearing the local name
   await api("PATCH", "/api/me", { displayName: null }, owner.token);
   const handleName = ownerState.members.find((m) => m.userId === owner.userId)?.handle;
   check("directory: names cleared -> local null stays, handle shown", (await nameAfterLogin()) === `@${handleName}`);
@@ -143,12 +143,12 @@ check("default role = Gast: nur sehen + Sprache", defaultRole?.name === "Gast" &
 const memberRole = ownerState.roles.find((r) => r.name === "Mitglied" && !r.isDefault);
 check("role Mitglied exists", !!memberRole && (memberRole.permissions & P.SEND_MESSAGES) !== 0 && (memberRole.permissions & P.STREAM_VIDEO) !== 0);
 
-// Server nicht offen (Standard), damit die Einladungslogik greift
+// server not open (default) so the invite logic applies
 await api("PATCH", "/api/settings", { openJoin: false, name: "Rauchtest-Server" }, owner.token);
 const [, s2] = await api("GET", "/api/state", undefined, owner.token);
 check("settings patch", s2.settings.name === "Rauchtest-Server" && s2.settings.openJoin === false);
 
-// ---------- Struktur
+// ---------- Structure
 const [sc, cat] = await api("POST", "/api/categories", { name: "Smoke" }, owner.token);
 const [st, textCh] = await api("POST", "/api/channels", { kind: "text", name: "smoke-text", categoryId: cat.id }, owner.token);
 const [sv, voiceCh] = await api("POST", "/api/channels", { kind: "voice", name: "smoke-voice", categoryId: cat.id, audioBitrate: 96, audioStereo: true }, owner.token);
@@ -163,7 +163,7 @@ check("create category + channels", sc === 200 && st === 200 && sv === 200);
 const [sr, modRole] = await api("POST", "/api/roles", { name: "Smoke-Mod", permissions: P.KICK_MEMBERS | P.MANAGE_MESSAGES, color: "#3498db" }, owner.token);
 check("create role", sr === 200 && modRole.position === 1);
 
-// ---------- Einladungen
+// ---------- Invites
 const [si, invite] = await api("POST", "/api/invites", { maxUses: 2 }, owner.token);
 check("create invite", si === 200 && /^[A-Za-z0-9_-]{6,32}$/.test(invite.code));
 const [sp, preview] = await api("GET", `/api/invites/${invite.code}`);
@@ -176,10 +176,10 @@ const badInvite = await login(keyB, "nope-nope-nope");
 check("bad invite rejected", badInvite.status === 403 && badInvite.body.error === "invite_invalid");
 const B = await login(keyB, invite.code);
 check("join with invite", B.status === 200);
-const B2 = await login(keyB); // Mitglied: braucht keine Einladung mehr
+const B2 = await login(keyB); // Member: no longer needs an invite
 check("member re-login without invite", B2.status === 200);
 
-// ---------- Nur mit Konto (Verwaltung): ohne Handle beim Verzeichnis 403 account_required; ohne Verzeichnis ist die Option wirkungslos.
+// ---------- Account required (admin): without a handle at the directory, 403 account_required; without a directory the option has no effect.
 const [sra] = await api("PATCH", "/api/settings", { requireAccount: true }, owner.token);
 const [, hra] = await api("GET", "/api/health");
 const [, stRa] = await api("GET", "/api/state", undefined, owner.token);
@@ -195,12 +195,12 @@ const ownerRa = await login(ownerKey);
 check("require account: owner exempt, existing member without account", ownerRa.status === 200 && (await login(keyB)).status === (hra.directoryUrl ? 403 : 200));
 await api("PATCH", "/api/settings", { requireAccount: false }, owner.token);
 
-// ---------- Serververzeichnis (M6d): auflisten + Beschreibung; mit Verzeichnis registriert sich der Server neu und erscheint in dessen Liste
+// ---------- Server directory (M6d): listing + description; with a directory the server re-registers and appears in its list
 const [sld] = await api("PATCH", "/api/settings", { listed: true, description: "Rauchtest im Verzeichnis" }, owner.token);
 const [, stLd] = await api("GET", "/api/state", undefined, owner.token);
 check("listing: patch listed + description in state", sld === 200 && stLd.settings.listed === true && stLd.settings.description === "Rauchtest im Verzeichnis");
 if (hra.directoryUrl) {
-  await new Promise((r) => setTimeout(r, 3500)); // entprellte Neuregistrierung (1,5 s) + Abruf
+  await new Promise((r) => setTimeout(r, 3500)); // debounced re-registration (1.5 s) + fetch
   const dl = await fetch(`${hra.directoryUrl}/api/servers`).then(async (r) => [r.status, await r.json().catch(() => [])]);
   const mine = Array.isArray(dl[1]) ? dl[1].find((x) => x.host === health.domain) : null;
   check("listing: server appears in the directory with description and member count", dl[0] === 200 && !!mine && mine.description === "Rauchtest im Verzeichnis" && typeof mine.memberCount === "number", JSON.stringify(dl[1]));
@@ -215,7 +215,7 @@ const [sldBad] = await api("PATCH", "/api/settings", { description: "x".repeat(2
 check("listing: description too long -> 400", sldBad === 400);
 await api("PATCH", "/api/me", { displayName: "Bea" }, B.token);
 
-// ---------- Sitzungen / Geraete (M6c): Liste, Bezeichnung aus dem User-Agent, Fernabmeldung (WS-Close 4011), andere, eigene
+// ---------- Sessions / devices (M6c): list, label from the user agent, remote sign-out (WS close 4011), others, own
 const [ssl0, sessList0] = await api("GET", "/api/me/sessions", undefined, B.token);
 check("sessions list: exactly one current", ssl0 === 200 && Array.isArray(sessList0) && sessList0.filter((s) => s.current).length === 1 && sessList0.length >= 2, `${sessList0.length ?? "?"} Sitzungen`);
 const B3 = await login(keyB, undefined, "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0");
@@ -242,13 +242,13 @@ const [srv6] = await api("DELETE", "/api/me/sessions/current", undefined, B4.tok
 const [sme4] = await api("GET", "/api/me", undefined, B4.token);
 check("logout current session -> token dead", srv6 === 200 && sme4 === 401);
 
-// Frisch beigetreten = Gast: darf nicht schreiben, bis ein Admin "Mitglied" vergibt.
+// Freshly joined = guest: may not post until an admin grants "member".
 const [sg1] = await api("POST", `/api/channels/${ownerState.channels.find((c) => c.kind === "text").id}/messages`, { content: "Gast?" }, B.token);
 const [sg2] = await api("POST", "/api/rtc-token", { channelId: ownerState.channels.find((c) => c.kind === "voice").id }, B.token);
 check("guest cannot write but may join voice", sg1 === 403 && sg2 === 200);
 await api("PUT", `/api/members/${B.userId}/roles`, { roleIds: [memberRole.id] }, owner.token);
 
-// ---------- Rechte
+// ---------- Permissions
 const [sb1] = await api("POST", "/api/channels", { kind: "text", name: "nope" }, B.token);
 check("member cannot create channels", sb1 === 403);
 const [sb2] = await api("DELETE", `/api/members/${owner.userId}`, undefined, B.token);
@@ -256,7 +256,7 @@ check("member cannot kick", sb2 === 403);
 const [sar] = await api("PUT", `/api/members/${B.userId}/roles`, { roleIds: [memberRole.id, modRole.id] }, owner.token);
 const [, stB] = await api("GET", "/api/state", undefined, B.token);
 check("assign role -> permissions update", sar === 200 && (stB.myPermissions & P.KICK_MEMBERS) !== 0 && stB.members.find((m) => m.userId === B.userId)?.roleIds.includes(modRole.id));
-// ---------- Mehrere Eigentuemer: nur Eigentuemer ernennen, Rechte folgen sofort, der erste Eigentuemer bleibt
+// ---------- Multiple owners: only owners can appoint, permissions follow immediately, the first owner stays
 const [so0] = await api("PUT", `/api/members/${B.userId}/owner`, { owner: true }, B.token);
 check("non-owner cannot grant owner", so0 === 403);
 const [so1] = await api("PUT", `/api/members/${B.userId}/owner`, { owner: true }, owner.token);
@@ -269,7 +269,7 @@ const [so3] = await api("PUT", `/api/members/${B.userId}/owner`, { owner: false 
 const [, stOwn2] = await api("GET", "/api/state", undefined, B.token);
 check("revoke owner -> back to role permissions", so3 === 200 && stOwn2.members.find((m) => m.userId === B.userId)?.isOwner === false && (stOwn2.myPermissions & P.ADMINISTRATOR) === 0 && stOwn2.members.find((m) => m.userId === owner.userId)?.isOwner === true);
 
-// ---------- Server-Icon (Verwaltung): Upload, Auslieferung, Favicon-URL in /api/health, Ablehnungen, Entfernen
+// ---------- Server icon (admin): upload, serving, favicon URL in /api/health, rejections, removal
 const PNG1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
 const pngForm = () => { const f = new FormData(); f.append("file", new Blob([PNG1], { type: "image/png" }), "icon.png"); return f; };
 const [si1, ri1] = await api("PUT", "/api/settings/icon", pngForm(), owner.token);
@@ -291,7 +291,7 @@ check("mod cannot kick owner", sb3 === 403 && kickOwner.error === "target_above_
 const [sb4] = await api("PATCH", `/api/roles/${modRole.id}`, { permissions: P.ADMINISTRATOR }, B.token);
 check("mod cannot escalate role", sb4 === 403);
 
-// ---------- WebSocket + Nachrichten
+// ---------- WebSocket + messages
 const wsA = await connectWs(owner.token);
 check("ws welcome with state", wsA.welcome.type === "welcome" && wsA.welcome.state.channels.some((c) => c.id === textCh.id));
 const wsB = await connectWs(B.token);
@@ -311,7 +311,7 @@ check("no text in voice channel", sm4 === 404);
 const [smEmpty] = await api("POST", `/api/channels/${textCh.id}/messages`, { content: "   " }, B.token);
 check("empty message rejected", smEmpty === 400);
 
-// Anhang
+// Attachment
 const fd = new FormData();
 fd.append("file", new Blob(["hallo datei"], { type: "text/plain" }), "notiz.txt");
 const [su, att] = await api("POST", "/api/attachments", fd, B.token);
@@ -323,14 +323,14 @@ check("download attachment", dl.status === 200 && (await dl.text()) === "hallo d
 const [sm6] = await api("POST", `/api/channels/${textCh.id}/messages`, { content: "", attachmentIds: [att.id] }, B.token);
 check("attachment cannot be reused", sm6 === 400);
 
-// Verlauf + Cursor
+// History + cursor
 for (let i = 0; i < 3; i++) await api("POST", `/api/channels/${textCh.id}/messages`, { content: `n${i}` }, owner.token);
 const [sh, page1] = await api("GET", `/api/channels/${textCh.id}/messages?limit=2`, undefined, B.token);
 const [, page2] = await api("GET", `/api/channels/${textCh.id}/messages?limit=10&before=${page1.messages[0].seq}`, undefined, B.token);
 check("history paging", sh === 200 && page1.messages.length === 2 && page1.hasMore === true && page2.messages.length === 3 && page2.hasMore === false
   && page2.messages[0].id === msg1.id, `seq ${page1.messages.map((m) => m.seq)} | ${page2.messages.map((m) => m.seq)}`);
 
-// Loeschen: Mod darf fremde loeschen, Autor eigene
+// Deleting: a mod may delete others' messages, the author their own
 const [sd1] = await api("DELETE", `/api/messages/${page1.messages[1].id}`, undefined, B.token);
 const evDel = await wsA.waitFor((e) => e.type === "message.delete" && e.id === page1.messages[1].id).catch(() => null);
 check("mod deletes foreign message", sd1 === 200 && !!evDel);
@@ -338,7 +338,7 @@ const [sd2] = await api("DELETE", `/api/messages/${msg2.id}`, undefined, B.token
 const dlGone = await api("GET", att.url, undefined, undefined, true);
 check("delete own message removes attachment", sd2 === 200 && dlGone.status === 404);
 
-// Tippen + Sprachkanal
+// Typing + voice channel
 wsB.send({ type: "typing", channelId: textCh.id });
 const evTyping = await wsA.waitFor((e) => e.type === "typing" && e.userId === B.userId).catch(() => null);
 check("typing forwarded", !!evTyping);
@@ -351,7 +351,7 @@ check("voice.join text channel rejected", !!evVoiceErr);
 const [srt] = await api("POST", "/api/rtc-token", { channelId: voiceCh.id }, B.token);
 const [srt2] = await api("POST", "/api/rtc-token", { channelId: textCh.id }, B.token);
 check("rtc-token voice only", srt === 200 && srt2 === 404);
-// M3: Kamera/Bildschirm nur mit STREAM_VIDEO; LiveKit setzt das per canPublishSources im Token durch.
+// M3: camera/screen only with STREAM_VIDEO; LiveKit enforces this via canPublishSources in the token.
 const grantOf = (tok) => JSON.parse(Buffer.from(tok.split(".")[1], "base64url").toString()).video;
 const [, ownerTok] = await api("POST", "/api/rtc-token", { channelId: voiceCh.id }, owner.token);
 check("rtc-token owner: mic+camera+screen+screen audio", ["microphone", "camera", "screen_share", "screen_share_audio"].every((x) => grantOf(ownerTok.token).canPublishSources?.includes(x)));
@@ -360,7 +360,7 @@ const [, bTok] = await api("POST", "/api/rtc-token", { channelId: voiceCh.id }, 
 check("rtc-token ohne STREAM_VIDEO: nur Mikrofon", JSON.stringify(grantOf(bTok.token).canPublishSources) === JSON.stringify(["microphone"]));
 await api("PATCH", `/api/roles/${memberRole.id}`, { permissions: memberRole.permissions }, owner.token);
 
-// ---------- Sprachkanal-Moderation (M3): verschieben, Kamera/Bildschirm beenden, Streamen sperren
+// ---------- Voice channel moderation (M3): move, stop camera/screen, block streaming
 const [, voiceCh2] = await api("POST", "/api/channels", { kind: "voice", name: "smoke-voice-2", categoryId: cat.id }, owner.token);
 const [smv0] = await api("POST", `/api/members/${owner.userId}/move`, { channelId: voiceCh2.id }, B.token);
 check("move without MODERATE_VOICE rejected", smv0 === 403);
@@ -385,7 +385,7 @@ const evMovedOut = await wsB.waitFor((e) => e.type === "voice.moved" && e.channe
 check("move out of voice -> voice.moved null", smv2 === 200 && !!evMovedOut);
 await api("DELETE", `/api/channels/${voiceCh2.id}`, undefined, owner.token);
 
-// ---------- Kick / Ban
+// ---------- Kick / ban
 const keyC = await newKey();
 const C = await login(keyC, invite.code);
 check("second invite use", C.status === 200);
@@ -411,7 +411,7 @@ check("unban + rejoin", sub === 200 && Cback.status === 200);
 const [sbanSelf] = await api("POST", "/api/bans", { userId: owner.userId }, owner.token);
 check("cannot ban self", sbanSelf === 400);
 
-// ---------- Protokollversion
+// ---------- Protocol version
 const wsOld = new WebSocket(BASE.replace(/^http/, "ws") + "/api/ws");
 await new Promise((r) => wsOld.on("open", r));
 wsOld.send(JSON.stringify({ type: "hello", protocolVersion: 99, sessionToken: owner.token }));
@@ -419,7 +419,7 @@ const vErr = JSON.parse(await new Promise((r) => wsOld.once("message", (m) => r(
 check("ws rejects v99", vErr.type === "error" && vErr.code === "protocol_version");
 await new Promise((r) => wsOld.once("close", r));
 
-// ---------- Aufraeumen
+// ---------- Cleanup
 await wsA.close(); await wsB.close();
 await api("DELETE", `/api/invites/${invite.code}`, undefined, owner.token);
 await api("DELETE", `/api/invites/${invite2.code}`, undefined, owner.token);

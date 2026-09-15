@@ -1,31 +1,31 @@
 /**
- * Sprach-Einstellungen pro Geraet (PLAN 3.5: "Nutzer waehlt pro Geraet"). Liegen im localStorage.
+ * Voice settings per device (PLAN 3.5: "the user chooses per device"). Stored in localStorage.
  */
 export type VoiceMode = "vad" | "ptt";
 
 export type VoiceSettings = {
   mode: VoiceMode;
-  /** KeyboardEvent.code, z. B. "Space" oder "KeyV". */
+  /** KeyboardEvent.code, e.g. "Space" or "KeyV". */
   pttKey: string;
-  /** Schwelle fuer Sprachaktivierung, 0..1 (RMS-Pegel). */
+  /** Threshold for voice activation, 0..1 (RMS level). */
   vadThreshold: number;
-  /** Nachlaufzeit in ms, damit Wortenden nicht abgeschnitten werden. */
+  /** Hangover time in ms so that word endings are not cut off. */
   vadHangoverMs: number;
   inputDeviceId: string | null;
   outputDeviceId: string | null;
-  /** Eigenes Ausgabegeraet fuer den Ton von Bildschirmfreigaben (null = wie Sprache). Nur Chromium (setSinkId). */
+  /** Separate output device for screen share audio (null = same as voice). Chromium only (setSinkId). */
   screenOutputDeviceId: string | null;
   cameraDeviceId: string | null;
-  /** Sendeaufloesung der Kamera (Simulcast liefert kleinere Stufen automatisch mit). */
+  /** Send resolution of the camera (simulcast supplies smaller layers automatically). */
   cameraQuality: "360p" | "720p";
-  /** Hintergrund-Unschaerfe der Kamera: 0 = aus, sonst Radius (10 leicht, 20 stark). Nur in Browsern mit Unterstuetzung. */
+  /** Camera background blur: 0 = off, otherwise the radius (10 light, 20 strong). Only in browsers that support it. */
   cameraBlur: number;
 };
 
 const KEY = "chat.voice.v1";
 
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
-  mode: "vad", // Standard laut Plan: funktioniert ohne Erklaerung
+  mode: "vad", // Default per the plan: works without explanation
   pttKey: "Space",
   vadThreshold: 0.04,
   vadHangoverMs: 400,
@@ -48,5 +48,5 @@ export function loadVoiceSettings(): VoiceSettings {
 }
 
 export function saveVoiceSettings(s: VoiceSettings): void {
-  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* privater Modus o. ae.: dann eben nicht */ }
+  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* private mode or similar: then simply not */ }
 }

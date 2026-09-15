@@ -7,14 +7,14 @@ import { bans, categories, channels, members, roles, serverSettings, users } fro
 import { SETTINGS_ID } from "./state";
 
 /**
- * Sorgt beim Start fuer einen benutzbaren Server: Einstellungen, Rollen Gast (Standard), Mitglied, Admin,
- * eine Kategorie mit Text- und Sprachkanal. Nutzer aus M0/M1 (vor Mitgliedschaften) werden einmalig Mitglied.
+ * Ensures a usable server at startup: settings, the roles guest (default), member and admin,
+ * one category with a text and a voice channel. Users from M0/M1 (predating memberships) become members once.
  */
 export async function bootstrap(db: Db, config: Config, log: FastifyBaseLogger) {
   await db.insert(serverSettings).values({ id: SETTINGS_ID, name: config.SERVER_NAME }).onConflictDoNothing();
 
-  // Frische Datenbank = keine Standardrolle. Nicht "keine Rollen" pruefen: Migration 0004 legt "Mitglied" auch in
-  // leeren Datenbanken an, dann fehlten Gast und Admin (Fehler 14.09.2026). Bestehende Server (mit Standardrolle) bleiben unangetastet.
+  // Fresh database = no default role. Do not check for "no roles": migration 0004 creates "member" in empty
+  // databases as well, which left guest and admin missing (bug on 2026-09-14). Existing servers (with a default role) are left untouched.
   const existing = await db.select({ name: roles.name, isDefault: roles.isDefault }).from(roles);
   if (!existing.some((r) => r.isDefault)) {
     const wanted = [
@@ -36,7 +36,7 @@ export async function bootstrap(db: Db, config: Config, log: FastifyBaseLogger) 
     log.info("Kanaele angelegt: #allgemein, Lobby");
   }
 
-  // Einmalige Uebernahme: Nutzer, die vor der Mitgliederverwaltung angelegt wurden.
+  // One-time migration: users created before member management existed.
   const [mc] = await db.select({ n: count() }).from(members);
   if ((mc?.n ?? 0) === 0) {
     const banned = (await db.select({ userId: bans.userId }).from(bans)).map((b) => b.userId);
@@ -48,7 +48,7 @@ export async function bootstrap(db: Db, config: Config, log: FastifyBaseLogger) 
   }
 
   const [s] = await db.select().from(serverSettings).where(eq(serverSettings.id, SETTINGS_ID)).limit(1);
-  // Mehrere Eigentuemer (14.09.2026): der erste Eigentuemer bekommt einmalig members.is_owner, damit Liste und Rechte eine Quelle haben.
+  // Multiple owners (2026-09-14): the first owner gets members.is_owner once, so list and permissions have a single source.
   if (s?.ownerId) await db.update(members).set({ isOwner: true }).where(and(eq(members.userId, s.ownerId), eq(members.isOwner, false)));
   if (!s?.ownerId) {
     log.warn(config.OWNER_PUBLIC_KEY

@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { Iso, PublicKey, Signature, Uuid } from "./primitives";
 
-// KOPIE-HINWEIS: Diese Datei (wie primitives.ts, backup.ts, useragent.ts samt Tests) liegt byte-identisch auch im Repo
-// squorli-directory unter packages/protocol/src. Quelle ist squorli-server; nach jeder Aenderung dorthin kopieren (siehe AGENTS.md).
+// COPY NOTE: this file (like primitives.ts, backup.ts, useragent.ts including their tests) also exists byte-identically in the
+// squorli-directory repo under packages/protocol/src. The source is squorli-server; copy it over after every change (see AGENTS.md).
 
-/** Challenge-Response-Anmeldung mit Ed25519: Chat-Server (/api/auth/challenge) und Verzeichnisdienst (/api/challenge) nutzen dieselbe Form. */
+/** Challenge-response sign-in with Ed25519: chat server (/api/auth/challenge) and directory service (/api/challenge) use the same shape. */
 export const ChallengeRequest = z.object({ publicKey: PublicKey });
 export const ChallengeResponse = z.object({
   challengeId: Uuid,
@@ -14,16 +14,16 @@ export const ChallengeResponse = z.object({
 export type ChallengeResponse = z.infer<typeof ChallengeResponse>;
 
 /**
- * Vertrag des Verzeichnisdienstes (PLAN 3.2 / M6, vorgezogen am 14.09.2026):
- * Handle (@name) -> oeffentlicher Schluessel. Der Dienst ist bewusst schmal; Chat-Server fragen ihn nur
- * optional und tolerieren seinen Ausfall (dann gilt der Schluessel ohne Handle).
+ * Contract of the directory service (PLAN 3.2 / M6, brought forward on 2026-09-14):
+ * Handle (@name) -> public key. The service is deliberately narrow; chat servers query it only
+ * optionally and tolerate its outage (the key then applies without a handle).
  *
- * M6a: Registrierung und Aufloesung. M6b: verschluesseltes Schluessel-Backup.
- * M6c: TOTP-Authenticator und Wiederherstellungscodes als zweiter Faktor fuer den Schluesselabruf, signierte Kontoaktionen,
- * Liste der Schluesselabrufe. SMTP bleibt vorbereitet.
+ * M6a: registration and resolution. M6b: encrypted key backup.
+ * M6c: TOTP authenticator and recovery codes as a second factor for key retrieval, signed account actions,
+ * list of key retrievals. SMTP remains prepared.
  */
 
-/** Handle ohne @: 3-32 Zeichen, Kleinbuchstaben, Ziffern, Punkt, Unterstrich; beginnt und endet alphanumerisch. */
+/** Handle without @: 3-32 characters, lowercase letters, digits, dot, underscore; starts and ends alphanumeric. */
 export const Handle = z
   .string()
   .trim()
@@ -32,7 +32,7 @@ export const Handle = z
   .max(32)
   .regex(/^[a-z0-9](?:[a-z0-9_.]*[a-z0-9])?$/, "3-32 Zeichen: a-z, 0-9, Punkt, Unterstrich");
 
-/** Registrierung ist an den Host des Dienstes gebunden (wie der Login an PUBLIC_DOMAIN), damit Signaturen nicht wanderbar sind. */
+/** Registration is bound to the service's host (like sign-in is to PUBLIC_DOMAIN) so signatures cannot be moved elsewhere. */
 export function directoryRegisterMessage(directoryHost: string, handle: string, nonce: string): string {
   return `community-directory-register\n${directoryHost}\n${handle}\n${nonce}`;
 }
@@ -44,61 +44,61 @@ export const DirectoryRegisterRequest = z.object({
   signature: Signature,
 });
 
-/** Anzeigename (Chat-Server: pro Server, PLAN 3.2; Verzeichnis: global und je Server). Leer = Handle bzw. Kurzform des Schluessels. */
+/** Display name (chat server: per server, PLAN 3.2; directory: global and per server). Empty = handle or the short form of the key. */
 export const DisplayName = z.string().trim().min(1).max(32);
-/** Host eines Chat-Servers (PUBLIC_DOMAIN, ggf. mit Port), Schluessel der Anzeigenamen je Server im Verzeichnis. */
+/** Host of a chat server (PUBLIC_DOMAIN, with port if any), the key for per-server display names in the directory. */
 export const ServerHost = z.string().trim().toLowerCase().min(1).max(253).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d{1,5})?$/, "Hostname, optional mit Port");
 
 export const DirectoryAccount = z.object({
   handle: Handle,
   publicKey: PublicKey,
   createdAt: Iso,
-  /** M6b: Passwort-Backup vorhanden (Anmeldung auf anderen Geraeten moeglich). */
+  /** M6b: a password backup exists (signing in on other devices is possible). */
   hasBackup: z.boolean().default(false),
-  /** Globaler Anzeigename; nur fuer registrierte Chat-Server (Server-Token, `?server=<host>`), oeffentlich immer null. */
+  /** Global display name; only for registered chat servers (server token, `?server=<host>`), always null publicly. */
   displayName: DisplayName.nullable().default(null),
-  /** Anzeigename fuer genau den Server aus `?server=<host>` (nur mit dessen Token); null ohne Eintrag. Gilt vor `displayName`. */
+  /** Display name for exactly the server from `?server=<host>` (only with its token); null if there is no entry. Takes precedence over `displayName`. */
   serverDisplayName: DisplayName.nullable().default(null),
 });
 
-// ---- M6b: passwortverschluesseltes Schluessel-Backup (Krypto in backup.ts)
+// ---- M6b: password-encrypted key backup (crypto in backup.ts)
 const Hex = (bytes: number) => z.string().regex(new RegExp(`^[0-9a-f]{${bytes * 2}}$`), `${bytes * 2} hex chars`);
 
-/** Parameter des Backups, vom Client festgelegt; der Dienst reicht sie nur durch (iv ist nur im Blob, nicht in der Parameter-Abfrage). */
+/** Parameters of the backup, chosen by the client; the service only passes them through (iv is in the blob only, not in the parameter query). */
 export const BackupParams = z.object({
   kdf: z.literal("pbkdf2-sha256"),
   iterations: z.number().int().min(100_000).max(10_000_000),
   salt: Hex(16),
   iv: Hex(12),
 });
-/** Aus dem Passwort abgeleiteter Auth-Schluessel; berechtigt zum Abruf des Chiffretexts, der Dienst speichert nur seinen SHA-256. */
+/** Auth key derived from the password; grants retrieval of the ciphertext, the service stores only its SHA-256. */
 export const BackupAuthKey = Hex(32);
-/** Ablegen ist wie die Registrierung an Host + Challenge gebunden und deckt den Chiffretext mit ab. */
+/** Storing is bound to host + challenge like registration and also covers the ciphertext. */
 export function directoryBackupMessage(directoryHost: string, nonce: string, ciphertext: string): string {
   return `community-directory-backup\n${directoryHost}\n${nonce}\n${ciphertext}`;
 }
-// ---- M6c: zweiter Faktor. 6 Ziffern = TOTP-Code, sonst Wiederherstellungscode (xxxxx-xxxxx); der Dienst entscheidet nach Form.
+// ---- M6c: second factor. 6 digits = TOTP code, otherwise a recovery code (xxxxx-xxxxx); the service decides by shape.
 export const SecondFactorCode = z.string().trim().min(6).max(20);
 
 export const BackupUploadRequest = z.object({
   publicKey: PublicKey,
   challengeId: Uuid,
   signature: Signature,
-  /** base64, AES-GCM ueber den 32-Byte-Seed (48 Byte). */
+  /** base64, AES-GCM over the 32-byte seed (48 bytes). */
   ciphertext: z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/).max(512),
   params: BackupParams,
   authKey: BackupAuthKey,
-  /** M6c: Pflicht, wenn der Authenticator aktiv ist (Passwort aendern = Backup ersetzen). */
+  /** M6c: mandatory when the authenticator is active (changing the password = replacing the backup). */
   code: SecondFactorCode.optional(),
 });
-/** Erster Schritt der Wiederherstellung: Salt und Iterationen, damit der Client den Auth-Schluessel ableiten kann. */
+/** First step of recovery: salt and iterations so the client can derive the auth key. */
 export const BackupParamsResponse = BackupParams.omit({ iv: true });
-/** Zweiter Schritt; `code` erst nach 401 totp_required noetig (die Antwort kommt nur bei richtigem Passwort). */
+/** Second step; `code` is only needed after a 401 totp_required (the response only comes with the correct password). */
 export const BackupFetchRequest = z.object({ handle: Handle, authKey: BackupAuthKey, code: SecondFactorCode.optional() });
 export const BackupBlob = z.object({ handle: Handle, publicKey: PublicKey, ciphertext: z.string(), params: BackupParams, updatedAt: Iso });
 
-// ---- M6c: signierte Kontoaktionen (Authenticator, Wiederherstellungscodes, Kontostatus). Gleiches Muster wie Registrierung
-// und Backup: Challenge + Signatur ueber Host, Nonce und Nutzlast (bei Aktionen mit Code ist der Code die Nutzlast).
+// ---- M6c: signed account actions (authenticator, recovery codes, account status). Same pattern as registration
+// and backup: challenge + signature over host, nonce and payload (for actions with a code, the code is the payload).
 export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends"]);
 export type DirectoryAction = z.infer<typeof DirectoryAction>;
 export function directoryActionMessage(directoryHost: string, action: DirectoryAction, nonce: string, payload = ""): string {
@@ -107,23 +107,23 @@ export function directoryActionMessage(directoryHost: string, action: DirectoryA
 export const SignedActionRequest = z.object({ publicKey: PublicKey, challengeId: Uuid, signature: Signature });
 export const CodeActionRequest = SignedActionRequest.extend({ code: SecondFactorCode });
 
-// ---- Anzeigenamen im Verzeichnis: global (server = null) oder je Chat-Server (server = dessen Host). Registrierte Chat-Server
-// holen beim Login `GET /api/keys/<key>?server=<host>` (mit ihrem Server-Token) und uebernehmen serverDisplayName ?? displayName.
-// Die Nutzlast der Signatur ist "<server|leer>\n<name|leer>", damit weder Server noch Name ausgetauscht werden koennen.
+// ---- Display names in the directory: global (server = null) or per chat server (server = that server's host). Registered chat servers
+// fetch `GET /api/keys/<key>?server=<host>` on sign-in (with their server token) and adopt serverDisplayName ?? displayName.
+// The signature's payload is "<server|empty>\n<name|empty>" so that neither server nor name can be swapped out.
 export function directoryProfilePayload(server: string | null, displayName: string | null): string {
   return `${server ?? ""}\n${displayName ?? ""}`;
 }
 export const ProfileUpdateRequest = SignedActionRequest.extend({ server: ServerHost.nullable(), displayName: DisplayName.nullable() });
-/** Ein Chat-Server, der den Schluessel nachgeschlagen hat (Login dort), mit dem dort geltenden Anzeigenamen (Kontoseite). `verified` = beim Verzeichnis registriert. */
+/** A chat server that has looked up the key (a sign-in there), with the display name that applies there (account page). `verified` = registered with the directory. */
 export const AccountServer = z.object({
   host: ServerHost, name: z.string().nullable(), displayName: DisplayName.nullable(), lastSeenAt: Iso, verified: z.boolean().default(false),
-  /** Icon des Servers beim Verzeichnis (M6d): Zeitpunkt der letzten Uebernahme, null = keins. URL: directoryServerIconUrl(). */
+  /** The server's icon at the directory (M6d): time it was last taken over, null = none. URL: directoryServerIconUrl(). */
   iconUpdatedAt: Iso.nullable().default(null),
 });
 
-// ---- Server-Registrierung: ein Chat-Server weist seinen Schluessel nach (Signatur ueber Host + Nonce) und die Kontrolle ueber
-// seinen Host (das Verzeichnis liest `proofUrl`, die /api/health des Servers, und vergleicht `serverKey`). Danach darf er mit dem
-// Token (Bearer, 24 h, bei 401 neu registrieren) Handle und Anzeigenamen seiner Nutzer lesen; ohne Token gibt es nur Handle + Schluessel.
+// ---- Server registration: a chat server proves its key (signature over host + nonce) and control over
+// its host (the directory reads `proofUrl`, the server's /api/health, and compares `serverKey`). After that it may use the
+// token (bearer, 24 h, re-register on a 401) to read the handle and display name of its users; without a token there is only handle + key.
 export function directoryServerRegisterMessage(directoryHost: string, host: string, nonce: string): string {
   return `community-directory-server-register\n${directoryHost}\n${host}\n${nonce}`;
 }
@@ -133,18 +133,18 @@ export const ServerRegisterRequest = z.object({
   publicKey: PublicKey,
   challengeId: Uuid,
   signature: Signature,
-  /** /api/health des Chat-Servers; muss auf `host` zeigen (https; http nur fuer localhost/127.0.0.1) und `serverKey` = publicKey liefern. */
+  /** The chat server's /api/health; must point at `host` (https; http only for localhost/127.0.0.1) and return `serverKey` = publicKey. */
   proofUrl: z.string().url(),
-  /** Serververzeichnis (M6d): oeffentlich auflisten? Dazu Beschreibung, offener Beitritt und Mitgliederzahl (nur Anzeige). */
+  /** Server directory (M6d): list publicly? Plus description, open join and member count (display only). */
   listed: z.boolean().default(false),
   description: z.string().trim().max(200).nullable().default(null),
   openJoin: z.boolean().default(false),
   memberCount: z.number().int().min(0).nullable().default(null),
 });
 /**
- * Eintrag im oeffentlichen Serververzeichnis (M6d, GET /api/servers: nur Server mit `listed`, deren Token nicht abgelaufen ist).
- * Das Icon holt das Verzeichnis bei jeder Registrierung selbst von <proofUrl-Basis>/api/server-icon (Host ist nachgewiesen) und
- * liefert es unter GET /api/servers/<host>/icon aus; Clients laden Icons also nur vom Verzeichnis, nie von fremden Servern.
+ * Entry in the public server directory (M6d, GET /api/servers: only servers with `listed` whose token has not expired).
+ * The directory fetches the icon itself from <proofUrl base>/api/server-icon on every registration (the host is proven) and
+ * serves it under GET /api/servers/<host>/icon; so clients load icons only from the directory, never from foreign servers.
  */
 export const DirectoryServer = z.object({
   host: ServerHost,
@@ -156,22 +156,22 @@ export const DirectoryServer = z.object({
   registeredAt: Iso,
 });
 export const ServerListResponse = z.array(DirectoryServer);
-/** URL des Server-Icons beim Verzeichnis (mit Versionsparameter, lange cachebar); null = kein Icon. */
+/** URL of the server icon at the directory (with a version parameter, cacheable for a long time); null = no icon. */
 export function directoryServerIconUrl(dirUrl: string, host: string, iconUpdatedAt: string | null): string | null {
   return iconUpdatedAt ? `${dirUrl}/api/servers/${encodeURIComponent(host)}/icon?v=${Date.parse(iconUpdatedAt)}` : null;
 }
-/** Link zum Chat-Server: https, ausser fuer localhost/127.0.0.1 (Dev). */
+/** Link to the chat server: https, except for localhost/127.0.0.1 (dev). */
 export function directoryServerUrl(host: string): string {
   return `${/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) ? "http" : "https"}://${host}`;
 }
 export const ServerRegisterResponse = z.object({ host: ServerHost, token: z.string().regex(/^[0-9a-f]{64}$/), expiresAt: Iso });
-/** Sammelabfrage eines registrierten Servers (Bearer-Token): Handle + Namen fuer viele Schluessel auf einmal (periodischer Abgleich). Unbekannte Schluessel fehlen in der Antwort. */
+/** Bulk query by a registered server (bearer token): handle + names for many keys at once (periodic reconciliation). Unknown keys are absent from the response. */
 export const ServerResolveRequest = z.object({ publicKeys: z.array(PublicKey).min(1).max(200) });
 export const ServerResolveResponse = z.array(DirectoryAccount);
 /**
- * Push vom Verzeichnis an einen registrierten Chat-Server (POST <proofUrl-Basis>/api/directory/notify) nach einer Namensaenderung:
- * nur der Schluessel, keine Daten. Der Server holt den Stand selbst mit seinem Token (deshalb braucht der Push keine Signatur;
- * ein Fremder kann hoechstens einen ueberfluessigen Abruf ausloesen).
+ * Push from the directory to a registered chat server (POST <proofUrl base>/api/directory/notify) after a name change:
+ * only the key, no data. The server fetches the state itself with its token (which is why the push needs no signature;
+ * a stranger can at most trigger a superfluous fetch).
  */
 export const DirectoryNotifyRequest = z.object({ publicKey: PublicKey });
 export type ServerResolveRequest = z.infer<typeof ServerResolveRequest>;
@@ -179,11 +179,11 @@ export type ServerRegisterRequest = z.infer<typeof ServerRegisterRequest>;
 export type ServerRegisterResponse = z.infer<typeof ServerRegisterResponse>;
 export type DirectoryServer = z.infer<typeof DirectoryServer>;
 
-/** Antwort auf totp-setup: Geheimnis (base32, 20 Byte) fuer QR-Code und Abtippen; aktiv wird es erst mit totp-enable. */
+/** Response to totp-setup: secret (base32, 20 bytes) for the QR code and for typing in; it only becomes active with totp-enable. */
 export const TotpSetupResponse = z.object({ secret: z.string().regex(/^[A-Z2-7]{32}$/), otpauth: z.string().url(), issuer: z.string() });
-/** Wiederherstellungscodes werden genau einmal im Klartext gezeigt; der Dienst speichert nur Hashes. */
+/** Recovery codes are shown in plain text exactly once; the service stores hashes only. */
 export const RecoveryCodesResponse = z.object({ recoveryCodes: z.array(z.string()).length(10) });
-/** Ein Schluesselabruf per Backup (M6c, nur Anzeige): wann, welcher Browser, von welcher Seite, mit welchem Faktor. */
+/** One key retrieval via backup (M6c, display only): when, which browser, from which site, with which factor. */
 export const KeyFetch = z.object({
   at: Iso,
   label: z.string().nullable(),
@@ -192,7 +192,7 @@ export const KeyFetch = z.object({
 });
 export const AccountStatus = DirectoryAccount.extend({
   totpEnabled: z.boolean(),
-  /** Geheimnis erzeugt, aber noch nicht mit einem Code bestaetigt. */
+  /** Secret generated but not yet confirmed with a code. */
   totpPending: z.boolean(),
   recoveryCodesLeft: z.number().int().min(0),
   fetches: z.array(KeyFetch),
@@ -202,9 +202,9 @@ export const AccountStatus = DirectoryAccount.extend({
 export const DirectoryHealth = z.object({
   ok: z.literal(true),
   service: z.literal("directory"),
-  /** Host, an den Registrierungs-Signaturen gebunden sind. */
+  /** Host that registration signatures are bound to. */
   host: z.string(),
-  /** `friends` (M7): Freunde und Direktnachrichten ueber den WebSocket /api/ws. */
+  /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. */
   features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false) }),
   time: Iso,
 });

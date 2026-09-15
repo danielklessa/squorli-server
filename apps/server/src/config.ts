@@ -7,40 +7,40 @@ const Env = z.object({
   DATABASE_URL: z.string().url(),
   PROXY_MODE: z.enum(["bundled", "external"]).default("bundled"),
   TRUSTED_PROXIES: z.string().default("127.0.0.1"),
-  /** Interne URL zum LiveKit-Server (Server-zu-Server, z. B. RoomService). */
+  /** Internal URL to the LiveKit server (server-to-server, e.g. RoomService). */
   LIVEKIT_URL: z.string().url(),
   /**
-   * URL, die Clients fuer die Medienverbindung bekommen (ohne Pfad, das SDK haengt /rtc an).
-   * Standard: wss://PUBLIC_DOMAIN, also ueber den Proxy. Im Dev ohne Proxy: ws://localhost:7880.
+   * URL that clients receive for the media connection (without a path, the SDK appends /rtc).
+   * Default: wss://PUBLIC_DOMAIN, i.e. through the proxy. In dev without a proxy: ws://localhost:7880.
    */
   LIVEKIT_PUBLIC_URL: z.string().url().optional(),
   LIVEKIT_API_KEY: z.string().min(1),
   LIVEKIT_API_SECRET: z.string().min(16),
   STATIC_DIR: z.string().optional(),
   SESSION_TTL_DAYS: z.coerce.number().default(30),
-  /** Verzeichnis fuer Anhaenge (Docker: Volume). */
+  /** Directory for attachments (Docker: volume). */
   DATA_DIR: z.string().default("./data"),
   MAX_UPLOAD_MB: z.coerce.number().positive().default(25),
   /**
-   * Oeffentlicher Schluessel, der beim ersten Login Eigentuemer wird. Leer = der erste Nutzer,
-   * der sich anmeldet, solange noch kein Eigentuemer existiert.
+   * Public key that becomes the owner on first sign-in. Empty = the first user
+   * who signs in while no owner exists yet.
    */
   OWNER_PUBLIC_KEY: z.string().regex(/^[0-9a-f]{64}$/).optional(),
-  /** Anfangsname des Servers; spaeter in den Einstellungen aenderbar. */
+  /** Initial name of the server; changeable later in the settings. */
   SERVER_NAME: z.string().min(1).max(64).default("Community"),
   /**
-   * Verzeichnisdienst (M6): oeffentliche Basis-URL, z. B. https://chat.example.org/id. Der Server loest beim Login
-   * Schluessel -> Handle auf und gibt die URL an Clients weiter (Registrierung im Browser). Leer = ohne Verzeichnis.
+   * Directory service (M6): public base URL, e.g. https://chat.example.org/id. At sign-in the server resolves
+   * key -> handle and passes the URL on to clients (registration in the browser). Empty = no directory.
    */
   DIRECTORY_URL: z.string().url().optional(),
   /**
-   * URL, unter der das Verzeichnis die /api/health dieses Servers erreicht (Host-Nachweis bei der Server-Registrierung).
-   * Standard: https://PUBLIC_DOMAIN/api/health; bei PUBLIC_DOMAIN=localhost http://localhost:PORT/api/health (Dev).
+   * URL at which the directory reaches this server's /api/health (host proof during server registration).
+   * Default: https://PUBLIC_DOMAIN/api/health; with PUBLIC_DOMAIN=localhost, http://localhost:PORT/api/health (dev).
    */
   DIRECTORY_PROOF_URL: z.string().url().optional(),
   /**
-   * "Nur mit Konto" beim Deployment fest vorgeben: true/false ueberschreibt die Einstellung aus der Verwaltung (dort dann
-   * gesperrt). Leer = die Verwaltung entscheidet. Wirkt nur mit DIRECTORY_URL.
+   * Pin "account required" at deployment time: true/false overrides the setting from the admin area (which is then
+   * locked). Empty = the admin area decides. Only takes effect together with DIRECTORY_URL.
    */
   REQUIRE_ACCOUNT: z.enum(["true", "false", "1", "0"]).transform((v) => v === "true" || v === "1").optional(),
 });

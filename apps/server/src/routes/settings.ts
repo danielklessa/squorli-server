@@ -15,13 +15,13 @@ import { SETTINGS_ID, broadcastStructure, loadSettings, loadState } from "../sta
 import { compact } from "../util";
 import type { DirectoryClient } from "../directory";
 
-/** Server-Icon: nur Rasterbilder (SVG koennte Skripte enthalten und wuerde same-origin ausgeliefert), hoechstens 2 MB. */
+/** Server icon: raster images only (SVG could contain scripts and would be served same-origin), at most 2 MB. */
 const ICON_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const ICON_MAX_BYTES = 2 * 1024 * 1024;
 
 export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: Hub, config: Config, directory: DirectoryClient) {
-  /** Verzeichnis (M6d): Name, Auflistung, Beschreibung, offener Beitritt und Icon stehen beim Verzeichnis; nach Aenderung neu registrieren. */
-  // Entprellt (1,5 s): mehrere Aenderungen kurz nacheinander = eine Registrierung (Registrierungslimit des Verzeichnisses 10/min).
+  /** Directory (M6d): name, listing, description, open join and icon live at the directory; re-register after a change. */
+  // Debounced (1.5 s): several changes in quick succession = one registration (the directory's registration limit is 10/min).
   let reregTimer: NodeJS.Timeout | null = null;
   const reregister = () => {
     if (reregTimer) clearTimeout(reregTimer);
@@ -30,8 +30,8 @@ export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: 
   };
   const iconPath = join(config.DATA_DIR, "server-icon");
   await mkdir(config.DATA_DIR, { recursive: true });
-  // Datei weg (DATA_DIR geleert oder gewechselt), aber in der DB noch ein Icon eingetragen: Eintrag loeschen, sonst zeigen
-  // Favicon, Seitenleiste, Login und Server-Leiste ein kaputtes Bild. Neu hochladen in Verwaltung > Server.
+  // File gone (DATA_DIR emptied or switched) but an icon is still recorded in the DB: delete the entry, otherwise favicon,
+  // sidebar, login and server rail show a broken image. Upload it again under Admin > Server.
   {
     const [row] = await db.select({ iconMime: serverSettings.iconMime }).from(serverSettings).where(eq(serverSettings.id, SETTINGS_ID)).limit(1);
     if (row?.iconMime && !existsSync(iconPath)) {
@@ -40,7 +40,7 @@ export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: 
     }
   }
 
-  /** Gesamtzustand per REST (derselbe wie im WS-welcome), z. B. nach Reconnect. */
+  /** Full state over REST (the same as in the WS welcome), e.g. after a reconnect. */
   app.get("/api/state", async (req, reply) => {
     const m = await requireMember(db, req, reply);
     if (!m) return;
@@ -53,7 +53,7 @@ export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: 
     if (!can(m.actor, Permission.MANAGE_SERVER)) return reply.code(403).send({ error: "forbidden" });
     const body = UpdateSettingsRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
-    // REQUIRE_ACCOUNT per Konfiguration vorgegeben: die Verwaltung darf es nicht umstellen.
+    // REQUIRE_ACCOUNT pinned by configuration: the admin area may not change it.
     if (body.data.requireAccount !== undefined && (await loadSettings(db)).requireAccountLocked) return reply.code(409).send({ error: "locked_by_config" });
     await db.update(serverSettings).set(compact(body.data)).where(eq(serverSettings.id, SETTINGS_ID));
     await broadcastStructure(db, hub, ["settings"]);
@@ -61,8 +61,8 @@ export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: 
     return { ok: true };
   });
 
-  // ---- Server-Icon (Verwaltung > Server): Datei unter DATA_DIR/server-icon, Typ + Zeitpunkt in server_settings.
-  // Der Client zeigt es in der Seitenleiste und als Favicon; /api/health nennt die URL schon vor dem Login.
+  // ---- Server icon (Admin > Server): file under DATA_DIR/server-icon, type + timestamp in server_settings.
+  // The client shows it in the sidebar and as the favicon; /api/health names the URL even before sign-in.
   app.put("/api/settings/icon", async (req, reply) => {
     const m = await requireMember(db, req, reply);
     if (!m) return;
@@ -98,7 +98,7 @@ export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: 
     return { ok: true };
   });
 
-  /** Oeffentlich (Favicon, Login-Bildschirm); die URL traegt einen Versions-Parameter, daher lange cachebar. */
+  /** Public (favicon, login screen); the URL carries a version parameter, so it is cacheable for a long time. */
   app.get("/api/server-icon", async (_req, reply) => {
     const [row] = await db.select({ iconMime: serverSettings.iconMime }).from(serverSettings).where(eq(serverSettings.id, SETTINGS_ID)).limit(1);
     if (!row?.iconMime || !existsSync(iconPath)) return reply.code(404).send({ error: "not_found" });

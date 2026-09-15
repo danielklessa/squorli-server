@@ -24,8 +24,8 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     hub.disconnectUser(userId, { type: "removed", reason, message });
   }
 
-  // Eigentuemer (mehrere moeglich): nur Eigentuemer ernennen oder entziehen; nicht sich selbst; der erste Eigentuemer
-  // (server_settings.owner_id) bleibt immer. Eigentuemer haben alle Rechte und stehen ueber jeder Rolle (outranks).
+  // Owners (several possible): only owners may appoint or revoke; not on yourself; the first owner
+  // (server_settings.owner_id) always stays. Owners have every permission and outrank every role (outranks).
   app.put<{ Params: { id: string } }>("/api/members/:id/owner", { schema: { params: Params } }, async (req, reply) => {
     const m = await requireMember(db, req, reply);
     if (!m) return;
@@ -43,7 +43,7 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     return { ok: true };
   });
 
-  // Rollen eines Mitglieds setzen
+  // Set a member's roles
   app.put<{ Params: { id: string } }>("/api/members/:id/roles", { schema: { params: Params } }, async (req, reply) => {
     const m = await requireMember(db, req, reply);
     if (!m) return;
@@ -58,7 +58,7 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     if (wanted.length !== new Set(body.data.roleIds).size) return reply.code(400).send({ error: "unknown_role" });
     const current = (await db.select().from(memberRoles).where(eq(memberRoles.userId, target.userId))).map((r) => r.roleId);
     const currentRoles = current.length ? await db.select().from(roles).where(inArray(roles.id, current)) : [];
-    // Nur Rollen unterhalb der eigenen Position duerfen hinzugefuegt oder entfernt werden.
+    // Only roles below your own position may be added or removed.
     const changed = [...wanted.filter((r) => !current.includes(r.id)), ...currentRoles.filter((r) => !body.data.roleIds.includes(r.id))];
     if (changed.some((r) => r.isDefault || !canTouchRole(m.actor, r.position))) return reply.code(403).send({ error: "role_above_you" });
 
@@ -69,9 +69,9 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     return { ok: true };
   });
 
-  // ---------- Sprachkanal-Moderation (M3): verschieben, Kamera/Bildschirm beenden, Streamen sperren.
-  // Recht MODERATE_VOICE und Rang ueber dem Ziel. LiveKit setzt Stummschaltung/Publish-Rechte durch; das WS-Ereignis
-  // laesst den Client seine Oberflaeche nachziehen (und beim Verschieben den neuen Raum betreten).
+  // ---------- Voice channel moderation (M3): move, stop camera/screen, block streaming.
+  // Requires MODERATE_VOICE and a rank above the target. LiveKit enforces muting/publish permissions; the WS event
+  // lets the client update its interface (and join the new room when being moved).
   async function moderationTarget(req: Parameters<typeof requireMember>[1], reply: Parameters<typeof requireMember>[2], targetId: string) {
     const m = await requireMember(db, req, reply);
     if (!m) return null;
@@ -126,7 +126,7 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
         hub.sendToUser(ctx.target.userId, { type: "voice.stop", camera: true, screen: true, by: ctx.by });
       }
     }
-    await broadcastStructure(db, hub, ["members"]); // schickt dem Ziel auch seine neuen Rechte ("me")
+    await broadcastStructure(db, hub, ["members"]); // also sends the target its new permissions ("me")
     req.log.info({ by: ctx.m.userId, target: ctx.target.userId, blocked: body.data.blocked }, "Streamen-Sperre gesetzt");
     return { ok: true };
   });
@@ -167,7 +167,7 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     if (!user) return reply.code(404).send({ error: "not_found" });
     if (user.id === m.userId) return reply.code(400).send({ error: "cannot_ban_self" });
     const target = await targetOf(user.id);
-    // Nicht-Mitglieder (bereits gekickt) duerfen nachtraeglich gebannt werden; Mitglieder nur unterhalb der eigenen Position.
+    // Non-members (already kicked) may be banned afterwards; members only below your own position.
     if (target && !outranks(m.actor, target)) return reply.code(403).send({ error: "target_above_you" });
     await db.insert(bans).values({ userId: user.id, bannedBy: m.userId, reason: body.data.reason ?? null }).onConflictDoNothing();
     await removeMember(user.id, "banned", body.data.reason ?? null);

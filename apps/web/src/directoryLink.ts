@@ -2,10 +2,10 @@ import { DIRECTORY_WS_VERSION, DirectoryServerEvent, directoryWsAuthMessage, typ
 import { sign, type Identity } from "./identity";
 
 /**
- * Zweite WebSocket-Verbindung (M7): zum Verzeichnisdienst, fuer Freunde, Praesenz und Ende-zu-Ende-verschluesselte
- * Direktnachrichten. Anmeldung ohne Sitzung: der Dienst schickt eine Challenge, wir antworten mit einer Signatur des
- * Geraeteschluessels (an den Host des Verzeichnisses gebunden). Wiederverbindung mit wachsendem Abstand; der Store bekommt
- * jedes Ereignis und den Verbindungszustand.
+ * Second WebSocket connection (M7): to the directory service, for friends, presence and end-to-end encrypted
+ * direct messages. Sign-in without a session: the service sends a challenge, we answer with a signature from the
+ * device key (bound to the directory's host). Reconnect with growing backoff; the store receives
+ * every event and the connection state.
  */
 export type LinkStatus = "idle" | "connecting" | "connected" | "error";
 
@@ -41,7 +41,7 @@ export class DirectoryLink {
         this.ping = window.setInterval(() => this.send({ type: "ping", t: Date.now() }), 25_000);
       }
       if (e.type === "error" && (e.code === "version" || e.code === "unauthorized" || e.code === "unknown_account")) {
-        // Kein Wiederverbinden: der Client passt nicht zum Dienst oder der Schluessel hat dort kein Konto.
+        // No reconnect: the client does not match the service, or the key has no account there.
         this.want = false;
         this.onStatus("error", e.message);
       }

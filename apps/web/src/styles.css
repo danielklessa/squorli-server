@@ -1,31 +1,31 @@
 /*
- * Squorli Web-Client. Farben, Schrift, Radien und Abstaende folgen docs/brand/AGENTS.md (Version 2, Dark Mode).
- * Die Marken-Tokens (--sq-*) kommen aus public/brand/squorli-tokens.css (in index.html eingebunden); hier werden sie
- * auf die semantischen Variablen der App abgebildet, damit die Komponentenregeln kurz bleiben.
+ * Squorli web client. Colors, typography, radii and spacing follow docs/brand/AGENTS.md (version 2, dark mode).
+ * The brand tokens (--sq-*) come from public/brand/squorli-tokens.css (included in index.html); here they are
+ * mapped onto the app's semantic variables so the component rules stay short.
  */
 :root {
   color-scheme: dark;
   font-family: var(--sq-font, "Segoe UI", system-ui, sans-serif);
   font-size: 16px;
   line-height: 1.5;
-  --bg: var(--sq-night, #0C1424);        /* App-Hintergrund, Dock, Eingaben im Login */
-  --bg2: var(--sq-surface, #162238);     /* Seitenleiste, Mitglieder, Karten, Modals */
-  --bg3: var(--sq-night, #0C1424);       /* Hauptbereich (Chat) */
-  --bg4: var(--sq-raised, #1E2D47);      /* Menues, Eingaben, erhoehte Flaechen, Hover */
-  --sel: var(--sq-selection, #243E68);   /* aktive Navigation, Auswahl */
-  --line: #22334F;                       /* Trennlinien: zwischen Surface und Raised, absichtlich leise */
+  --bg: var(--sq-night, #0C1424);        /* app background, dock, inputs on the login screen */
+  --bg2: var(--sq-surface, #162238);     /* sidebar, members, cards, modals */
+  --bg3: var(--sq-night, #0C1424);       /* main area (chat) */
+  --bg4: var(--sq-raised, #1E2D47);      /* menus, inputs, raised surfaces, hover */
+  --sel: var(--sq-selection, #243E68);   /* active navigation, selection */
+  --line: #22334F;                       /* dividers: between surface and raised, deliberately quiet */
   --text: var(--sq-text, #F5F8FF);
   --muted: var(--sq-muted, #A9B8D2);
-  --brand: var(--sq-squorli-blue, #6397FF); /* Marke, Links, Fokus */
-  --accent: var(--sq-action, #246BFD);      /* primaere Aktionen */
+  --brand: var(--sq-squorli-blue, #6397FF); /* brand, links, focus */
+  --accent: var(--sq-action, #246BFD);      /* primary actions */
   --accent-hover: var(--sq-action-hover, #1856D8);
   --ok: var(--sq-mint, #42D6AE);
   --warn: var(--sq-amber, #FFC568);
   --danger: var(--sq-coral, #FF7F91);
-  --on-dark: #FFFFFF;                    /* Text auf Action-Blau (4,57:1 gemessen) */
-  --on-light: var(--sq-night, #0C1424);  /* Text auf Mint/Amber/Coral */
+  --on-dark: #FFFFFF;                    /* text on action blue (measured 4.57:1) */
+  --on-light: var(--sq-night, #0C1424);  /* text on mint/amber/coral */
   --r: var(--sq-radius-control, 12px);
-  --head-h: 3.25rem;                    /* gemeinsame Hoehe der Kopfzeilen (Seitenleiste, Chat, Buehne) */
+  --head-h: 3.25rem;                    /* shared height of the headers (sidebar, chat, stage) */
   --r-panel: var(--sq-radius-panel, 20px);
   --u: var(--sq-space-unit, 4px);
 }
@@ -73,18 +73,19 @@ h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; colo
 /* Login */
 .login { min-height: 100%; display: grid; grid-template-rows: 1fr auto; place-items: center; gap: 1rem; padding: 1.5rem; }
 .login-card { width: min(34rem, 100%); background: var(--bg2); padding: 2rem 2rem 1.75rem; border-radius: var(--r-panel); }
-/* Splash: Icon und Name des Servers (aus /api/health); ohne eigenes Icon das Squorli-Signet */
+/* Splash: the server's icon and name (from /api/health); without its own icon, the Squorli mark */
 .login-head { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; margin-bottom: 1.25rem; text-align: center; }
 .login-head h1 { margin: 0; font-size: 1.5rem; font-weight: 600; overflow-wrap: anywhere; }
 .login-icon { width: 72px; height: 72px; border-radius: 20px; object-fit: cover; }
 .login-foot { display: flex; align-items: center; gap: 0.4rem; color: var(--muted); font-size: 0.8125rem; }
 .login-foot img { opacity: 0.8; }
+.login-foot .lang-select { margin-left: auto; font-size: 0.8125rem; padding: 0.15rem 0.4rem; }
 .invite-preview { background: var(--bg); padding: 0.6rem 0.9rem; border-radius: var(--r); }
 
 /* Layout */
 .app { height: 100%; display: grid; grid-template-columns: 15rem minmax(0, 1fr) 14rem; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
 .app.with-rail { grid-template-columns: 4.25rem 15rem minmax(0, 1fr) 14rem; }
-/* Server-Leiste (M6d): Server des eigenen Handles laut Verzeichnis, aktueller Server markiert */
+/* Server rail (M6d): the servers of your own handle according to the directory, current server highlighted */
 .rail { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; padding: 0.6rem 0; background: var(--bg); border-right: 1px solid var(--line); overflow-y: auto; min-height: 0; }
 .rail-item { width: 2.75rem; height: 2.75rem; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; background: var(--bg2); color: var(--text); text-decoration: none; transition: border-radius 0.12s, background 0.12s; flex: none; }
 .rail-item img { width: 100%; height: 100%; object-fit: cover; }
@@ -93,11 +94,11 @@ h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; colo
 .rail-initials { font-weight: 700; font-size: 0.95rem; letter-spacing: 0.02em; }
 .rail-sep { width: 1.75rem; border-top: 1px solid var(--line); margin: 0.1rem 0; }
 .rail-item.discover { color: var(--ok); }
-/* Startansicht (M7): Squorli-Symbol oben in der Leiste, Badge = offene Anfragen + ungelesene Direktnachrichten */
+/* Home view (M7): the Squorli mark at the top of the rail, badge = open requests + unread direct messages */
 .rail-item.home { position: relative; background: var(--bg2); cursor: pointer; }
 .rail-item.home img { width: 32px; height: 32px; object-fit: contain; }
 button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; position: relative; }
-/* Multi-Server-Client: gruener Lautsprecher = hier laeuft die Sprachverbindung, weisser Punkt = ungelesene Nachrichten */
+/* Multi-server client: green speaker = the voice connection runs here, white dot = unread messages */
 .rail-voice { position: absolute; right: -4px; bottom: -4px; width: 1.1rem; height: 1.1rem; border-radius: 50%; background: var(--ok); color: var(--bg); font-size: 0.7rem; display: inline-flex; align-items: center; justify-content: center; border: 2px solid var(--bg); }
 .rail-unread { position: absolute; left: -0.55rem; top: 50%; width: 0.35rem; height: 0.7rem; margin-top: -0.35rem; border-radius: 0 4px 4px 0; background: var(--text); }
 .server-status .stack { max-width: 32rem; margin: auto; padding: 1rem; }
@@ -118,7 +119,7 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 .home-empty p { max-width: 28rem; }
 .friend-row { margin: 0.4rem 0; }
 .friend-row .ic { margin-right: 0.3rem; }
-/* Serververzeichnis (M6d): Liste aus dem Verzeichnis, Beitritt per Link */
+/* Server directory (M6d): list from the directory, joining via link */
 .browser-modal { width: min(44rem, 100%); }
 .browser-list { list-style: none; margin: 0; padding: 0.5rem 1.25rem 1.25rem; display: flex; flex-direction: column; gap: 0.5rem; overflow-y: auto; }
 .browser-item { display: flex; align-items: center; gap: 0.8rem; background: var(--bg); padding: 0.7rem 0.9rem; border-radius: var(--r); }
@@ -143,12 +144,12 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 .channel-list section { margin-bottom: 0.6rem; }
 .channel-list h3 { padding: 0.4rem 0.5rem 0.2rem; }
 .channel-list ul { list-style: none; margin: 0; padding: 0; }
-.channel-list li.channel + li.channel { margin-top: 4px; }   /* Luft zwischen den Kanaelen */
+.channel-list li.channel + li.channel { margin-top: 4px; }   /* breathing room between the channels */
 .channel-btn { width: 100%; text-align: left; background: transparent; color: var(--muted); font-weight: 500; display: flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.6rem; border-radius: var(--r); }
 .channel-btn:hover { background: var(--bg4); color: var(--text); }
 .channel.active .channel-btn { background: var(--sel); color: var(--text); }
 .channel.unread .channel-btn { color: var(--text); font-weight: 600; }
-.channel.joined .channel-icon { color: var(--ok); opacity: 1; }   /* verbundener Sprachkanal: nur das Symbol, keine Hinterlegung */
+.channel.joined .channel-icon { color: var(--ok); opacity: 1; }   /* connected voice channel: the icon only, no highlight */
 .channel-icon { opacity: 0.8; width: 1.1rem; display: inline-flex; justify-content: center; }
 .channel-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .count { font-size: 0.75rem; background: var(--bg); border-radius: 999px; padding: 0 0.45rem; }
@@ -159,7 +160,7 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 .dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--line); flex: none; transition: background 0.1s; }
 .speaking .dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(66,214,174,.3); }
 .speaking { color: var(--text); }
-/* Drag & Drop von Sprachteilnehmern zwischen Kanaelen */
+/* Drag & drop of voice participants between channels */
 .voice-members li.draggable { cursor: grab; }
 .voice-members li.dragging { opacity: 0.4; }
 .channel.droppable > .channel-btn { outline: 1px dashed var(--line); outline-offset: -1px; }
@@ -168,7 +169,7 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 /* Dock */
 .dock { background: var(--bg); border-top: 1px solid var(--line); }
 .dock > .dock-row { padding: 0.5rem 0.6rem; }
-/* Sprachverbindung: eigener Bereich mit Status, Pegel und Schnellzugriffen oberhalb der Namenszeile */
+/* Voice connection: its own area with status, level and quick actions above the name row */
 .dock-voice { padding: 0.5rem 0.6rem 0.4rem; font-size: 0.875rem; border-bottom: 1px solid var(--line); background: var(--bg2); }
 .dock-controls { margin-top: 0.35rem; }
 .dock-status .ok { color: var(--ok); }
@@ -199,7 +200,7 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 /* Chat */
 .chat { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .chat.empty { align-items: center; justify-content: center; }
-.chat-head { display: flex; align-items: center; gap: 0.5rem; height: var(--head-h); padding: 0 3rem 0 1rem; border-bottom: 1px solid var(--line); flex-shrink: 0; }   /* rechts Platz fuer den Debug-Knopf */
+.chat-head { display: flex; align-items: center; gap: 0.5rem; height: var(--head-h); padding: 0 3rem 0 1rem; border-bottom: 1px solid var(--line); flex-shrink: 0; }   /* room on the right for the debug button */
 .topic { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-left: 1px solid var(--line); padding-left: 0.6rem; color: var(--muted); }
 .messages { flex: 1; overflow-y: auto; padding: 0.75rem 1rem; }
 .day-sep { display: flex; align-items: center; gap: 0.6rem; margin: 1rem 0 0.4rem; color: var(--muted); font-size: 0.75rem; }
@@ -259,10 +260,10 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 .debug td { padding: 0.05rem 0.75rem 0.05rem 0; vertical-align: top; }
 .debug td:first-child { color: var(--muted); white-space: nowrap; }
 .wslog { max-height: 10rem; overflow: auto; font-size: 0.72rem; white-space: pre-wrap; word-break: break-all; border: 1px solid var(--line); border-radius: 6px; padding: 0.4rem; margin: 0.2rem 0; }
-/* Debug-Knopf: fester Platz rechts in der Kopfzeile des Hauptbereichs, vertikal mittig */
+/* Debug button: fixed spot on the right of the main area's header, vertically centered */
 .debug-toggle { position: absolute; right: 0.6rem; top: calc(var(--head-h) / 2); transform: translateY(-50%); }
 
-/* Bestaetigungs- und Eingabedialoge (Ersatz fuer window.confirm/prompt), liegen ueber allen anderen Modals */
+/* Confirmation and input dialogs (replacement for window.confirm/prompt), sitting above all other modals */
 .dialog-backdrop { z-index: 30; }
 .dialog { width: min(26rem, 100%); padding: 1.25rem 1.5rem 1.5rem; gap: 0.25rem; animation: dialog-in 120ms ease-out; }
 .dialog h2 { margin: 0 0 0.25rem; font-size: 1.25rem; }
@@ -270,7 +271,7 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 .dialog-actions { display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 1rem; }
 @keyframes dialog-in { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
 
-/* Buehne (M3): Kacheln, Sprecher-Fokus, Steuerleiste */
+/* Stage (M3): tiles, speaker focus, control bar */
 .stage { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--bg); }
 .stage .chat-head { background: var(--bg3); }
 .spacer { flex: 1; }
@@ -307,12 +308,12 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 .bar-btn.on { background: var(--accent); color: var(--on-dark); }
 .bar-btn.off { background: var(--danger); color: var(--on-light); }
 .bar-btn.leave { background: var(--danger); color: var(--on-light); }
-/* Auflegen: Hoerer (um 135 Grad gedreht, siehe Icon rotate) auf Coral */
+/* Hang up: handset (rotated by 135 degrees, see icon rotate) on coral */
 .icon.hangup { background: var(--danger); color: var(--on-light); border-radius: 50%; width: 1.7rem; height: 1.7rem; padding: 0; }
 .icon.hangup:hover { background: #ff9aa8; color: var(--on-light); }
 button.icon.on { color: var(--brand); }
 
-/* Kamera-Auswahl beim Einschalten */
+/* Camera picker at switch-on time */
 .camera-picker { width: min(30rem, 100%); }
 .camera-preview { aspect-ratio: 16 / 9; background: #000; border-radius: var(--r); overflow: hidden; margin-top: 0.5rem; }
 .camera-preview video { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -325,15 +326,15 @@ button.icon.on { color: var(--brand); }
 .camera-option.active { background: var(--accent); color: var(--on-dark); }
 .camera-dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: currentColor; opacity: 0.6; flex: none; }
 
-/* Sprachkanal-Moderation im Mitglieder-Menue */
+/* Voice channel moderation in the member menu */
 .mod-voice { border-top: 1px solid var(--line); padding-top: 0.4rem; }
 .mod-voice select, .mod-voice button { width: 100%; }
 
-/* Profil > Geraete (M6c): Sitzungsliste */
+/* Profile > devices (M6c): session list */
 .session-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .session-list li { display: flex; align-items: center; gap: 0.8rem; padding: 0.5rem 0; border-bottom: 1px solid var(--line); }
 .session-list li:last-child { border-bottom: 0; }
 .badge { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 0.1rem 0.5rem; border-radius: 999px; background: var(--ok); color: var(--on-light); margin-left: 0.4rem; }
-/* Handle-Registrierung und Konto-Login im Login (M6) */
+/* Handle registration and account sign-in on the login screen (M6) */
 .handle-box { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r); padding: 0.75rem 0.9rem; }
 .handle-box .row input { flex: 1; min-width: 10rem; }

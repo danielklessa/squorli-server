@@ -11,8 +11,8 @@ import { actorOf, loadChannels, loadState } from "../state";
 import type { VoicePresence } from "../voice/presence";
 
 /**
- * Echtzeit-Kanal fuer alles ausser Medien: Zustand nach Handshake, Praesenz, Kanalzustand, Nachrichten, Tippen.
- * Zustandsabgleich per Sequenznummer nach Reconnect: Client laedt /api/state und den Verlauf neu (M2).
+ * Real-time channel for everything except media: state after the handshake, presence, channel state, messages, typing.
+ * State reconciliation by sequence number after a reconnect: the client reloads /api/state and the history (M2).
  */
 export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presence: VoicePresence<WebSocket>) {
   const unsubscribe = presence.onChange((channelId, members) => {
@@ -72,7 +72,7 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
           return presence.leave(socket);
         case "typing": {
           const now = Date.now();
-          if (now - lastTyping < 2000) return; // Drosselung: hoechstens alle 2 s
+          if (now - lastTyping < 2000) return; // Throttling: at most every 2 s
           lastTyping = now;
           return hub.broadcast({ type: "typing", channelId: ev.data.channelId, userId }, socket);
         }

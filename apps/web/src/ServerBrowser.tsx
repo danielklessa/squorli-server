@@ -3,10 +3,11 @@ import { useEffect, useState } from "react";
 import * as api from "./api";
 import { Icon } from "./Icon";
 import { RailEntry } from "./ServerRail";
+import { t } from "./i18n";
 
 /**
- * Serververzeichnis (M6d): oeffentliche Liste des Verzeichnisdienstes (GET /api/servers, nur Server mit "auflisten").
- * Beitritt per Link: der Server wird in seiner eigenen Origin geoeffnet; offen = ohne Einladung betretbar.
+ * Server directory (M6d): public list from the directory service (GET /api/servers, only servers that opt into listing).
+ * Joining via link: the server is opened in its own origin; open = can be entered without an invite.
  */
 export function ServerBrowser({ directoryUrl, currentHost, onClose }: { directoryUrl: string; currentHost: string | null; onClose: () => void }) {
   const [servers, setServers] = useState<DirectoryServer[] | null>(null);
@@ -25,13 +26,13 @@ export function ServerBrowser({ directoryUrl, currentHost, onClose }: { director
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="modal browser-modal" onMouseDown={(e) => e.stopPropagation()}>
         <header className="modal-head">
-          <h2>Server entdecken</h2><span className="spacer" />
-          <button className="icon" onClick={onClose} title="Schließen"><Icon name="x" /></button>
+          <h2>{t("browser.title")}</h2><span className="spacer" />
+          <button className="icon" onClick={onClose} title={t("common.close")}><Icon name="x" /></button>
         </header>
-        <p className="muted small" style={{ padding: "0.6rem 1.25rem 0" }}>Öffentliches Serververzeichnis von {dirHost}. Betreiber entscheiden selbst, ob ihr Server hier erscheint.</p>
+        <p className="muted small" style={{ padding: "0.6rem 1.25rem 0" }}>{t("browser.intro", { host: dirHost })}</p>
         {error && <p className="error small">{error}</p>}
-        {servers === null && !error && <p className="muted center">Lade …</p>}
-        {servers && servers.length === 0 && <p className="muted center">Noch kein Server im Verzeichnis.</p>}
+        {servers === null && !error && <p className="muted center">{t("common.loading")}</p>}
+        {servers && servers.length === 0 && <p className="muted center">{t("browser.empty")}</p>}
         {servers && servers.length > 0 && (
           <ul className="browser-list">
             {servers.map((s) => {
@@ -43,12 +44,12 @@ export function ServerBrowser({ directoryUrl, currentHost, onClose }: { director
                   <div className="grow">
                     <strong>{name}</strong> <span className="muted small">{s.host}</span>
                     <p className="muted small">
-                      {s.memberCount !== null && <>{s.memberCount} Mitglieder · </>}
-                      {s.openJoin ? "offen, ohne Einladung betretbar" : "Beitritt nur mit Einladung"}
+                      {s.memberCount !== null && <>{t("login.memberCount", { n: s.memberCount })} · </>}
+                      {s.openJoin ? t("browser.open") : t("browser.inviteOnly")}
                     </p>
                     {s.description && <p className="small">{s.description}</p>}
                   </div>
-                  {current ? <span className="muted small">Dieser Server</span> : <a className="link-btn" href={directoryServerUrl(s.host)}>Öffnen</a>}
+                  {current ? <span className="muted small">{t("browser.thisServer")}</span> : <a className="link-btn" href={directoryServerUrl(s.host)}>{t("common.open")}</a>}
                 </li>
               );
             })}

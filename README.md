@@ -1,10 +1,11 @@
 # Squorli
 
-Self-hosted community chat with voice and video channels. Server + web/desktop client.
+Self-hosted, open-source community chat with voice and video channels. Squorli Server includes the browser client; a desktop client is planned.
+Website: https://squorli.com. The separately operated [Squorli Directory](https://directory.squorli.com) is **not open source**. Shared product identity: [docs/brand/PRODUCT.md](docs/brand/PRODUCT.md). The concrete server license is still pending (see License below).
 Modelled on Discord, but every server belongs to its operator. Plan and architecture: [`docs/PLAN.md`](docs/PLAN.md).
 Working guide for developers and AI agents (commands, conventions, pitfalls, test status): [`AGENTS.md`](AGENTS.md).
 
-**Status: M3 (video and screen share) implemented in the browser, acceptance pending.** Multiple text and voice channels in categories, roles with permissions and hierarchy, invite links, kick and ban, text chat with history, editing, deleting and attachments, admin interface, member list with online status. Voice with voice activation/push-to-talk and device selection; camera with simulcast, stage with tile and speaker view, screen share with audio (Chromium) as a separate audio track, bandwidth in the debug view. New members are "Gast" (guest: view and voice only), admins grant "Mitglied" (member). Not yet: desktop client, direct messages, reactions, audit log.
+**Status: M3 (video and screen share) implemented in the browser, acceptance pending.** Multiple text and voice channels in categories, roles with permissions and hierarchy, invite links, kick and ban, text chat with history, editing, deleting and attachments, admin interface, member list with online status. Voice with voice activation/push-to-talk and device selection; camera with simulcast, stage with tile and speaker view, screen share with audio (Chromium) as a separate audio track, bandwidth in the debug view. New members are "Gast" (guest: view and voice only), admins grant "Mitglied" (member). Friends and end-to-end encrypted direct messages between friends are implemented via the optional Directory (M7). Not yet: desktop client, reactions, audit log.
 
 **First start:** The first user who logs in becomes the owner (or the key from `OWNER_PUBLIC_KEY`). After that the server is closed: further users need an invite link (`/invite/<code>`), which the owner creates in the admin panel (gear icon), or the server is set to "offen" (open) there.
 
@@ -111,7 +112,13 @@ via `LIVEKIT_CONFIG` (keep it in step with `deploy/livekit/livekit.yaml`).
 
 ## License
 
-Not decided yet (MIT or Apache 2.0). Until then: all rights reserved.
+Squorli Server is the open-source project. The concrete license (MIT or Apache 2.0) and license file are still pending; no license has been selected by this website/documentation update. Until a license is supplied, the existing all-rights-reserved status applies. Squorli Directory is separate and is not open source.
+
+## Website and shared brand
+
+The sibling `../squorli-website` project provides the German/English public website for https://squorli.com and German/English installation documentation. The guide source is `../squorli-website/src/pages/[lang]/docs/install.astro`; the planned public path is `/en/docs/install/`.
+
+This repository's `docs/brand/` remains canonical. Keep it byte-identical in both sibling projects, and synchronize the runtime assets. From `../squorli-website`, run `pnpm brand:sync` after a canonical brand change, then `pnpm brand:check`. Product descriptions and the website's two languages must also be updated together. See [docs/brand/PRODUCT.md](docs/brand/PRODUCT.md).
 
 ## Smoke test
 

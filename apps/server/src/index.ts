@@ -29,15 +29,15 @@ import { VoicePresence } from "./voice/presence";
 import { registerWs } from "./ws/handler";
 
 const here = dirname(fileURLToPath(import.meta.url));
-/** Version aus der package.json des Servers (dev: apps/server, Container: /app); der Client zeigt sie im Login. */
+/** Version from the server's package.json (dev: apps/server, container: /app); the client shows it on the login screen. */
 const VERSION = ((): string => {
   try { return (JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8")) as { version?: string }).version ?? "0"; } catch { return "0"; }
 })();
 
 /**
- * Optionale .env neben dem Paket (apps/server/.env) laden, ohne Zusatzabhaengigkeit.
- * Bereits gesetzte Umgebungsvariablen haben Vorrang. Fehlt die Datei, passiert nichts.
- * Im Container kommt die Konfiguration ausschliesslich ueber die Umgebung.
+ * Load an optional .env next to the package (apps/server/.env), without an extra dependency.
+ * Environment variables that are already set take precedence. If the file is missing, nothing happens.
+ * In the container the configuration comes exclusively from the environment.
  */
 function loadDotEnv() {
   const file = join(here, "..", ".env");
@@ -51,24 +51,24 @@ async function main() {
 
   const app = Fastify({
     logger: { level: config.NODE_ENV === "production" ? "info" : "debug" },
-    // Im external-Modus glauben wir X-Forwarded-* nur den konfigurierten Proxys.
-    // Im bundled-Modus ist der einzige Proxy unser eigener Caddy im Docker-Netz.
+    // In external mode we trust X-Forwarded-* only from the configured proxies.
+    // In bundled mode the only proxy is our own Caddy inside the Docker network.
     trustProxy: config.trustedProxies,
   });
 
   const { db, client } = createDb(config.DATABASE_URL);
-  // Migrationsordner: im Dev relativ zu src, im Build relativ zu dist -> beide zeigen auf ../drizzle
+  // Migrations folder: in dev relative to src, in the build relative to dist -> both point at ../drizzle
   await runMigrations(db, join(here, "..", "drizzle"));
 
-  // CORS fuer alle Origins: der Web-Client eines anderen Squorli-Servers spricht diesen Server direkt an (Multi-Server-Client,
-  // Server-Leiste). Auth laeuft ausschliesslich ueber das Bearer-Token im Header (keine Cookies), die Login-Signatur bleibt an
-  // PUBLIC_DOMAIN gebunden; ein fremder Origin kann also nichts im Namen des Nutzers tun, ohne dessen Token zu besitzen.
+  // CORS for all origins: the web client of another Squorli server talks to this server directly (multi-server client,
+  // server rail). Auth runs exclusively through the bearer token in the header (no cookies), and the login signature stays bound to
+  // PUBLIC_DOMAIN; so a foreign origin cannot do anything on the user's behalf without holding their token.
   await app.register(cors, { origin: true });
   await app.register(websocket);
 
-  // Verzeichnis-Anbindung (M6): Server-Schluessel + Token; init() nach bootstrap (Einstellungen), register() nach app.listen.
+  // Directory integration (M6): server key + token; init() after bootstrap (settings), register() after app.listen.
   let directory: DirectoryClient | null = null;
-  // Push vom Verzeichnis nach einer Namensaenderung (DirectoryNotifyRequest): Nutzer neu laden. Gesetzt, sobald der Abgleich laeuft.
+  // Push from the directory after a name change (DirectoryNotifyRequest): reload the user. Set as soon as the reconciliation is running.
   let notifyHandler: ((publicKey: string) => Promise<void>) | null = null;
   app.post("/api/directory/notify", async (req, reply) => {
     const body = DirectoryNotifyRequest.safeParse(req.body);
@@ -80,15 +80,15 @@ async function main() {
   app.get("/api/health", async () => ({
     ok: true,
     proxyMode: config.PROXY_MODE,
-    /** Oeffentlicher Server-Schluessel; das Verzeichnis prueft ihn bei der Server-Registrierung (Host-Nachweis). */
+    /** Public server key; the directory checks it during server registration (host proof). */
     serverKey: directory?.serverKey ?? null,
-    /** Servername und Icon fuer Seitentitel und Favicon schon vor dem Login (beides ist auch in der Einladungsvorschau sichtbar). */
+    /** Server name and icon for the page title and favicon even before sign-in (both are also visible in the invite preview). */
     ...(await loadSettings(db).then((st) => ({ serverName: st.name, iconUrl: st.iconUrl, requireAccount: st.requireAccount && !!config.DIRECTORY_URL }))
       .catch(() => ({ serverName: null, iconUrl: null, requireAccount: false }))),
     version: VERSION,
-    /** Verzeichnisdienst (M6), den dieser Server anerkennt; der Client registriert Handles dort. null = keiner. */
+    /** Directory service (M6) that this server recognizes; the client registers handles there. null = none. */
     directoryUrl: config.DIRECTORY_URL ?? null,
-    /** Domain, an die Login-Signaturen gebunden sind; der Client vergleicht sie mit seinem Hostnamen. */
+    /** Domain that login signatures are bound to; the client compares it against its hostname. */
     domain: config.PUBLIC_DOMAIN,
     protocolVersion: PROTOCOL_VERSION,
     time: new Date().toISOString(),
@@ -102,10 +102,10 @@ async function main() {
 
   const hub = new Hub();
   const presence = new VoicePresence<WebSocket>();
-  // Online-Status aendert die Mitgliederliste aller.
+  // Online status changes everyone's member list.
   hub.onPresence(() => { void broadcastStructure(db, hub, ["members"]).catch((err) => app.log.warn({ err }, "presence broadcast")); });
 
-  // Uploads (Anhaenge, Server-Icon): eine Datei je Anfrage, Groesse nach MAX_UPLOAD_MB.
+  // Uploads (attachments, server icon): one file per request, size per MAX_UPLOAD_MB.
   await app.register(multipart, { limits: { fileSize: Math.round(config.MAX_UPLOAD_MB * 1024 * 1024), files: 1 } });
   await registerAuthRoutes(app, db, config, hub, directory);
   await registerUserRoutes(app, db, directory, hub, presence);
@@ -119,17 +119,17 @@ async function main() {
   await registerLivekitRoutes(app, db, config);
   await registerWs(app, db, hub, presence);
 
-  // Gebauter Web-Client wird vom selben Prozess ausgeliefert (ein Container weniger).
+  // The built web client is served by the same process (one container less).
   const staticDir = config.STATIC_DIR ?? join(here, "..", "public");
   if (existsSync(join(staticDir, "index.html"))) {
     await app.register(fastifyStatic, {
       root: staticDir,
-      // wildcard: true (Standard) loest Dateien bei jeder Anfrage auf. Mit false wuerde beim Start eine Route je
-      // vorhandener Datei registriert; nach `pnpm build` ohne Neustart gaebe es fuer neue Asset-Hashes nur 404.
+      // wildcard: true (the default) resolves files on every request. With false, one route per existing file would be
+      // registered at startup; after `pnpm build` without a restart, new asset hashes would only produce 404s.
       wildcard: true,
-      cacheControl: false, // wir setzen cache-control selbst (siehe setHeaders)
-      // Gehashte Assets duerfen lange gecacht werden, die Shell (index.html) nie: sonst zeigt ein Browser nach
-      // einem Deploy auf Asset-Namen, die es nicht mehr gibt.
+      cacheControl: false, // we set cache-control ourselves (see setHeaders)
+      // Hashed assets may be cached for a long time, the shell (index.html) never: otherwise, after a deploy, a browser
+      // would point at asset names that no longer exist.
       setHeaders: (res, path) => {
         res.setHeader("cache-control", path.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable");
       },
@@ -137,28 +137,39 @@ async function main() {
     app.setNotFoundHandler((req, reply) => {
       const path = req.url.split("?")[0] ?? "";
       if (path.startsWith("/api/")) return reply.code(404).send({ error: "not_found" });
-      // Fehlende Dateien (mit Endung) bekommen 404, nicht die App-Shell. Sonst liefert ein veralteter
-      // Asset-Link text/html und der Browser meldet "Expected a JavaScript module ... MIME type text/html".
+      // Missing files (with an extension) get a 404, not the app shell. Otherwise a stale asset link
+      // returns text/html and the browser reports "Expected a JavaScript module ... MIME type text/html".
       if (/\.[a-z0-9]{1,8}$/i.test(path)) return reply.code(404).type("text/plain").send("not found");
       return reply.header("cache-control", "no-cache").sendFile("index.html");
     });
   } else {
-    // Ohne gebauten Web-Client laeuft nur die API. Statt einer nackten 404 auf "/" sagen, was fehlt.
+    // Without a built web client only the API runs. Instead of a bare 404 on "/", say what is missing.
     app.log.warn({ staticDir }, "Web-Client nicht gefunden (kein index.html). Nur die API ist erreichbar. " +
       "Abhilfe: `pnpm build` im Repo (kopiert apps/web/dist nach apps/server/public), Docker-Image neu bauen, oder STATIC_DIR setzen.");
-    app.get("/", async (_req, reply) => reply.code(503).type("text/plain; charset=utf-8").send([
-      "Squorli: API läuft, aber der Web-Client fehlt.",
-      `Erwartet wurde ${join(staticDir, "index.html")}.`,
-      "Abhilfe: im Repo `pnpm build` ausführen (legt apps/server/public an) oder das Docker-Image neu bauen;",
-      "alternativ STATIC_DIR auf ein Verzeichnis mit dem gebauten Client zeigen lassen.",
-      "Prüfen: GET /api/health",
-      "",
-    ].join("\n")));
+    // Bilingual (German/English) by Accept-Language, English by default: the same rule the web client applies.
+    const expected = join(staticDir, "index.html");
+    const texts = {
+      de: [
+        "Squorli: API läuft, aber der Web-Client fehlt.",
+        `Erwartet wurde ${expected}.`,
+        "Abhilfe: im Repo `pnpm build` ausführen (legt apps/server/public an) oder das Docker-Image neu bauen;",
+        "alternativ STATIC_DIR auf ein Verzeichnis mit dem gebauten Client zeigen lassen.",
+        "Prüfen: GET /api/health",
+      ],
+      en: [
+        "Squorli: the API is running, but the web client is missing.",
+        `Expected ${expected}.`,
+        "Fix: run `pnpm build` in the repo (creates apps/server/public) or rebuild the Docker image;",
+        "alternatively point STATIC_DIR at a directory with the built client.",
+        "Check: GET /api/health",
+      ],
+    };
+    app.get("/", async (req, reply) => reply.code(503).type("text/plain; charset=utf-8").send([...texts[preferredLanguage(req.headers["accept-language"])], ""].join("\n")));
   }
 
   app.addHook("onClose", async () => { await client.end(); });
 
-  // Haeufiger Fehler: Dev-Wert fuer die Client-URL von LiveKit auf einem oeffentlichen Server.
+  // Common mistake: the dev value for LiveKit's client URL on a public server.
   const lkUrl = new URL(config.livekitPublicUrl);
   const lkHost = lkUrl.hostname;
   if (lkUrl.protocol === "wss:" && lkUrl.port && lkUrl.port !== "443") {
@@ -175,7 +186,7 @@ async function main() {
   await app.listen({ port: config.PORT, host: "0.0.0.0" });
   app.log.info({ proxyMode: config.PROXY_MODE, domain: config.PUBLIC_DOMAIN }, "app-server up");
   if (directory.enabled) {
-    // Registrieren, dann alle 5 Minuten die Namen aller Nutzer abgleichen (Aenderungen auf der Kontoseite kommen so ohne Neuladen an).
+    // Register, then reconcile all users' names every 5 minutes (changes on the account page arrive without a reload this way).
     const sync = async () => {
       const changed = await directory!.syncAll((u) => presence.rename(u.userId, { displayName: u.displayName, publicKey: u.publicKey, handle: u.handle }));
       if (changed) await broadcastStructure(db, hub, ["members"]);
@@ -186,8 +197,19 @@ async function main() {
       if (changed) await broadcastStructure(db, hub, ["members"]);
     };
     const timer = setInterval(() => { void sync().catch((err) => app.log.warn({ err }, "Verzeichnis-Abgleich")); }, SYNC_INTERVAL_MS);
-    timer.unref(); // haelt den Prozess nicht am Leben (nach app.listen sind keine Hooks mehr moeglich)
+    timer.unref(); // does not keep the process alive (no more hooks are possible after app.listen)
   }
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });
+
+/** "de" when German ranks before English in the Accept-Language header (or is the only known language), otherwise "en". */
+export function preferredLanguage(header: string | string[] | undefined): "de" | "en" {
+  const raw = Array.isArray(header) ? header.join(",") : header ?? "";
+  const ranked = raw.split(",").map((part, i) => {
+    const [tag = "", ...params] = part.trim().split(";");
+    const q = params.map((p) => p.trim()).find((p) => p.startsWith("q="));
+    return { lang: tag.trim().toLowerCase().split("-")[0], q: q ? Number(q.slice(2)) || 0 : 1, i };
+  }).filter((e) => e.lang === "de" || e.lang === "en").sort((a, b) => b.q - a.q || a.i - b.i);
+  return ranked[0]?.lang === "de" ? "de" : "en";
+}

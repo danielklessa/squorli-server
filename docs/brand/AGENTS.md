@@ -2,6 +2,8 @@
 
 ## Purpose and Scope
 
+Product names, domains, open-source boundaries, documentation language and cross-project synchronization are defined in [PRODUCT.md](PRODUCT.md). It is part of this package and must remain synchronized across squorli-server, squorli-directory and squorli-website. The server's docs/brand directory is canonical. Use the website's `pnpm brand:sync` and `pnpm brand:check` to maintain every package and selected runtime asset copy.
+
 This package is the approved visual foundation for Squorli, a chat and voice application for gaming and creator communities. Use these rules when embedding the included assets and when designing Squorli interfaces. They do not replace project-specific development, security or testing requirements. Explicit current user instructions take precedence over these brand recommendations.
 
 The current design is version 2: **Dark Mode as the default, blue logos and full, round speech figures**. Do not use older purple grid drafts or an earlier, slimmer SVG version as an implementation template.

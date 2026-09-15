@@ -1,11 +1,11 @@
 import { displayNameOf, type VoiceMember } from "@squorli/protocol";
 
 /**
- * Wer sitzt in welchem Sprachkanal? Gefuehrt pro WebSocket-Verbindung, damit ein abgerissener
- * Socket den Nutzer automatisch austraegt. Ein Nutzer mit zwei Tabs zaehlt einmal.
+ * Who is sitting in which voice channel? Tracked per WebSocket connection so a dropped
+ * socket removes the user automatically. A user with two tabs counts once.
  *
- * Das ist Absicht ("ich bin im Kanal"), nicht der Medienstatus; den kennt LiveKit.
- * In-Memory reicht fuer einen Knoten (wie der ChallengeStore).
+ * This is intent ("I am in the channel"), not media state; LiveKit knows that.
+ * In-memory is enough for a single node (like the ChallengeStore).
  */
 export class VoicePresence<Conn = unknown> {
   private readonly byConn = new Map<Conn, { channelId: string; member: VoiceMember }>();
@@ -16,7 +16,7 @@ export class VoicePresence<Conn = unknown> {
     return () => this.listeners.delete(fn);
   }
 
-  /** Setzt die Verbindung in den Kanal; ein vorheriger Kanal wird verlassen. */
+  /** Puts the connection into the channel; a previous channel is left. */
   join(conn: Conn, channelId: string, member: VoiceMember): void {
     const prev = this.byConn.get(conn);
     this.byConn.set(conn, { channelId, member });
@@ -31,19 +31,19 @@ export class VoicePresence<Conn = unknown> {
     this.emit(prev.channelId);
   }
 
-  /** Alle Verbindungen eines Nutzers austragen (Kick/Ban). */
+  /** Remove all connections of a user (kick/ban). */
   leaveUser(userId: string): void {
     for (const [conn, entry] of [...this.byConn]) if (entry.member.userId === userId) this.leave(conn);
   }
 
-  /** Kanal geloescht: alle Verbindungen darin austragen. */
+  /** Channel deleted: remove all connections in it. */
   clearChannel(channelId: string): void {
     let touched = false;
     for (const [conn, entry] of [...this.byConn]) if (entry.channelId === channelId) { this.byConn.delete(conn); touched = true; }
     if (touched) this.emit(channelId);
   }
 
-  /** Anzeigename eines Nutzers in allen seinen Verbindungen aktualisieren. */
+  /** Update a user's display name across all of their connections. */
   rename(userId: string, u: { displayName: string | null; publicKey: string; handle?: string | null }): void {
     const touched = new Set<string>();
     for (const entry of this.byConn.values()) {
@@ -58,13 +58,13 @@ export class VoicePresence<Conn = unknown> {
     return this.byConn.get(conn)?.channelId;
   }
 
-  /** Sprachkanal eines Nutzers (erste Verbindung), fuer Moderation. */
+  /** A user's voice channel (first connection), for moderation. */
   channelOfUser(userId: string): string | undefined {
     for (const entry of this.byConn.values()) if (entry.member.userId === userId) return entry.channelId;
     return undefined;
   }
 
-  /** Mitglieder eines Kanals, je Nutzer einmal, in Beitrittsreihenfolge. */
+  /** Members of a channel, once per user, in join order. */
   members(channelId: string): VoiceMember[] {
     const seen = new Map<string, VoiceMember>();
     for (const { channelId: c, member } of this.byConn.values()) {

@@ -3,11 +3,12 @@ import { useEffect, useMemo, useState } from "react";
 import { DmView } from "./DmView";
 import { Icon } from "./Icon";
 import type { State, Store } from "./store";
+import { t } from "./i18n";
 
 /**
- * Startansicht (M7, Squorli-Symbol in der Server-Leiste): links Freunde, Anfragen und Suche, rechts das Gespraech mit dem
- * ausgewaehlten Freund (Ende-zu-Ende verschluesselt ueber das Verzeichnis). Ersetzt Kanalliste, Chat und Mitgliederliste;
- * Sprache laeuft im Dock darunter weiter. Namen: der Freund gibt seinen globalen Anzeigenamen frei, sonst das Handle.
+ * Home view (M7, the Squorli mark in the server rail): friends, requests and search on the left, the conversation with the
+ * selected friend on the right (end-to-end encrypted through the directory). Replaces the channel list, chat and member list;
+ * voice keeps running in the dock below. Names: the friend exposes their global display name, otherwise the handle.
  */
 export const friendName = (f: Friend) => f.displayName ?? `@${f.handle}`;
 
@@ -28,7 +29,7 @@ export function HomeSidebar({ state, store, members }: { state: State; store: St
     return friendName(a).localeCompare(friendName(b));
   });
 
-  // Suche: Handles beim Verzeichnis (Praefix, entprellt) und Namen in der Mitgliederliste des verbundenen Servers.
+  // Search: handles at the directory (prefix, debounced) and names in the member list of the connected server.
   const query = q.trim().replace(/^@/, "").toLowerCase();
   useEffect(() => {
     if (query.length < 2) { setHits([]); return; }
@@ -40,43 +41,43 @@ export function HomeSidebar({ state, store, members }: { state: State; store: St
   const seen = new Set(localHits.map((m) => m.publicKey));
   const dirHits = hits.filter((h) => h.publicKey !== me && !seen.has(h.publicKey));
 
-  const linkText = state.directoryLink === "connected" ? null : state.directoryLink === "connecting" ? "Verbinde mit dem Verzeichnis …" : state.directoryLinkError ?? "Keine Verbindung zum Verzeichnis.";
+  const linkText = state.directoryLink === "connected" ? null : state.directoryLink === "connecting" ? t("home.connecting") : state.directoryLinkError ?? t("home.noLink");
 
   return (
     <div className="home-side">
-      <header className="server-head"><img className="brand-mark" src="/brand/squorli-icon-small.svg" alt="" width="22" height="22" /><strong>Freunde</strong></header>
+      <header className="server-head"><img className="brand-mark" src="/brand/squorli-icon-small.svg" alt="" width="22" height="22" /><strong>{t("home.friends")}</strong></header>
       <div className="home-search">
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Handle oder Name suchen" spellCheck={false} aria-label="Freund suchen" />
-        {q && <button className="icon" title="Suche leeren" onClick={() => setQ("")}><Icon name="x" /></button>}
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("home.searchPlaceholder")} spellCheck={false} aria-label={t("home.searchLabel")} />
+        {q && <button className="icon" title={t("home.clearSearch")} onClick={() => setQ("")}><Icon name="x" /></button>}
       </div>
       {linkText && <p className="muted small home-note">{linkText}</p>}
       {state.friendsError && <p className="error small home-note">{state.friendsError}</p>}
       <div className="channel-list home-list">
         {query.length >= 2 && (
           <section>
-            <h3>Suche</h3>
-            {localHits.length === 0 && dirHits.length === 0 && <p className="muted small home-note">Nichts gefunden. Namen werden nur auf diesem Server gesucht, Handles im Verzeichnis.</p>}
+            <h3>{t("home.search")}</h3>
+            {localHits.length === 0 && dirHits.length === 0 && <p className="muted small home-note">{t("home.nothingFound")}</p>}
             <ul>
-              {localHits.map((m) => <SearchRow key={m.publicKey} publicKey={m.publicKey} title={m.displayName} sub={m.handle ? `@${m.handle}` : "ohne Handle"} state={byKey.get(m.publicKey)?.state ?? null} canAdd={!!m.handle} store={store} />)}
-              {dirHits.map((h) => <SearchRow key={h.publicKey} publicKey={h.publicKey} title={`@${h.handle}`} sub="Verzeichnis" state={byKey.get(h.publicKey)?.state ?? null} canAdd store={store} />)}
+              {localHits.map((m) => <SearchRow key={m.publicKey} publicKey={m.publicKey} title={m.displayName} sub={m.handle ? `@${m.handle}` : t("home.noHandle")} state={byKey.get(m.publicKey)?.state ?? null} canAdd={!!m.handle} store={store} />)}
+              {dirHits.map((h) => <SearchRow key={h.publicKey} publicKey={h.publicKey} title={`@${h.handle}`} sub={t("home.directory")} state={byKey.get(h.publicKey)?.state ?? null} canAdd store={store} />)}
             </ul>
           </section>
         )}
         {incoming.length > 0 && (
           <section>
-            <h3>Anfragen · {incoming.length}</h3>
+            <h3>{t("home.requests")} · {incoming.length}</h3>
             <ul>{incoming.map((f) => (
               <li key={f.publicKey} className="friend request">
                 <span className="friend-name">@{f.handle}</span>
-                <button className="icon ok" title="Annehmen" onClick={() => store.acceptFriend(f.publicKey)}><Icon name="check" /></button>
-                <button className="icon danger" title="Ablehnen" onClick={() => store.declineFriend(f.publicKey)}><Icon name="x" /></button>
+                <button className="icon ok" title={t("home.accept")} onClick={() => store.acceptFriend(f.publicKey)}><Icon name="check" /></button>
+                <button className="icon danger" title={t("home.decline")} onClick={() => store.declineFriend(f.publicKey)}><Icon name="x" /></button>
               </li>
             ))}</ul>
           </section>
         )}
         <section>
-          <h3>Freunde · {accepted.length}</h3>
-          {accepted.length === 0 && state.directoryLink === "connected" && <p className="muted small home-note">Noch keine Freunde. Suche oben nach einem Handle oder wähle in der Mitgliederliste eines Servers „Als Freund hinzufügen“ (Rechtsklick).</p>}
+          <h3>{t("home.friends")} · {accepted.length}</h3>
+          {accepted.length === 0 && state.directoryLink === "connected" && <p className="muted small home-note">{t("home.noFriends")}</p>}
           <ul>{accepted.map((f) => {
             const unread = state.conversations[f.publicKey]?.unread ?? 0;
             return (
@@ -92,22 +93,22 @@ export function HomeSidebar({ state, store, members }: { state: State; store: St
         </section>
         {outgoing.length > 0 && (
           <section>
-            <h3>Gesendete Anfragen · {outgoing.length}</h3>
+            <h3>{t("home.sentRequests")} · {outgoing.length}</h3>
             <ul>{outgoing.map((f) => (
               <li key={f.publicKey} className="friend request">
                 <span className="friend-name muted">@{f.handle}</span>
-                <button className="icon" title="Zurückziehen" onClick={() => store.removeFriend(f.publicKey)}><Icon name="x" /></button>
+                <button className="icon" title={t("home.withdraw")} onClick={() => store.removeFriend(f.publicKey)}><Icon name="x" /></button>
               </li>
             ))}</ul>
           </section>
         )}
         {blocked.length > 0 && (
           <section>
-            <h3>Blockiert · {blocked.length}</h3>
+            <h3>{t("home.blocked")} · {blocked.length}</h3>
             <ul>{blocked.map((f) => (
               <li key={f.publicKey} className="friend request">
                 <span className="friend-name muted">@{f.handle}</span>
-                <button className="secondary small" onClick={() => store.unblockFriend(f.publicKey)}>Aufheben</button>
+                <button className="secondary small" onClick={() => store.unblockFriend(f.publicKey)}>{t("home.unblock")}</button>
               </li>
             ))}</ul>
           </section>
@@ -117,15 +118,15 @@ export function HomeSidebar({ state, store, members }: { state: State; store: St
   );
 }
 
-/** Suchtreffer: Freund hinzufuegen oder Zustand zeigen; ohne Handle (kein Verzeichniskonto) geht keine Anfrage. */
+/** Search hit: add as a friend or show the state; without a handle (no directory account) no request is possible. */
 function SearchRow({ publicKey, title, sub, state, canAdd, store }: { publicKey: string; title: string; sub: string; state: Friend["state"] | null; canAdd: boolean; store: Store }) {
-  const label = state === "accepted" ? "Freund" : state === "pending_out" ? "angefragt" : state === "pending_in" ? "möchte dein Freund sein" : state === "blocked" ? "blockiert" : null;
+  const label = state ? t(`friend.${state}`) : null;
   return (
     <li className="friend request">
       <span className="friend-name">{title} <span className="muted small">{sub}</span></span>
       {label ? <span className="muted small">{label}</span>
-        : canAdd ? <button className="icon ok" title="Als Freund hinzufügen" onClick={() => store.requestFriend(publicKey)}><Icon name="user-plus" /></button>
-          : <span className="muted small" title="Ohne Handle beim Verzeichnis keine Freundschaft möglich">kein Konto</span>}
+        : canAdd ? <button className="icon ok" title={t("home.addFriend")} onClick={() => store.requestFriend(publicKey)}><Icon name="user-plus" /></button>
+          : <span className="muted small" title={t("home.noAccountHint")}>{t("home.noAccount")}</span>}
     </li>
   );
 }
@@ -136,7 +137,7 @@ export function HomeMain({ state, store }: { state: State; store: Store }) {
     return (
       <section className="chat empty home-empty">
         <img src="/brand/squorli-icon.svg" alt="" width="72" height="72" />
-        <p className="muted">Wähle links einen Freund, um zu schreiben. Direktnachrichten sind Ende-zu-Ende verschlüsselt: das Verzeichnis sieht nur, dass ihr schreibt, nicht was.</p>
+        <p className="muted">{t("home.pickFriend")}</p>
       </section>
     );
   }

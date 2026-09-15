@@ -2,57 +2,57 @@ import { bigserial, boolean, index, integer, pgTable, primaryKey, text, timestam
 
 const ts = (name: string) => timestamp(name, { withTimezone: true });
 
-/** Identitaet = oeffentlicher Ed25519-Schluessel. Kein Passwort. Ein Nutzer kann existieren, ohne Mitglied zu sein (gekickt/gebannt). */
+/** Identity = public Ed25519 key. No password. A user can exist without being a member (kicked/banned). */
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   publicKey: text("public_key").notNull().unique(),
-  /** Profil pro Server (PLAN 3.2). null = Kurzform des Schluessels anzeigen. */
+  /** Profile per server (PLAN 3.2). null = show the short form of the key. */
   displayName: text("display_name"),
   createdAt: ts("created_at").notNull().defaultNow(),
   lastSeenAt: ts("last_seen_at"),
-  /** Verifiziertes Handle aus dem Verzeichnisdienst (M6), beim Login nachgeschlagen und hier gecacht. */
+  /** Verified handle from the directory service (M6), looked up at sign-in and cached here. */
   handle: text("handle"),
   handleCheckedAt: ts("handle_checked_at"),
 });
 
 export const sessions = pgTable("sessions", {
   token: text("token").primaryKey(),
-  /** Oeffentliche Kennung fuer die Geraeteverwaltung (M6c); das Token bleibt geheim. */
+  /** Public identifier for device management (M6c); the token stays secret. */
   id: uuid("id").notNull().defaultRandom().unique(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   createdAt: ts("created_at").notNull().defaultNow(),
   expiresAt: ts("expires_at").notNull(),
-  /** Aus dem User-Agent beim Login abgeleitet, z. B. "Chrome auf Windows". */
+  /** Derived from the user agent at sign-in, e.g. "Chrome on Windows". */
   label: text("label"),
-  /** Gedrosselt (alle 5 min) bei jeder Anfrage nachgefuehrt. */
+  /** Updated on every request, throttled to once every 5 minutes. */
   lastUsedAt: ts("last_used_at"),
 });
 
-/** Genau eine Zeile (id = "server"). Ein Deployment = ein Server. */
+/** Exactly one row (id = "server"). One deployment = one server. */
 export const serverSettings = pgTable("server_settings", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   openJoin: boolean("open_join").notNull().default(false),
-  /** Anmeldung nur mit Verzeichniskonto (Handle); Eigentuemer ausgenommen. Ohne DIRECTORY_URL ohne Wirkung. */
+  /** Sign-in only with a directory account (handle); owners exempt. No effect without DIRECTORY_URL. */
   requireAccount: boolean("require_account").notNull().default(false),
-  /** M6d: im Serververzeichnis auflisten, mit Beschreibung (beides geht bei der Registrierung ans Verzeichnis). */
+  /** M6d: list in the server directory, with a description (both are sent to the directory at registration). */
   listed: boolean("listed").notNull().default(false),
   description: text("description"),
   ownerId: uuid("owner_id").references(() => users.id, { onDelete: "set null" }),
-  /** Server-Icon (Verwaltung): Datei liegt unter DATA_DIR/server-icon, hier MIME-Typ und Zeitpunkt (Cache-Version). */
+  /** Server icon (admin): the file lives under DATA_DIR/server-icon, here the MIME type and timestamp (cache version). */
   iconMime: text("icon_mime"),
   iconUpdatedAt: ts("icon_updated_at"),
-  /** Ed25519-Seed (hex) des Servers fuer die Registrierung beim Verzeichnis (M6); beim ersten Start erzeugt, bleibt danach gleich. */
+  /** The server's Ed25519 seed (hex) for registration at the directory (M6); generated on first start, unchanged afterwards. */
   directoryPrivateKey: text("directory_private_key"),
 });
 
-/** Mitgliedschaft. Wer hier fehlt, sieht nichts und kann nichts. */
+/** Membership. Anyone missing here sees nothing and can do nothing. */
 export const members = pgTable("members", {
   userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   joinedAt: ts("joined_at").notNull().defaultNow(),
-  /** Moderator hat Kamera/Bildschirm gesperrt (M3). */
+  /** A moderator has blocked camera/screen (M3). */
   streamBlocked: boolean("stream_blocked").notNull().default(false),
-  /** Eigentuemer (mehrere moeglich). Der erste steht zusaetzlich in server_settings.owner_id und ist unentziehbar. */
+  /** Owner (several possible). The first one is additionally recorded in server_settings.owner_id and cannot be revoked. */
   isOwner: boolean("is_owner").notNull().default(false),
 });
 
@@ -70,7 +70,7 @@ export const channels = pgTable("channels", {
   categoryId: uuid("category_id").references(() => categories.id, { onDelete: "set null" }),
   position: integer("position").notNull().default(0),
   createdAt: ts("created_at").notNull().defaultNow(),
-  /** Sprachqualitaet (M3): Opus-Bitrate in kbit/s und Stereo. */
+  /** Voice quality (M3): Opus bitrate in kbit/s and stereo. */
   audioBitrate: integer("audio_bitrate").notNull().default(64),
   audioStereo: boolean("audio_stereo").notNull().default(false),
 });
@@ -114,7 +114,7 @@ export const messages = pgTable(
   "messages",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    /** Monoton steigend ueber alle Kanaele: Reihenfolge und Cursor fuer den Verlauf. */
+    /** Monotonically increasing across all channels: ordering and cursor for the history. */
     seq: bigserial("seq", { mode: "number" }).notNull().unique(),
     channelId: uuid("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
     authorId: uuid("author_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -125,7 +125,7 @@ export const messages = pgTable(
   (t) => ({ byChannel: index("messages_channel_seq_idx").on(t.channelId, t.seq) }),
 );
 
-/** Datei liegt unter DATA_DIR/attachments/<id>; messageId wird beim Senden der Nachricht gesetzt. */
+/** The file lives under DATA_DIR/attachments/<id>; messageId is set when the message is sent. */
 export const attachments = pgTable("attachments", {
   id: uuid("id").primaryKey().defaultRandom(),
   messageId: uuid("message_id").references(() => messages.id, { onDelete: "cascade" }),

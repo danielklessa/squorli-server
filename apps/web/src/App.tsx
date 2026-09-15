@@ -19,6 +19,7 @@ import { Permission, directoryServerIconUrl, directoryServerUrl, hasPermission }
 import { Store, activeState, homeState, type State } from "./store";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 import type { VoiceSettings } from "./voice/settings";
+import { t } from "./i18n";
 
 export function App() {
   const store = useMemo(() => new Store(), []);
@@ -28,30 +29,30 @@ export function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showDebug, setShowDebug] = useState(() => new URLSearchParams(window.location.search).has("debug"));
-  /** Buehne (Kacheln/Bildschirm) statt Chat im Hauptbereich; Sprache laeuft unabhaengig davon weiter. */
+  /** Stage (tiles/screen) instead of chat in the main area; voice keeps running independently. */
   const [stageOpen, setStageOpen] = useState(false);
   const [showBrowser, setShowBrowser] = useState(false);
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>(() => loadVoiceSettings());
-  /** Kamera-Auswahl offen (Liste der Kameras), wenn beim Einschalten mehr als eine vorhanden ist. */
+  /** Camera picker open (list of cameras) when there is more than one at switch-on time. */
   const [cameraPick, setCameraPick] = useState<MediaDeviceInfo[] | null>(null);
   /**
-   * Server, zu dem die Sprachverbindung gehoert (Multi-Server-Client): sie bleibt beim Wechsel des angezeigten Servers bestehen;
-   * erst der Beitritt zu einem Sprachkanal eines anderen Servers beendet sie (Vorgabe des Nutzers).
+   * Server the voice connection belongs to (multi-server client): it survives switching the displayed server;
+   * only joining a voice channel on another server ends it (as the user specified).
    */
   const [voiceHost, setVoiceHost] = useState<string | null>(null);
   const voiceHostRef = useRef<string | null>(null);
   voiceHostRef.current = voiceHost;
 
-  // Kamera an/aus. Bei mehreren Kameras immer erst fragen (Vorgabe des Nutzers), bei einer direkt einschalten.
+  // Camera on/off. With several cameras always ask first (as the user specified), with one switch on directly.
   const toggleCamera = useCallback(async () => {
     if (voice.cameraOn) { await client.setCameraEnabled(false); return; }
     const { cameras } = await VoiceClient.listDevices(true).catch(() => ({ cameras: [] as MediaDeviceInfo[] }));
-    // Dialog, sobald es etwas zu waehlen gibt: mehrere Kameras oder ein waehlbarer Hintergrund.
+    // Dialog as soon as there is something to choose: several cameras or a selectable background.
     if (cameras.length > 1 || (cameras.length === 1 && VoiceClient.supportsBlur())) setCameraPick(cameras);
     else await client.setCameraEnabled(true, cameras[0]?.deviceId ?? null, voiceSettings.cameraQuality, voiceSettings.cameraBlur);
   }, [client, voice.cameraOn, voiceSettings.cameraQuality, voiceSettings.cameraBlur]);
 
-  // Hintergrund-Unschaerfe an/aus (Staerke aus den Einstellungen, Standard leicht).
+  // Background blur on/off (strength from the settings, default light).
   const toggleBlur = useCallback(async () => {
     const next = voice.cameraBlur > 0 ? 0 : (voiceSettings.cameraBlur || 10);
     const s = { ...voiceSettings, cameraBlur: next };
@@ -69,12 +70,12 @@ export function App() {
   useEffect(() => store.subscribe(setState), [store]);
   useEffect(() => client.subscribe(setVoice), [client]);
   useEffect(() => {
-    // Kick, Bann oder Sitzungsverlust auf dem Server der Sprachverbindung beendet sie.
+    // A kick, ban or session loss on the voice connection's server ends it.
     store.onRemoved = (host) => { if (host === voiceHostRef.current) { void client.leave(); setVoiceHost(null); } };
     void store.init();
   }, [store, client]);
 
-  // Unerwartete Trennung von LiveKit: auch die Kanal-Praesenz am App-Server zuruecknehmen.
+  // Unexpected disconnect from LiveKit: also withdraw the channel presence at the app server.
   const [wasInVoice, setWasInVoice] = useState(false);
   useEffect(() => {
     const now = voice.status !== "disconnected";
@@ -85,7 +86,7 @@ export function App() {
     setWasInVoice(now);
   }, [voice.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Tipp-Anzeigen altern lassen (Re-Render alle 2 s)
+  // Let typing indicators age out (re-render every 2 s)
   const [, tick] = useState(0);
   useEffect(() => { const id = setInterval(() => tick((t) => t + 1), 2000); return () => clearInterval(id); }, []);
 
@@ -95,9 +96,9 @@ export function App() {
     await client.leave();
   }, [client, store]);
 
-  /** Sprachkanal auf `host` betreten; laeuft die Sprache auf einem anderen Server, wird sie dort zuerst beendet. */
+  /** Join a voice channel on `host`; if voice is running on another server, it is ended there first. */
   const joinVoice = useCallback(async (host: string, channelId: string) => {
-    client.prepareAudio(); // noch in der Nutzergeste, vor dem ersten await (Autoplay-/AudioContext-Regeln der Browser)
+    client.prepareAudio(); // still inside the user gesture, before the first await (browsers' autoplay/AudioContext rules)
     const conn = store.connection(host);
     if (!conn) return;
     setStageOpen(true);
@@ -117,30 +118,30 @@ export function App() {
   const voiceServer = voiceHost ? state.servers[voiceHost] ?? null : null;
   const voiceChannel = voiceServer?.server?.channels.find((c) => c.id === voice.channelId) ?? null;
 
-  // Sprachprofil des Kanals geaendert (Verwaltung) -> Mikrofon live umstellen.
+  // The channel's voice profile changed (admin) -> switch the microphone over live.
   useEffect(() => {
     if (voiceChannel) void client.setAudioProfile({ bitrate: voiceChannel.audioBitrate, stereo: voiceChannel.audioStereo });
   }, [client, voiceChannel?.audioBitrate, voiceChannel?.audioStereo]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Moderation (M3): Verschieben und Beenden durch einen Moderator ausfuehren und dem Nutzer sagen, was passiert ist.
+  // Moderation (M3): carry out a moderator's move or stop and tell the user what happened.
   useEffect(() => {
     store.onVoiceMoved = (host, channelId, by) => {
       if (host !== voiceHostRef.current) return;
       if (channelId) {
-        const name = store.connection(host)?.state.server?.channels.find((c) => c.id === channelId)?.name ?? "einen anderen Kanal";
-        client.setNotice(`${by} hat dich nach "${name}" verschoben.`);
+        const name = store.connection(host)?.state.server?.channels.find((c) => c.id === channelId)?.name ?? t("app.otherChannel");
+        client.setNotice(t("app.movedNotice", { by, name }));
         void joinVoice(host, channelId).catch(() => {});
       } else {
-        client.setNotice(`${by} hat dich aus dem Sprachkanal entfernt.`);
+        client.setNotice(t("app.removedNotice", { by }));
         void leaveVoice();
       }
     };
     store.onVoiceStop = (host, what, by) => {
       if (host !== voiceHostRef.current) return;
-      const parts = [what.camera && voice.cameraOn ? "Kamera" : "", what.screen && voice.screenOn ? "Bildschirmfreigabe" : ""].filter(Boolean);
+      const parts = [what.camera && voice.cameraOn ? t("app.camera") : "", what.screen && voice.screenOn ? t("app.screenShare") : ""].filter(Boolean);
       if (what.camera) void client.setCameraEnabled(false);
       if (what.screen) void client.setScreenShareEnabled(false);
-      if (parts.length) client.setNotice(`${by} hat deine ${parts.join(" und ")} beendet.`);
+      if (parts.length) client.setNotice(t("app.stoppedNotice", { by, what: parts.join(t("app.and")) }));
     };
     return () => { store.onVoiceMoved = null; store.onVoiceStop = null; };
   }, [store, client, joinVoice, leaveVoice, voice.cameraOn, voice.screenOn]);
@@ -150,7 +151,7 @@ export function App() {
   const activeHost = state.activeHost;
   const conn = store.connection(activeHost) ?? store.home;
 
-  // Seitentitel = Name des angezeigten Servers, Favicon = dessen Icon (Verwaltung) oder Squorli-Signet; gilt auch fuer den Login-Bildschirm.
+  // Page title = name of the displayed server, favicon = its icon (admin) or the Squorli mark; also applies to the login screen.
   const title = active.server?.settings.name ?? active.serverName ?? "Squorli";
   const iconUrl = active.server ? (active.server.settings.iconUrl ? conn.api.abs(active.server.settings.iconUrl) : null) : active.iconUrl;
   useEffect(() => applyBranding(title, iconUrl), [title, iconUrl]);
@@ -161,9 +162,9 @@ export function App() {
   const current = server?.channels.find((c) => c.id === active.currentChannelId && c.kind === "text") ?? null;
   const me = server?.members.find((m) => m.userId === active.userId);
   const canStream = !!server && hasPermission(server.myPermissions, Permission.STREAM_VIDEO);
-  // Die Buehne gehoert zum Server der Sprachverbindung; auf einem anderen Server zeigt der Dock "Ansicht" und wechselt dorthin.
+  // The stage belongs to the voice connection's server; on another server the dock shows "view" and switches there.
   const showStage = stageOpen && voiceChannel !== null && voiceHost === activeHost;
-  // M7: Startansicht mit Freunden und Direktnachrichten, sobald der Verzeichnis-Socket existiert (Konto beim Verzeichnis).
+  // M7: home view with friends and direct messages as soon as the directory socket exists (an account at the directory).
   const homeAvailable = state.friends !== null || state.directoryLink !== "idle";
   const homeOpen = homeAvailable && state.homeOpen;
   const homeBadge = (state.friends ?? []).filter((f) => f.state === "pending_in").length + Object.values(state.conversations).reduce((n, c) => n + c.unread, 0);
@@ -173,14 +174,14 @@ export function App() {
     onMessage: (pk: string) => { const st = store.friendState(pk); if (st === "accepted") store.selectPeer(pk); else store.openHome(true); },
   } : null;
 
-  // Server-Leiste: eigener Server zuerst, dann die Server des Kontos aus dem Verzeichnis (ohne Dublette des eigenen).
+  // Server rail: own server first, then the account's servers from the directory (without duplicating our own).
   const railServers: RailServer[] = [];
   const homeDirHost = home.serverDomain ?? window.location.hostname;
   railServers.push({ key: state.homeHost, host: homeDirHost, name: home.server.settings.name, sub: null, iconUrl: home.server.settings.iconUrl });
   for (const s of (state.accountServers ?? []).slice().sort((a, b) => (b.lastSeenAt < a.lastSeenAt ? -1 : b.lastSeenAt > a.lastSeenAt ? 1 : 0))) {
     const key = store.hostFor(s.host);
     if (key === state.homeHost) continue;
-    railServers.push({ key, host: s.host, name: s.name ?? s.host, sub: s.displayName ? `als ${s.displayName}` : null, iconUrl: state.directoryUrl ? directoryServerIconUrl(state.directoryUrl, s.host, s.iconUpdatedAt) : null });
+    railServers.push({ key, host: s.host, name: s.name ?? s.host, sub: s.displayName ? t("app.asName", { name: s.displayName }) : null, iconUrl: state.directoryUrl ? directoryServerIconUrl(state.directoryUrl, s.host, s.iconUpdatedAt) : null });
   }
   const railState = Object.fromEntries(Object.entries(state.servers).map(([k, s]) => [k, {
     unread: Object.values(s.unread).some(Boolean), voice: k === voiceHost && voice.status !== "disconnected", connection: s.connection,
@@ -221,10 +222,10 @@ export function App() {
             typing={active.typing[current.id] ?? {}} conn={conn}
           />
         ) : (
-          <section className="chat empty"><p className="muted">Kein Textkanal vorhanden.</p></section>
+          <section className="chat empty"><p className="muted">{t("app.noTextChannel")}</p></section>
         )}
         {showDebug && <DebugPanel log={active.log} client={client} voice={voice} />}
-        <button className="debug-toggle icon" title="Debug" onClick={() => setShowDebug((v) => !v)}><Icon name="bug" /></button>
+        <button className="debug-toggle icon" title={t("app.debug")} onClick={() => setShowDebug((v) => !v)}><Icon name="bug" /></button>
       </main>
 
       {!homeOpen && server && <MemberList api={conn.api} members={server.members} roles={server.roles} myUserId={active.userId!} myPermissions={server.myPermissions} ownerId={server.settings.ownerId}
@@ -242,7 +243,7 @@ export function App() {
   );
 }
 
-/** Hauptbereich fuer einen fremden Server, der (noch) keinen Zustand hat: verbindet, Fehler, entfernt. */
+/** Main area for a foreign server that has no state (yet): connecting, error, removed. */
 function ServerStatus({ s, onRetry, onClose }: { s: State["servers"][string]; onRetry: () => void; onClose: () => void }) {
   const busy = s.connection === "logging-in" || s.connection === "connecting" || s.connection === "reconnecting";
   const name = s.serverName ?? s.host;
@@ -250,14 +251,14 @@ function ServerStatus({ s, onRetry, onClose }: { s: State["servers"][string]; on
     <section className="chat empty server-status">
       <div className="stack">
         <h2>{name}</h2>
-        {busy && <p className="muted">Verbinde mit {s.host} …</p>}
-        {s.removed && <p className="error">{s.removed.reason === "banned" ? "Du wurdest auf diesem Server gebannt" : "Du wurdest von diesem Server entfernt"}{s.removed.message ? `: ${s.removed.message}` : "."}</p>}
+        {busy && <p className="muted">{t("status.connecting", { host: s.host })}</p>}
+        {s.removed && <p className="error">{s.removed.reason === "banned" ? t("status.banned") : t("status.removed")}{s.removed.message ? `: ${s.removed.message}` : "."}</p>}
         {s.error && <p className="error">{s.error}</p>}
         {!busy && (
           <div className="row">
-            <button onClick={onRetry}>Erneut versuchen</button>
-            <a className="link-btn" href={directoryServerUrl(s.host)}>Direkt öffnen</a>
-            <button className="secondary" onClick={onClose}>Schließen</button>
+            <button onClick={onRetry}>{t("common.retry")}</button>
+            <a className="link-btn" href={directoryServerUrl(s.host)}>{t("status.openDirect")}</a>
+            <button className="secondary" onClick={onClose}>{t("common.close")}</button>
           </div>
         )}
       </div>

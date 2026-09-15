@@ -1,8 +1,8 @@
 /**
- * Identitaet = Ed25519-Schluesselpaar, erzeugt im Browser, gespeichert in localStorage.
+ * Identity = Ed25519 key pair, generated in the browser, stored in localStorage.
  *
- * M0: unverschluesselt im localStorage. Das ist fuer Entwicklung in Ordnung und
- * fuer Release 1 NICHT ausreichend. Vor M5: Wiederherstellungscode + verschluesselte Ablage.
+ * M0: unencrypted in localStorage. That is fine for development and
+ * NOT sufficient for release 1. Before M5: recovery code + encrypted storage.
  */
 import * as ed from "@noble/ed25519";
 
@@ -27,13 +27,13 @@ export function forgetIdentity() {
   localStorage.removeItem(KEY);
 }
 
-/** M6b: Identitaet aus einem wiederhergestellten Seed (Anmeldung mit Handle + Passwort). */
+/** M6b: identity from a recovered seed (sign-in with handle + password). */
 export async function identityFromPrivateKey(privateKeyHex: string): Promise<Identity> {
   const pub = await ed.getPublicKeyAsync(fromHex(privateKeyHex));
   return { publicKey: toHex(pub), privateKey: privateKeyHex };
 }
 
-/** Geraeteschluessel ersetzen (nach Wiederherstellung). */
+/** Replace the device key (after a recovery). */
 export function storeIdentity(id: Identity) {
   localStorage.setItem(KEY, JSON.stringify(id));
 }

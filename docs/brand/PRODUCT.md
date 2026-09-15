@@ -1,0 +1,41 @@
+# Squorli product identity
+
+Last updated: 15 September 2026. Keep this file byte-identical in the brand packages of all three Squorli projects.
+
+## Names and domains
+
+| Name | Meaning | Official destination |
+| --- | --- | --- |
+| Squorli | The overall brand: a home for community conversations, voice and video | https://squorli.com |
+| Squorli Server | The self-hosted, open-source community server and its web client | https://gitlab.klessa.net/squorli/squorli-server |
+| Squorli Directory | The separately operated identity, discovery and friends service; not open source | https://directory.squorli.com |
+
+The website is being prepared for squorli.com; this statement is not a deployment status claim. The Directory destination was supplied by the project owner. Do not advertise a public source repository for the Directory. Generic deployment examples may use chat.example.org for a community's own server.
+
+## Product description
+
+Squorli gives gaming, creator and other communities a place for text, voice, video and screen sharing on a server they operate themselves. Roles, invitations and moderation belong to each server. The browser client is implemented; a desktop client is planned.
+
+Connecting Squorli Directory adds global handles, password-encrypted key backup, authenticator support, public server discovery, friends and end-to-end encrypted direct messages between friends. The Directory is optional for basic server operation. Do not describe it as self-hosted open-source software or imply that an optional connection makes its dependent features available offline.
+
+Only direct messages between friends are described as end-to-end encrypted. Do not extend that claim to server channels, attachments, voice or video. Do not claim anonymous operation, zero metadata, audited cryptography, measured scalability or production readiness without supporting evidence.
+
+## Release and licensing wording
+
+The owner identifies Squorli Server as the open-source project and Squorli Directory as not open source. The server repository still needs a concrete license selection and license file before public release. Do not invent an MIT/Apache license or remove that pending decision when writing public copy.
+
+Video and screen sharing are implemented; real-camera acceptance and restrictive-network/TURN testing remain pending. Screen audio depends on a supported Chromium browser. Do not present roadmap targets as measured capabilities.
+
+## Language and visual rules
+
+- Internal project documentation and agent instructions are maintained in English.
+- The public website's marketing text, navigation and technical articles are available in German and English. Update both translations in the same work step and share executable examples to prevent drift.
+- Use the spelling **Squorli**, **Squorli Server**, and **Squorli Directory** consistently in current descriptions. Historical technical identifiers need not be renamed.
+- Use the approved version 2 SVGs, palette and UI font from this package. Website headlines may scale responsively beyond the UI heading sizes, without changing the logo geometry or wordmark.
+- Illustrations may show fictional communities but must be labeled as examples. They must not imply a live app session or modify the brand mark.
+
+## Synchronization
+
+The canonical package is squorli-server/docs/brand. Mirror the complete package into squorli-directory/docs/brand and squorli-website/docs/brand. Mirror the selected runtime SVGs and CSS tokens into each application's brand asset folder. Product-positioning changes must also update affected READMEs, plans and public website copy in the same work step.
+
+From squorli-website run `pnpm brand:sync` after editing the canonical package, then `pnpm brand:check`. The scripts compare bytes and never delete unexpected files. Missing sibling checkouts or unexpected extra files require manual review; do not silently create a divergent brand package.

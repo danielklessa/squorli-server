@@ -5,8 +5,8 @@ export default defineConfig({
   format: ["esm"],
   target: "node22",
   clean: true,
-  // Das Protokollpaket liegt nur als TypeScript-Quelle vor; ins Bundle aufnehmen,
-  // damit dist/index.js ohne Type-Stripping und ohne Workspace-Link laeuft.
+  // The protocol package only exists as TypeScript source; include it in the bundle
+  // so dist/index.js runs without type stripping and without a workspace link.
   noExternal: ["@squorli/protocol"],
-  // @fastify/multipart zieht busboy nach; als extern belassen (liegt in node_modules des deploy-Outputs).
+  // @fastify/multipart pulls in busboy; leave it external (it lives in the deploy output's node_modules).
 });

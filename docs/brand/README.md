@@ -5,6 +5,7 @@ Dark Mode is the default. The primary color #6397FF sits on night blue #0C1424. 
 The fuller, round speech figures follow the original draft more closely. The icon mark adopts the three circling speech figures of the selected draft. The outlines have been redrawn as smooth Bézier curves and the figures arranged in 120° steps. The eyes are real cut-outs. The custom-drawn, rounded wordmark is built entirely from vector geometry: no fonts, embedded images or external dependencies.
 
 ## Files
+- PRODUCT.md: shared product identity, official domains, licensing boundaries, documentation language and synchronization workflow for all three Squorli projects.
 - AGENTS.md: instructions for AI assistants on embedding and applying the package. Read it first when integrating and reference it from the project AGENTS.md.
 - squorli-logo.svg: default logo for dark backgrounds; identical to squorli-logo-dark.svg.
 - squorli-icon.svg: default icon mark without wordmark; identical to squorli-icon-blue.svg.

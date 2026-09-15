@@ -1,6 +1,6 @@
 /**
- * Seitentitel und Favicon: immer der Servername (schon vor dem Login aus /api/health), das Server-Icon aus der
- * Verwaltung als Favicon, sonst das Squorli-Signet (docs/brand).
+ * Page title and favicon: always the server name (from /api/health even before sign-in), the server icon from the
+ * admin area as the favicon, otherwise the Squorli mark (docs/brand).
  */
 const DEFAULT_ICON = "/brand/squorli-icon-small.svg";
 

@@ -4,15 +4,14 @@ import { askConfirm } from "./dialogs";
 import { friendName } from "./Home";
 import { Icon } from "./Icon";
 import type { DmThread, Store } from "./store";
+import { fmtDay, fmtTime, t } from "./i18n";
 
 /**
- * Gespraech mit einem Freund (M7): Verlauf (aelteres beim Hochscrollen), Gruppierung wie im Kanal-Chat, Composer ohne
- * Anhaenge. Loeschen: eigene Nachrichten innerhalb von 5 Minuten fuer beide, sonst nur fuer mich (Nutzerentscheidung).
+ * Conversation with a friend (M7): history (older messages when scrolling up), grouping as in the channel chat, composer without
+ * attachments. Deleting: your own messages within 5 minutes for both sides, otherwise only for me (user decision).
  */
 const GROUP_MS = 5 * 60_000;
 const linkRe = /(https?:\/\/[^\s<]+)/g;
-const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-const fmtDay = (iso: string) => new Date(iso).toLocaleDateString([], { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
 
 function renderText(text: string) {
   return text.split("\n").map((line, i) => (
@@ -64,14 +63,14 @@ export function DmView({ friend, thread, myKey, store }: { friend: Friend; threa
     <section className="chat">
       <header className="chat-head">
         <span className={`presence ${friend.online ? "on" : ""}`} /><strong>{name}</strong>
-        <span className="muted topic">@{friend.handle}{friend.online ? " · online" : ""}</span>
+        <span className="muted topic">@{friend.handle}{friend.online ? ` · ${t("dm.online")}` : ""}</span>
         <span className="spacer" />
-        <button className="icon" title="Gespräch bei mir löschen" onClick={() => { void askConfirm({ title: `Gespräch mit ${name} löschen?`, text: "Nur bei dir; dein Freund behält seine Kopie.", confirmLabel: "Löschen", danger: true }).then((ok) => { if (ok) store.clearDm(friend.publicKey); }); }}><Icon name="trash-2" /></button>
+        <button className="icon" title={t("dm.clearTitle")} onClick={() => { void askConfirm({ title: t("dm.clearConfirmTitle", { name }), text: t("dm.clearConfirmText"), confirmLabel: t("common.delete"), danger: true }).then((ok) => { if (ok) store.clearDm(friend.publicKey); }); }}><Icon name="trash-2" /></button>
       </header>
 
       <div className="messages" ref={listRef} onScroll={onScroll}>
-        {thread.loading && <p className="muted center">Lade …</p>}
-        {thread.loaded && !thread.hasMore && <p className="muted center"><Icon name="lock" /> Ende-zu-Ende verschlüsselt mit {name}</p>}
+        {thread.loading && <p className="muted center">{t("common.loading")}</p>}
+        {thread.loaded && !thread.hasMore && <p className="muted center"><Icon name="lock" /> {t("dm.e2e", { name })}</p>}
         {thread.list.map((m, i) => {
           const prev = thread.list[i - 1];
           const grouped = prev && prev.from === m.from && new Date(m.sentAt).getTime() - new Date(prev.sentAt).getTime() < GROUP_MS;
@@ -84,18 +83,18 @@ export function DmView({ friend, thread, myKey, store }: { friend: Friend; threa
               <article className={`msg ${grouped && !newDay ? "grouped" : ""}`}>
                 {!(grouped && !newDay) && (
                   <div className="msg-head">
-                    <strong>{mine ? "Du" : name}</strong>
+                    <strong>{mine ? t("dm.you") : name}</strong>
                     <time className="muted" dateTime={m.sentAt}>{fmtTime(m.sentAt)}</time>
                   </div>
                 )}
                 <div className="msg-body">
                   {m.text === null
-                    ? <p className="muted"><Icon name="lock" /> Nachricht konnte nicht entschlüsselt werden.</p>
+                    ? <p className="muted"><Icon name="lock" /> {t("dm.undecryptable")}</p>
                     : <p>{renderText(m.text)}</p>}
                 </div>
                 <div className="msg-actions">
-                  <button className="icon" title={both ? "Für beide löschen" : "Bei mir löschen"} onClick={() => {
-                    void askConfirm({ title: both ? "Nachricht für beide löschen?" : "Nachricht bei dir löschen?", text: both ? "Innerhalb von 5 Minuten nach dem Senden verschwindet sie auch beim Empfänger." : "Dein Freund behält seine Kopie.", confirmLabel: "Löschen", danger: true })
+                  <button className="icon" title={both ? t("dm.deleteBoth") : t("dm.deleteMine")} onClick={() => {
+                    void askConfirm({ title: both ? t("dm.deleteBothTitle") : t("dm.deleteMineTitle"), text: both ? t("dm.deleteBothText") : t("dm.deleteMineText"), confirmLabel: t("common.delete"), danger: true })
                       .then((ok) => { if (ok) store.deleteDm(friend.publicKey, m.id); });
                   }}><Icon name="trash-2" /></button>
                 </div>
@@ -108,8 +107,8 @@ export function DmView({ friend, thread, myKey, store }: { friend: Friend; threa
       <footer className="composer">
         {err && <p className="error">{err}</p>}
         <div className="composer-row">
-          <textarea value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} rows={1} placeholder={`Nachricht an ${name}`} disabled={sending} />
-          <button onClick={submit} disabled={sending || !draft.trim()}>Senden</button>
+          <textarea value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} rows={1} placeholder={t("dm.placeholder", { name })} disabled={sending} />
+          <button onClick={submit} disabled={sending || !draft.trim()}>{t("chat.send")}</button>
         </div>
         <div className="typing" />
       </footer>

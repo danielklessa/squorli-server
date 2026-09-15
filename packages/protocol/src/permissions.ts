@@ -1,6 +1,6 @@
 /**
- * Rechte als Bitmaske. Rollen tragen eine Maske, ein Mitglied hat die ODER-Summe seiner Rollen.
- * ADMINISTRATOR schliesst alles ein. Neue Rechte immer hinten anhaengen, nie umnummerieren.
+ * Permissions as a bitmask. Roles carry a mask, a member has the OR of all their roles.
+ * ADMINISTRATOR includes everything. Always append new permissions at the end, never renumber.
  */
 export const Permission = {
   ADMINISTRATOR: 1 << 0,
@@ -39,12 +39,12 @@ export const PERMISSION_LABELS: Record<PermissionName, string> = {
 };
 
 /**
- * Standardrolle "Gast" (bekommt jeder beim Beitritt): nur Kanaele sehen und Sprachkanaele betreten.
- * Entscheidung des Nutzers vom 13.09.2026. Alles Weitere ueber die Rolle "Mitglied", die Admins vergeben.
+ * Default role "guest" (everyone gets it on joining): only view channels and enter voice channels.
+ * User decision of 2026-09-13. Everything else via the "member" role, which admins grant.
  */
 export const DEFAULT_EVERYONE_PERMISSIONS = Permission.VIEW_CHANNELS | Permission.CONNECT_VOICE;
 
-/** Rolle "Mitglied" (wird beim ersten Start angelegt, nicht automatisch vergeben): schreiben, anhaengen, einladen, Kamera/Bildschirm. */
+/** Role "member" (created on first start, not granted automatically): post, attach, invite, camera/screen. */
 export const DEFAULT_MEMBER_PERMISSIONS =
   DEFAULT_EVERYONE_PERMISSIONS | Permission.SEND_MESSAGES | Permission.ATTACH_FILES | Permission.CREATE_INVITES | Permission.STREAM_VIDEO;
 

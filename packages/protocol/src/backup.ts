@@ -1,14 +1,14 @@
-// KOPIE-HINWEIS: liegt byte-identisch auch im Repo squorli-directory (packages/protocol/src); Quelle ist squorli-server, nach Aenderung kopieren.
+// COPY NOTE: also exists byte-identically in the squorli-directory repo (packages/protocol/src); the source is squorli-server, copy it over after any change.
 /**
- * Schluessel-Backup (M6b): Der private Schluessel (32-Byte-Seed des Ed25519-Paares) wird im Client mit einem Passwort
- * verschluesselt. Der Verzeichnisdienst sieht nur Chiffretext und einen Auth-Schluessel, der zum Abrufen berechtigt
- * (dort nur als SHA-256 gespeichert). Isomorph: WebCrypto in Browser und Node, keine Abhaengigkeiten.
+ * Key backup (M6b): the private key (32-byte seed of the Ed25519 pair) is encrypted in the client with a password.
+ * The directory service only sees ciphertext and an auth key that grants retrieval
+ * (stored there as SHA-256 only). Isomorphic: WebCrypto in browser and Node, no dependencies.
  *
- * Ableitung:  PBKDF2-SHA256(passwort, salt, iterations)      -> master (32 Byte)
- *             HKDF-SHA256(master, info "community-backup-enc") -> AES-256-GCM-Schluessel (verlaesst den Client nie)
- *             HKDF-SHA256(master, info "community-backup-auth")-> Auth-Schluessel (hex, wird an den Dienst gesendet)
- * Wer die Datenbank des Dienstes hat, muss trotzdem das Passwort durch PBKDF2 raten; wer den Auth-Schluessel abfaengt,
- * bekommt nur den Chiffretext.
+ * Derivation: PBKDF2-SHA256(password, salt, iterations)      -> master (32 bytes)
+ *             HKDF-SHA256(master, info "community-backup-enc") -> AES-256-GCM key (never leaves the client)
+ *             HKDF-SHA256(master, info "community-backup-auth")-> auth key (hex, sent to the service)
+ * Whoever has the service's database still has to guess the password through PBKDF2; whoever intercepts the auth key
+ * only gets the ciphertext.
  */
 import type { BackupParams } from "./directory";
 
@@ -19,7 +19,7 @@ const utf8 = (s: string) => new TextEncoder().encode(s);
 const subtle = () => globalThis.crypto.subtle;
 
 export const bytesToHex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
-// Rueckgabetyp bewusst nicht annotiert: new Uint8Array(n) ist Uint8Array<ArrayBuffer>, was WebCrypto (BufferSource) verlangt.
+// Return type deliberately not annotated: new Uint8Array(n) is Uint8Array<ArrayBuffer>, which is what WebCrypto (BufferSource) requires.
 export const hexToBytes = (h: string) => {
   const out = new Uint8Array(h.length >> 1);
   for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
@@ -31,7 +31,7 @@ export const randomHex = (bytes: number): string => bytesToHex(globalThis.crypto
 
 export type BackupKeys = { encKey: CryptoKey; authKey: string };
 
-/** Beide Schluessel aus Passwort und Parametern ableiten (dauert wegen PBKDF2 absichtlich einen Moment). */
+/** Derive both keys from password and parameters (deliberately takes a moment because of PBKDF2). */
 export async function deriveBackupKeys(password: string, saltHex: string, iterations: number): Promise<BackupKeys> {
   const s = subtle();
   const base = await s.importKey("raw", utf8(password.normalize("NFKC")), "PBKDF2", false, ["deriveBits"]);
@@ -42,7 +42,7 @@ export async function deriveBackupKeys(password: string, saltHex: string, iterat
   return { encKey, authKey: bytesToHex(new Uint8Array(await hkdf("community-backup-auth"))) };
 }
 
-/** Neues Backup: frisches Salt und IV, Seed mit AES-GCM verschluesseln. */
+/** New backup: fresh salt and IV, encrypt the seed with AES-GCM. */
 export async function createBackup(password: string, privateKeyHex: string, iterations = BACKUP_ITERATIONS): Promise<{ params: BackupParams; ciphertext: string; authKey: string }> {
   const params: BackupParams = { kdf: "pbkdf2-sha256", iterations, salt: randomHex(16), iv: randomHex(12) };
   const keys = await deriveBackupKeys(password, params.salt, params.iterations);
@@ -50,7 +50,7 @@ export async function createBackup(password: string, privateKeyHex: string, iter
   return { params, ciphertext: bytesToBase64(new Uint8Array(ct)), authKey: keys.authKey };
 }
 
-/** Backup oeffnen; wirft bei falschem Schluessel (AES-GCM-Tag passt nicht). Liefert den Seed als Hex. */
+/** Open a backup; throws on a wrong key (the AES-GCM tag does not match). Returns the seed as hex. */
 export async function openBackup(keys: BackupKeys, ivHex: string, ciphertext: string): Promise<string> {
   const pt = await subtle().decrypt({ name: "AES-GCM", iv: hexToBytes(ivHex) }, keys.encKey, base64ToBytes(ciphertext));
   return bytesToHex(new Uint8Array(pt));

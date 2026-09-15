@@ -18,12 +18,13 @@ import { BackgroundBlur, supportsBackgroundProcessors, type BackgroundProcessorW
 import { VoiceGate, rmsLevel } from "./gate";
 import { MicPipeline, type GateMode } from "./micPipeline";
 import type { VoiceSettings } from "./settings";
+import { t } from "../i18n";
 
 /**
- * Sprachkanal-Client ohne UI-Abhaengigkeit (PLAN 3.4 "gemeinsamer Kern"): LiveKit-Raum, Mikrofon-Pipeline,
- * Wiedergabe der anderen Teilnehmer, Sprecher-Anzeige, Geraetewahl, Statistiken fuer die Debug-Ansicht.
- * M3: Kamera (Simulcast, adaptiveStream waehlt die Stufe nach Kachelgroesse), Bildschirmfreigabe mit Ton
- * als eigenem Audio-Track (PLAN 3.6), Video-Kacheln fuer die Buehne.
+ * Voice channel client without a UI dependency (PLAN 3.4 "shared core"): LiveKit room, microphone pipeline,
+ * playback of the other participants, speaker indication, device selection, statistics for the debug view.
+ * M3: camera (simulcast, adaptiveStream picks the layer by tile size), screen sharing with audio
+ * as its own audio track (PLAN 3.6), video tiles for the stage.
  */
 export type VoiceParticipant = {
   identity: string;
@@ -31,25 +32,25 @@ export type VoiceParticipant = {
   isLocal: boolean;
   speaking: boolean;
   micMuted: boolean;
-  /** Ton aus (hoert niemanden); fuer andere ueber LiveKit-Attribute sichtbar. */
+  /** Deafened (hears nobody); visible to others via LiveKit attributes. */
   deafened: boolean;
   cameraOn: boolean;
   screenOn: boolean;
   quality: string;
 };
 
-/** Ein Videobild fuer die Buehne: Kamera oder Bildschirm eines Teilnehmers. Das Track-Objekt wird per attach() angezeigt. */
+/** One video feed for the stage: a participant's camera or screen. The track object is displayed via attach(). */
 export type VideoTile = {
-  /** identity + Quelle, stabil ueber Re-Renders */
+  /** identity + source, stable across re-renders */
   id: string;
   identity: string;
   name: string;
   isLocal: boolean;
   source: "camera" | "screen";
   track: LocalVideoTrack | RemoteVideoTrack;
-  /** Bildschirm-Ton (nur remote; lokal hoert man sich nicht selbst) */
+  /** Screen audio (remote only; locally you do not hear yourself) */
   audio: RemoteAudioTrack | null;
-  /** Bildschirmfreigabe bringt Ton mit (auch lokal bekannt) */
+  /** The screen share carries audio (known locally as well) */
   hasAudio: boolean;
 };
 
@@ -59,54 +60,54 @@ export type VoiceState = {
   status: VoiceStatus;
   channelId: string | null;
   participants: VoiceParticipant[];
-  /** Mikrofon effektiv stumm (von Hand oder weil Ton aus); fuer andere sichtbar. */
+  /** Microphone effectively muted (manually or because of deafening); visible to others. */
   micMuted: boolean;
-  /** Ton aus: eingehendes Audio stumm, Mikrofon zwangsweise stumm. */
+  /** Deafened: incoming audio muted, microphone forcibly muted. */
   deafened: boolean;
-  /** Tor der Sprachaktivierung / PTT offen (nur lokal). */
+  /** Voice activation / PTT gate open (local only). */
   gateOpen: boolean;
   level: number;
-  /** false = Browser blockiert Autoplay; Nutzer muss einmal klicken. */
+  /** false = the browser blocks autoplay; the user has to click once. */
   canPlayback: boolean;
-  /** Zustand des Web-Audio-Kontexts (Mikrofon-Tor, Pegelmessung): "running" ist Pflicht, "suspended" = Browser blockiert bis zur Nutzergeste. */
+  /** State of the Web Audio context (microphone gate, level metering): "running" is mandatory, "suspended" = the browser blocks until a user gesture. */
   audioContext: string;
   inputDeviceId: string | null;
   cameraOn: boolean;
-  /** Aktiver Unschaerfe-Radius der Kamera (0 = aus). */
+  /** Active blur radius of the camera (0 = off). */
   cameraBlur: number;
   screenOn: boolean;
-  /** Nach dem Start einer Bildschirmfreigabe: kam ein Audio-Track mit? null = keine Freigabe aktiv. */
+  /** After starting a screen share: did an audio track come along? null = no share active. */
   screenAudio: boolean | null;
   tiles: VideoTile[];
-  /** Hinweis eines Moderators (verschoben, Kamera beendet); der Nutzer kann ihn wegklicken. */
+  /** Notice from a moderator (moved, camera stopped); the user can dismiss it. */
   notice: string | null;
-  /** Ausgabegeraet fuer Bildschirm-Ton und wie viele Spuren es tragen (Debug). */
+  /** Output device for screen audio and how many tracks it carries (debug). */
   screenSink: { deviceId: string | null; tracks: number; error: string | null };
-  /** Aktives Sprachprofil des Kanals (Bitrate kbit/s, Stereo). */
+  /** Active voice profile of the channel (bitrate in kbit/s, stereo). */
   audioProfile: AudioProfile | null;
-  /** Zuletzt benutzte LiveKit-URL (Debug). */
+  /** Last used LiveKit URL (debug). */
   rtcUrl: string | null;
-  /** Letzte Raum-Ereignisse mit Zeit (Debug), neueste zuletzt. */
+  /** Recent room events with timestamps (debug), newest last. */
   events: string[];
   error: string | null;
 };
 
-/** 0,1 s Stille (WAV): einmal in einer Nutzergeste abspielen entsperrt die <audio>-Wiedergabe fuer das Dokument. */
+/** 0.1 s of silence (WAV): playing it once inside a user gesture unlocks <audio> playback for the document. */
 const SILENT_WAV = "data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YSADAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==";
-/** Sprecher-Rahmen fuer andere: RMS-Schwelle und Nachlauf der lokalen Pegelmessung. */
+/** Speaker highlight for others: RMS threshold and hangover of the local level metering. */
 const REMOTE_SPEAK_THRESHOLD = 0.015;
 const REMOTE_SPEAK_HANGOVER_MS = 250;
 const EVENTS_MAX = 40;
 
-/** Gewaehlter ICE-Weg je Transportrichtung, z. B. "udp srflx->host" oder "relay (TURN)". */
+/** Selected ICE path per transport direction, e.g. "udp srflx->host" or "relay (TURN)". */
 export type IcePath = { publisher: string | null; subscriber: string | null };
 
-/** Sprachqualitaet des Kanals (Opus-Bitrate in kbit/s, Stereo), kommt aus den Kanaleinstellungen. */
+/** Voice quality of the channel (Opus bitrate in kbit/s, stereo), coming from the channel settings. */
 export type AudioProfile = { bitrate: number; stereo: boolean };
 export const DEFAULT_AUDIO_PROFILE: AudioProfile = { bitrate: 64, stereo: false };
 
 export type JoinOptions = {
-  /** "relay" zwingt den Browser auf TURN (Test fuer gesperrtes UDP/TCP). */
+  /** "relay" forces the browser onto TURN (a test for blocked UDP/TCP). */
   iceTransportPolicy?: "all" | "relay";
   audio?: AudioProfile;
 };
@@ -118,20 +119,18 @@ export type AudioStats = {
   path: IcePath;
   sender: { packetsSent?: number | undefined; packetsLost?: number | undefined; jitter?: number | undefined; roundTripTime?: number | undefined; bytesSent?: number | undefined } | null;
   receivers: { identity: string; packetsReceived?: number | undefined; packetsLost?: number | undefined; jitter?: number | undefined; bytesReceived?: number | undefined }[];
-  /** M3: je Simulcast-Stufe (rid) beim Senden, je Spur beim Empfang. Bytes sind kumuliert; Bitrate = Differenz je Intervall. */
+  /** M3: per simulcast layer (rid) when sending, per track when receiving. Bytes are cumulative; bitrate = the difference per interval. */
   videoSend: VideoSendStat[];
   videoRecv: VideoRecvStat[];
 };
 
-/** Chromium-Browser koennen Tab-/Systemton bei der Bildschirmfreigabe mitliefern; alle anderen nicht (PLAN 3.6). */
+/** Chromium browsers can include tab/system audio with a screen share; all others cannot (PLAN 3.6). */
 export const isChromium = () => typeof (window as { chrome?: unknown }).chrome !== "undefined";
 
-/** Erklaert, warum eine Bildschirmfreigabe ohne Ton laeuft; leer, wenn Ton dabei ist oder keine Freigabe aktiv. */
+/** Explains why a screen share is running without audio; empty when audio is included or no share is active. */
 export function explainScreenAudio(state: Pick<VoiceState, "screenOn" | "screenAudio">): string {
   if (!state.screenOn || state.screenAudio !== false) return "";
-  return isChromium()
-    ? "Bildschirm wird ohne Ton geteilt. Ton kommt nur mit, wenn im Browser-Dialog ein Tab (\"Tab-Audio teilen\") oder unter Windows der ganze Bildschirm mit \"Systemaudio teilen\" gewählt wird; einzelne Fenster liefern keinen Ton."
-    : "Bildschirm wird ohne Ton geteilt: dieser Browser liefert bei der Bildschirmfreigabe keinen Ton. Mit Ton geht es in Chrome, Edge oder Brave.";
+  return isChromium() ? t("voice.screenNoAudioChromium") : t("voice.screenNoAudioOther");
 }
 
 export class VoiceClient {
@@ -146,32 +145,32 @@ export class VoiceClient {
   };
   private audioProfile: AudioProfile = DEFAULT_AUDIO_PROFILE;
   private micSettings: VoiceSettings | null = null;
-  /** Ausgabegeraet fuer Bildschirm-Ton (getrennt von der Sprache); null = Standard/wie Sprache. */
+  /** Output device for screen audio (separate from voice); null = default/same as voice. */
   private screenSinkId: string | null = null;
-  /** Vom Nutzer selbst gesetzte Mikrofon-Stummschaltung, unabhaengig von "Ton aus". */
+  /** Microphone mute set by the user themselves, independent of deafening. */
   private micMutedByUser = false;
-  /** Zuletzt gewuenschte Kamera-Einstellungen (fuer erneutes Einschalten). */
+  /** Last requested camera settings (for switching on again). */
   private camera: { deviceId: string | null; quality: "360p" | "720p"; blur: number } = { deviceId: null, quality: "720p", blur: 0 };
-  /** Hintergrund-Prozessor (MediaPipe-Segmentierung, laeuft im Browser); bleibt fuer Umschalten erhalten. */
+  /** Background processor (MediaPipe segmentation, running in the browser); kept around for toggling. */
   private blur: BackgroundProcessorWrapper | null = null;
-  /** Ein AudioContext fuer alles (Mikrofon-Tor, Pegel der anderen); in einer Nutzergeste angelegt, siehe prepareAudio(). */
+  /** One AudioContext for everything (microphone gate, other participants' levels); created inside a user gesture, see prepareAudio(). */
   private audioCtx: AudioContext | null = null;
   private unlocked = false;
-  /** Pegelmesser je entfernter Mikrofon-Spur: Sprecher-Rahmen ohne die Verzoegerung der LiveKit-Meldung (~0,5-1 s). */
+  /** Level meter per remote microphone track: speaker highlight without the delay of LiveKit's report (~0.5-1 s). */
   private readonly meters = new Map<string, { source: MediaStreamAudioSourceNode; analyser: AnalyserNode; gate: VoiceGate; samples: Float32Array<ArrayBuffer> }>();
   private meterTimer: number | null = null;
 
   constructor(audioHost?: HTMLElement) {
     this.audioHost = audioHost ?? VoiceClient.makeHost();
-    // Fallback: jede Geste im Dokument darf blockiertes Audio nachtraeglich freigeben (Kontext fortsetzen, Wiedergabe starten).
+    // Fallback: any gesture in the document may unblock audio after the fact (resume the context, start playback).
     document.addEventListener("pointerdown", () => this.unlockOnGesture(), { capture: true, passive: true });
     document.addEventListener("keydown", () => this.unlockOnGesture(), { capture: true, passive: true });
   }
 
   /**
-   * Im Klick-Handler VOR dem ersten await aufrufen (App.joinVoice): legt den AudioContext in der Nutzergeste an und spielt
-   * einmal Stille, damit Browser mit strenger Autoplay-Regel (Safari, teils Firefox) Mikrofon-Tor und Wiedergabe freigeben.
-   * Ohne das entstand der Kontext erst nach Token und Verbindung: Pegel blieb 0 (niemand hoerte einen) und <audio> blieb stumm.
+   * Call in the click handler BEFORE the first await (App.joinVoice): creates the AudioContext inside the user gesture and plays
+   * silence once, so browsers with a strict autoplay policy (Safari, partly Firefox) unlock the microphone gate and playback.
+   * Without this the context was only created after the token and the connection: the level stayed 0 (nobody heard you) and <audio> stayed silent.
    */
   prepareAudio(): void {
     const ctx = this.ensureCtx();
@@ -179,7 +178,7 @@ export class VoiceClient {
     if (!this.unlocked) {
       const el = document.createElement("audio");
       el.src = SILENT_WAV;
-      el.play().then(() => { this.unlocked = true; }).catch(() => { /* keine Geste: spaeter erneut */ });
+      el.play().then(() => { this.unlocked = true; }).catch(() => { /* no gesture: try again later */ });
     }
     if (this.room && !this.room.canPlaybackAudio) void this.startAudio();
     this.patch({ audioContext: ctx.state });
@@ -229,8 +228,8 @@ export class VoiceClient {
     this.micSettings = settings;
     this.patch({ status: "connecting", channelId, rtcUrl: url, error: null, audioProfile: this.audioProfile });
 
-    // adaptiveStream: Empfangsqualitaet je nach Groesse des <video>-Elements (Simulcast-Stufe), pausiert unsichtbare Spuren.
-    // dynacast: Sender schaltet Stufen ab, die niemand abonniert hat. Zusammen: PLAN M3 "Simulcast-Stufen je nach Kachelgroesse".
+    // adaptiveStream: receive quality depending on the size of the <video> element (simulcast layer), pauses invisible tracks.
+    // dynacast: the sender turns off layers nobody subscribes to. Together: PLAN M3 "simulcast layers depending on tile size".
     const room = new Room({
       adaptiveStream: true,
       dynacast: true,
@@ -238,8 +237,8 @@ export class VoiceClient {
       publishDefaults: {
         simulcast: true,
         videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
-        videoCodec: "vp8", // ueberall decodierbar, kein Backup-Codec noetig
-        screenShareEncoding: ScreenSharePresets.h1080fps30.encoding, // 1080p, 30 fps, bis 5 Mbit/s
+        videoCodec: "vp8", // decodable everywhere, no backup codec needed
+        screenShareEncoding: ScreenSharePresets.h1080fps30.encoding, // 1080p, 30 fps, up to 5 Mbit/s
         dtx: true,
         red: true,
       },
@@ -262,13 +261,13 @@ export class VoiceClient {
       .on(RoomEvent.LocalTrackPublished, (pub) => { this.log(`sende ${pub.source}`); this.refreshTiles(); })
       .on(RoomEvent.LocalTrackUnpublished, (pub) => {
         this.log(`beendet ${pub.source}`);
-        // Auch wenn der Browser die Freigabe selbst beendet ("Freigabe beenden"-Leiste) hier landen.
+        // Also end up here when the browser itself stops the share (the "stop sharing" bar).
         if (pub.source === Track.Source.ScreenShare) this.patch({ screenOn: false, screenAudio: null });
         if (pub.source === Track.Source.Camera) this.patch({ cameraOn: false });
         this.refreshTiles();
       })
       .on(RoomEvent.TrackStreamStateChanged, () => this.refreshTiles())
-      // LiveKit setzt bei Geraetewechseln alle Audio-Spuren auf das Sprach-Ausgabegeraet; Bildschirm-Ton danach wieder trennen.
+      // On device changes LiveKit points all audio tracks at the voice output device; separate the screen audio again afterwards.
       .on(RoomEvent.MediaDevicesChanged, () => { void this.applyScreenSink(); })
       .on(RoomEvent.ActiveDeviceChanged, (kind) => { if (kind === "audiooutput") void this.applyScreenSink(); })
       .on(RoomEvent.AudioPlaybackStatusChanged, () => this.patch({ canPlayback: room.canPlaybackAudio }))
@@ -281,13 +280,13 @@ export class VoiceClient {
 
     try {
       await room.connect(url, token, opts.iceTransportPolicy ? { rtcConfig: { iceTransportPolicy: opts.iceTransportPolicy } } : {});
-      // Mikrofon erst nach Verbindung, damit ein Verbindungsfehler nicht auch noch eine Berechtigungsfrage kostet.
+      // Microphone only after connecting, so a connection error does not also cost a permission prompt.
       const mic = new MicPipeline(settings.vadThreshold, settings.vadHangoverMs, this.ensureCtx());
       this.mic = mic;
       mic.onState = (s) => {
         const changed = s.open !== this.state.gateOpen;
         this.patch({ level: s.level, gateOpen: s.open });
-        if (changed) this.refreshParticipants(); // eigener Sprecher-Rahmen sofort, nicht erst mit LiveKits Meldung
+        if (changed) this.refreshParticipants(); // own speaker highlight immediately, not only once LiveKit reports it
       };
       mic.setMode(settings.mode);
       const track = await mic.start(settings.inputDeviceId, this.audioProfile.stereo);
@@ -324,7 +323,7 @@ export class VoiceClient {
     this.patch({ status: "disconnected", channelId: null, participants: [], gateOpen: false, level: 0, micMuted: false, deafened: false, inputDeviceId: null, cameraOn: false, screenOn: false, screenAudio: null, tiles: [] });
   }
 
-  // ---------- Kamera und Bildschirm (M3)
+  // ---------- Camera and screen (M3)
 
   async setCameraEnabled(on: boolean, deviceId?: string | null, quality?: "360p" | "720p", blur?: number): Promise<void> {
     const room = this.room;
@@ -334,22 +333,22 @@ export class VoiceClient {
     if (blur !== undefined) this.camera.blur = blur;
     try {
       const resolution = (this.camera.quality === "360p" ? VideoPresets.h360 : VideoPresets.h720).resolution;
-      if (!on) this.blur = null; // Track wird beendet, der Prozessor mit ihm
+      if (!on) this.blur = null; // the track is ended, and the processor with it
       await room.localParticipant.setCameraEnabled(on, on ? { resolution, ...(this.camera.deviceId ? { deviceId: this.camera.deviceId } : {}) } : undefined);
       this.patch({ cameraOn: on, cameraBlur: 0, error: null });
       if (on && this.camera.blur > 0) await this.setCameraBlur(this.camera.blur);
     } catch (err) {
-      if (!isUserCancel(err)) this.patch({ error: `Kamera: ${errorText(err)}` });
+      if (!isUserCancel(err)) this.patch({ error: t("voice.errCamera", { err: errorText(err) }) });
       this.patch({ cameraOn: room.localParticipant.isCameraEnabled });
     }
     this.refreshTiles();
     this.refreshParticipants();
   }
 
-  /** Kann dieser Browser den Hintergrund weichzeichnen (WebGL2/WASM, MediaStreamTrackProcessor)? */
+  /** Can this browser blur the background (WebGL2/WASM, MediaStreamTrackProcessor)? */
   static supportsBlur(): boolean { try { return supportsBackgroundProcessors(); } catch { return false; } }
 
-  /** Hintergrund-Unschaerfe der laufenden Kamera setzen (0 = aus). Modell/WASM laedt beim ersten Mal aus dem Netz (jsdelivr, Google Storage). */
+  /** Set the background blur of the running camera (0 = off). The model/WASM is downloaded on first use (jsdelivr, Google Storage). */
   async setCameraBlur(radius: number): Promise<void> {
     this.camera.blur = radius;
     const track = this.room?.localParticipant.getTrackPublication(Track.Source.Camera)?.track;
@@ -367,11 +366,11 @@ export class VoiceClient {
       this.log(radius > 0 ? `hintergrund unscharf (${radius})` : "hintergrund normal");
     } catch (err) {
       this.blur = null;
-      this.patch({ cameraBlur: 0, error: `Hintergrund-Unschärfe: ${errorText(err)}` });
+      this.patch({ cameraBlur: 0, error: t("voice.errBlur", { err: errorText(err) }) });
     }
   }
 
-  /** Opus-Einstellungen aus dem Kanalprofil: Bitrate; Mono mit DTX (Stille kostet nichts) und RED (Redundanz gegen Verlust). */
+  /** Opus settings from the channel profile: bitrate; mono with DTX (silence costs nothing) and RED (redundancy against loss). */
   private micPublishOptions() {
     const p = this.audioProfile;
     return {
@@ -384,7 +383,7 @@ export class VoiceClient {
     };
   }
 
-  /** Kanalprofil hat sich geaendert (Verwaltung): Mikrofon mit neuen Opus-Parametern neu publizieren. */
+  /** The channel profile changed (admin): republish the microphone with the new Opus parameters. */
   async setAudioProfile(profile: AudioProfile): Promise<void> {
     const same = profile.bitrate === this.audioProfile.bitrate && profile.stereo === this.audioProfile.stereo;
     this.audioProfile = profile;
@@ -399,7 +398,7 @@ export class VoiceClient {
       if (wasMuted && this.publication.track instanceof LocalAudioTrack) await this.publication.track.mute();
       this.log(`opus umgestellt: ${profile.bitrate} kbit/s ${profile.stereo ? "stereo" : "mono"}`);
     } catch (err) {
-      this.patch({ error: `Sprachprofil: ${errorText(err)}` });
+      this.patch({ error: t("voice.errProfile", { err: errorText(err) }) });
     }
   }
 
@@ -408,14 +407,14 @@ export class VoiceClient {
     if (this.state.cameraOn && this.room) await this.room.switchActiveDevice("videoinput", deviceId ?? "default").catch(() => {});
   }
 
-  /** Bildschirm teilen; Ton wird immer angefordert und als eigener Track publiziert (PLAN 3.6). Ob er kommt, entscheidet der Browser. */
+  /** Share the screen; audio is always requested and published as its own track (PLAN 3.6). Whether it arrives is up to the browser. */
   async setScreenShareEnabled(on: boolean): Promise<void> {
     const room = this.room;
     if (!room) return;
     try {
-      // Kein Simulcast fuer den Bildschirm: adaptiveStream wuerde bei kleinen Kacheln die grobe Stufe holen und beim
-      // Vergroessern erst nach Sekunden hochschalten; Text braucht die volle Stufe. contentHint "detail" haelt die
-      // Aufloesung und opfert bei Engpaessen lieber Bilder pro Sekunde.
+      // No simulcast for the screen: with small tiles adaptiveStream would fetch the coarse layer and only scale up
+      // seconds after enlarging; text needs the full layer. contentHint "detail" keeps the
+      // resolution and sacrifices frames per second instead when bandwidth is tight.
       await room.localParticipant.setScreenShareEnabled(on, on ? {
         audio: true,
         systemAudio: "include",
@@ -428,15 +427,15 @@ export class VoiceClient {
       this.patch({ screenOn: on && room.localParticipant.isScreenShareEnabled, screenAudio: on ? hasAudio : null, error: null });
       if (on) this.log(hasAudio ? "bildschirm mit ton" : "bildschirm ohne ton");
     } catch (err) {
-      // Abbruch im Auswahldialog ist kein Fehler.
-      if (!isUserCancel(err)) this.patch({ error: `Bildschirmfreigabe: ${errorText(err)}` });
+      // Cancelling in the picker dialog is not an error.
+      if (!isUserCancel(err)) this.patch({ error: t("voice.errScreen", { err: errorText(err) }) });
       this.patch({ screenOn: room.localParticipant.isScreenShareEnabled });
     }
     this.refreshTiles();
     this.refreshParticipants();
   }
 
-  /** Lautstaerke des Bildschirm-Tons eines Teilnehmers (0..1); getrennt vom Mikrofon regelbar. */
+  /** Volume of a participant's screen audio (0..1); adjustable separately from the microphone. */
   setScreenAudioVolume(identity: string, volume: number): void {
     const tile = this.state.tiles.find((t) => t.identity === identity && t.source === "screen");
     tile?.audio?.setVolume(volume);
@@ -463,15 +462,15 @@ export class VoiceClient {
     this.patch({ tiles });
   }
 
-  /** Browser-Autoplay-Sperre aufheben; muss aus einer Nutzeraktion heraus aufgerufen werden. */
+  /** Lift the browser's autoplay block; must be called from within a user action. */
   async startAudio(): Promise<void> {
     await this.room?.startAudio();
     this.patch({ canPlayback: this.room?.canPlaybackAudio ?? true });
   }
 
   /**
-   * Mikrofon von Hand stumm/an. Bei "Ton aus" hebt ein Klick aufs Mikrofon beides auf (wie bei Discord),
-   * denn ein aktives Mikrofon bei ausgeschaltetem Ton ergibt keinen Sinn.
+   * Microphone mute/unmute by hand. While deafened, a click on the microphone lifts both (as in Discord),
+   * because an active microphone with the audio turned off makes no sense.
    */
   async setMuted(muted: boolean): Promise<void> {
     if (!muted && this.state.deafened) { this.micMutedByUser = false; await this.setDeafened(false); return; }
@@ -480,8 +479,8 @@ export class VoiceClient {
   }
 
   /**
-   * Ton aus/an ("deafen"): eingehendes Audio stumm, Mikrofon zwangsweise stumm. Beim Einschalten des Tons
-   * bleibt das Mikrofon nur stumm, wenn es vorher von Hand stummgeschaltet war.
+   * Deafen on/off: incoming audio muted, microphone forcibly muted. When turning the audio back on,
+   * the microphone stays muted only if it had been muted by hand before.
    */
   async setDeafened(on: boolean): Promise<void> {
     this.patch({ deafened: on });
@@ -517,11 +516,11 @@ export class VoiceClient {
 
   async setOutputDevice(deviceId: string): Promise<void> {
     await this.room?.switchActiveDevice("audiooutput", deviceId);
-    // LiveKit setzt das Geraet fuer alle Spuren; Bildschirm-Ton danach wieder auf sein eigenes Geraet legen.
+    // LiveKit sets the device for all tracks; put the screen audio back on its own device afterwards.
     await this.applyScreenSink();
   }
 
-  /** Bildschirm-Ton auf ein eigenes Ausgabegeraet (z. B. Lautsprecher statt Headset). Nur Chromium; sonst wirkungslos. */
+  /** Route screen audio to a separate output device (e.g. speakers instead of a headset). Chromium only; no effect elsewhere. */
   async setScreenOutputDevice(deviceId: string | null): Promise<void> {
     this.screenSinkId = deviceId;
     await this.applyScreenSink();
@@ -545,7 +544,7 @@ export class VoiceClient {
 
   setNotice(text: string | null) { this.patch({ notice: text }); if (text) this.log(`hinweis: ${text}`); }
 
-  /** requestCamera = true fragt einmal nach Kameraberechtigung, damit die Geraetenamen lesbar sind (fuer die Auswahl beim Einschalten). */
+  /** requestCamera = true asks for camera permission once so the device names are readable (for the picker at switch-on time). */
   static async listDevices(requestCamera = false): Promise<{ inputs: MediaDeviceInfo[]; outputs: MediaDeviceInfo[]; cameras: MediaDeviceInfo[] }> {
     const [inputs, outputs, cameras] = await Promise.all([
       Room.getLocalDevices("audioinput", false),
@@ -599,15 +598,15 @@ export class VoiceClient {
   private attachRemote(track: RemoteTrack, identity: string) {
     if (track.kind !== Track.Kind.Audio) return;
     const el = track.attach();
-    el.muted = this.state.deafened; // "Ton aus" gilt auch fuer Spuren, die spaeter dazukommen
+    el.muted = this.state.deafened; // deafening also applies to tracks that arrive later
     this.audioHost.appendChild(el);
     if (track.source === Track.Source.ScreenShareAudio) void this.applyScreenSink();
     if (track.source === Track.Source.Microphone) this.addMeter(identity, track.mediaStreamTrack);
     this.patch({ canPlayback: this.room?.canPlaybackAudio ?? true });
   }
 
-  // ---- Sprecher-Erkennung lokal: RMS je entfernter Mikrofon-Spur alle 50 ms, Tor mit Nachlauf (wie die eigene VAD).
-  // LiveKits ActiveSpeakersChanged kommt vom Server geglaettet (~0,5-1 s spaeter) und dient nur noch als Rueckfall.
+  // ---- Local speaker detection: RMS per remote microphone track every 50 ms, gate with hangover (like our own VAD).
+  // LiveKit's ActiveSpeakersChanged arrives smoothed from the server (~0.5-1 s later) and now only serves as a fallback.
   private addMeter(identity: string, mst: MediaStreamTrack) {
     this.dropMeter(identity);
     try {
@@ -615,7 +614,7 @@ export class VoiceClient {
       const source = ctx.createMediaStreamSource(new MediaStream([mst]));
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 512;
-      source.connect(analyser); // nicht an destination: die Wiedergabe laeuft weiter ueber das <audio>-Element
+      source.connect(analyser); // not to destination: playback keeps running through the <audio> element
       this.meters.set(identity, { source, analyser, gate: new VoiceGate(REMOTE_SPEAK_THRESHOLD, REMOTE_SPEAK_HANGOVER_MS), samples: new Float32Array(analyser.fftSize) });
     } catch (err) {
       this.log(`pegelmesser fuer ${identity.slice(0, 8)} nicht moeglich: ${err instanceof Error ? err.message : String(err)}`);
@@ -630,7 +629,7 @@ export class VoiceClient {
   private startMeters() {
     this.stopMeters();
     this.meterTimer = window.setInterval(() => {
-      if (this.audioCtx?.state !== "running") return; // ohne laufenden Kontext gilt LiveKits Meldung (siehe refreshParticipants)
+      if (this.audioCtx?.state !== "running") return; // without a running context LiveKit's report applies (see refreshParticipants)
       const now = performance.now();
       let changed = false;
       for (const m of this.meters.values()) {
@@ -667,7 +666,7 @@ export class VoiceClient {
   }
 }
 
-/** Aus WebRTC-Statistiken den aktiven Kandidatenweg lesen: Protokoll und Kandidatentypen (host/srflx/prflx/relay). */
+/** Read the active candidate path from the WebRTC statistics: protocol and candidate types (host/srflx/prflx/relay). */
 async function icePathOf(statsPromise: Promise<RTCStatsReport> | undefined): Promise<string | null> {
   const stats = await statsPromise?.catch(() => undefined);
   if (!stats) return null;
@@ -681,46 +680,40 @@ async function icePathOf(statsPromise: Promise<RTCStatsReport> | undefined): Pro
   const local = pair.localCandidateId ? (stats.get(pair.localCandidateId) as Cand | undefined) : undefined;
   const remote = pair.remoteCandidateId ? (stats.get(pair.remoteCandidateId) as Cand | undefined) : undefined;
   if (!local) return null;
-  if (local.candidateType === "relay") return `relay (TURN über ${local.relayProtocol ?? local.protocol ?? "?"})`;
+  if (local.candidateType === "relay") return `relay (TURN via ${local.relayProtocol ?? local.protocol ?? "?"})`;
   return `${local.protocol ?? "?"} ${local.candidateType ?? "?"}->${remote?.candidateType ?? "?"}`;
 }
 
-/** Trennungsgrund von LiveKit erklaeren; unexpected = dem Nutzer als Fehler zeigen. */
+/** Explain LiveKit's disconnect reason; unexpected = show it to the user as an error. */
 function explainDisconnect(reason: DisconnectReason | undefined): { short: string; long: string; unexpected: boolean } {
-  const name = reason === undefined ? "unbekannt" : DisconnectReason[reason] ?? String(reason);
-  const media = "Die Medienverbindung (ICE) kam nicht zustande oder brach ab. Prüfen: 7882/udp und 7881/tcp am Router zum Chat-Host, " +
-    "LiveKit kennt seine öffentliche IP (LIVEKIT_NODE_IP)? Der Dev-Stack (compose.dev.yml) bietet 127.0.0.1 an und ist von außen nie erreichbar.";
+  const name = reason === undefined ? t("voice.disc.unknown") : DisconnectReason[reason] ?? String(reason);
+  const media = t("voice.iceHint");
   switch (reason) {
     case DisconnectReason.CLIENT_INITIATED: return { short: name, long: "", unexpected: false };
-    case DisconnectReason.DUPLICATE_IDENTITY: return { short: name, long: "Getrennt: dieselbe Identität ist von einem anderen Gerät/Tab beigetreten.", unexpected: true };
-    case DisconnectReason.SIGNAL_CLOSE: return { short: name, long: "Getrennt: die Signalverbindung (/rtc WebSocket) wurde geschlossen. Ursachen: Proxy-Timeout auf /rtc (proxy_read_timeout), Netzwechsel, App im Hintergrund/Bildschirm gesperrt.", unexpected: true };
+    case DisconnectReason.DUPLICATE_IDENTITY: return { short: name, long: t("voice.disc.duplicate"), unexpected: true };
+    case DisconnectReason.SIGNAL_CLOSE: return { short: name, long: t("voice.disc.signalClose"), unexpected: true };
     case DisconnectReason.CONNECTION_TIMEOUT:
     case DisconnectReason.JOIN_FAILURE:
     case DisconnectReason.STATE_MISMATCH:
     case DisconnectReason.UNKNOWN_REASON:
     case undefined:
-      return { short: name, long: `Getrennt (${name}). ${media}`, unexpected: true };
+      return { short: name, long: t("voice.disc.generic", { name, media }), unexpected: true };
     default:
-      return { short: name, long: `Getrennt durch den Server (${name}).`, unexpected: true };
+      return { short: name, long: t("voice.disc.server", { name }), unexpected: true };
   }
 }
 
-/** Verbindungsfehler in einen Satz mit Ursache und naechstem Schritt uebersetzen. */
+/** Turn a connection error into a sentence with the cause and the next step. */
 function explainConnectError(message: string, url: string): string {
   const host = (() => { try { return new URL(url).hostname; } catch { return ""; } })();
   const pageIsHttps = window.location.protocol === "https:";
-  if (host === "localhost" || host === "127.0.0.1") {
-    return `${message}. Der Server hat als LiveKit-Adresse "${url}" ausgegeben; das ist die Dev-Einstellung (LIVEKIT_PUBLIC_URL) und von anderen Geräten aus nicht erreichbar. ` +
-      `Auf dem Server LIVEKIT_PUBLIC_URL entfernen (Standard: wss://PUBLIC_DOMAIN) oder auf die öffentliche Adresse setzen.`;
-  }
-  if (pageIsHttps && url.startsWith("ws://")) {
-    return `${message}. Diese Seite läuft über HTTPS, die LiveKit-Adresse "${url}" aber über ws:// (unverschlüsselt); Browser blockieren das. LIVEKIT_PUBLIC_URL auf wss:// umstellen.`;
-  }
-  return `${message} (LiveKit-Adresse: ${url}). Prüfen: ${url.replace(/^ws/, "http")}/rtc/validate muss im Browser 401 liefern; sonst leitet der Proxy /rtc nicht weiter.`;
+  if (host === "localhost" || host === "127.0.0.1") return t("voice.connErrLocalhost", { message, url });
+  if (pageIsHttps && url.startsWith("ws://")) return t("voice.connErrWs", { message, url });
+  return t("voice.connErrGeneric", { message, url, check: url.replace(/^ws/, "http") });
 }
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
-/** Nutzer hat den Browser-Dialog (Kamera-/Bildschirmauswahl) abgebrochen. */
+/** The user cancelled the browser dialog (camera/screen picker). */
 const isUserCancel = (err: unknown) => err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "AbortError");
 
 function mapState(s: ConnectionState): VoiceStatus {

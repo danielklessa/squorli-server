@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BackupUploadRequest, createBackup, deriveBackupKeys, openBackup } from "./index";
 
-// Wenige Iterationen, damit der Test schnell bleibt; die Ableitung ist dieselbe wie mit BACKUP_ITERATIONS.
+// Few iterations to keep the test fast; the derivation is the same as with BACKUP_ITERATIONS.
 const SEED = "0f".repeat(32);
 
 describe("backup (M6b)", () => {

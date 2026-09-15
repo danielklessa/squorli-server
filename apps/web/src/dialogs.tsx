@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { t } from "./i18n";
 
 /**
- * Ersatz fuer window.confirm/prompt: ein eigenes Modal, das ueber allem liegt.
- * askConfirm() und askInput() liefern Promises; DialogHost rendert den jeweils aktuellen Dialog.
- * Es gibt immer nur einen Dialog gleichzeitig, weitere warten in der Reihe.
+ * Replacement for window.confirm/prompt: an own modal that sits above everything.
+ * askConfirm() and askInput() return promises; DialogHost renders the currently active dialog.
+ * There is only ever one dialog at a time; further ones wait in the queue.
  */
 type Base = { title: string; text?: string; confirmLabel?: string; cancelLabel?: string; danger?: boolean };
 export type ConfirmOptions = Base;
@@ -54,8 +55,8 @@ function ConfirmDialog({ opts, onDone }: { opts: ConfirmOptions; onDone: (ok: bo
   return (
     <Frame opts={opts} onCancel={() => onDone(false)}>
       <div className="dialog-actions">
-        <button className="secondary" onClick={() => onDone(false)}>{opts.cancelLabel ?? "Abbrechen"}</button>
-        <button ref={ref} className={opts.danger ? "danger" : ""} onClick={() => onDone(true)}>{opts.confirmLabel ?? "OK"}</button>
+        <button className="secondary" onClick={() => onDone(false)}>{opts.cancelLabel ?? t("common.cancel")}</button>
+        <button ref={ref} className={opts.danger ? "danger" : ""} onClick={() => onDone(true)}>{opts.confirmLabel ?? t("common.ok")}</button>
       </div>
     </Frame>
   );
@@ -72,8 +73,8 @@ function InputDialog({ opts, onDone }: { opts: InputOptions; onDone: (value: str
         <input autoFocus value={value} placeholder={opts.placeholder} maxLength={opts.maxLength ?? 200} onChange={(e) => setValue(e.target.value)} onKeyDown={onKey} />
       </label>
       <div className="dialog-actions">
-        <button className="secondary" onClick={() => onDone(null)}>{opts.cancelLabel ?? "Abbrechen"}</button>
-        <button className={opts.danger ? "danger" : ""} disabled={!ok} onClick={submit}>{opts.confirmLabel ?? "OK"}</button>
+        <button className="secondary" onClick={() => onDone(null)}>{opts.cancelLabel ?? t("common.cancel")}</button>
+        <button className={opts.danger ? "danger" : ""} disabled={!ok} onClick={submit}>{opts.confirmLabel ?? t("common.ok")}</button>
       </div>
     </Frame>
   );

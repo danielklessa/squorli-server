@@ -36,7 +36,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: C
     const ok = await ed.verifyAsync(hexToBytes(signature), msg, hexToBytes(publicKey)).catch(() => false);
     if (!ok) return reply.code(401).send({ error: "signature_invalid" });
 
-    // Nutzer anlegen oder laden. Erste Anmeldung = Registrierung.
+    // Create or load the user. First sign-in = registration.
     const [user] = await db
       .insert(users)
       .values({ publicKey })
@@ -47,20 +47,20 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: C
     const [ban] = await db.select().from(bans).where(eq(bans.userId, user.id)).limit(1);
     if (ban) return reply.code(403).send({ error: "banned", reason: ban.reason });
 
-    // Verifiziertes Handle und Anzeigename aus dem Verzeichnis (M6) nachschlagen; Ausfall des Dienstes ist kein Login-Fehler.
+    // Look up the verified handle and display name from the directory (M6); an outage of the service is not a sign-in error.
     const profile = await directory.refresh({ id: user.id, publicKey, displayName: user.displayName });
 
     const [member] = await db.select().from(members).where(eq(members.userId, user.id)).limit(1);
     const settings = await loadSettings(db);
     const firstEver = settings.ownerId === null && (config.OWNER_PUBLIC_KEY === undefined || config.OWNER_PUBLIC_KEY === publicKey);
-    // Nur mit Konto (Verwaltung): der Schluessel braucht ein Handle beim Verzeichnis. Eigentuemer und der erste Login sind
-    // ausgenommen (kein Aussperren). Ist das Verzeichnis gerade nicht erreichbar, zaehlt das zuletzt gecachte Handle.
+    // Account required (admin): the key needs a handle at the directory. Owners and the first sign-in are
+    // exempt (no lockout). If the directory is currently unreachable, the last cached handle counts.
     if (settings.requireAccount && config.DIRECTORY_URL && !member?.isOwner && !firstEver) {
       const handle = profile ? profile.handle : user.handle;
       if (!handle) return reply.code(403).send({ error: "account_required" });
     }
 
-    // Mitgliedschaft: bestehendes Mitglied, offener Server, oder gueltige Einladung.
+    // Membership: existing member, open server, or a valid invite.
     if (!member) {
       if (!settings.openJoin && !firstEver) {
         if (!invite) return reply.code(403).send({ error: "invite_required" });
@@ -71,7 +71,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: C
       req.log.info({ userId: user.id, via: invite ? "invite" : firstEver ? "owner" : "open" }, "neues Mitglied");
     }
 
-    // Eigentuemer festlegen: erster passender Login, solange keiner existiert.
+    // Determine the owner: the first matching sign-in while none exists.
     if (firstEver) {
       await db.update(serverSettings).set({ ownerId: user.id }).where(and(eq(serverSettings.id, SETTINGS_ID), isNull(serverSettings.ownerId)));
       await db.update(members).set({ isOwner: true }).where(eq(members.userId, user.id));
@@ -82,7 +82,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: C
 
     const token = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + config.SESSION_TTL_DAYS * 86_400_000);
-    // Geraetebezeichnung fuer die Sitzungsliste (M6c); der Client kann sie nicht setzen, nur der Browser verraet sie.
+    // Device label for the session list (M6c); the client cannot set it, only the browser reveals it.
     await db.insert(sessions).values({ token, userId: user.id, expiresAt, label: labelFromUserAgent(req.headers["user-agent"]), lastUsedAt: new Date() });
 
     if (!member) await broadcastStructure(db, hub, ["members", "settings"]);
@@ -90,7 +90,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: C
   });
 }
 
-/** Einladung pruefen und verbrauchen (atomar). true = gueltig und gezaehlt. */
+/** Check and consume an invite (atomically). true = valid and counted. */
 async function consumeInvite(db: Db, code: string): Promise<boolean> {
   const updated = await db
     .update(invites)

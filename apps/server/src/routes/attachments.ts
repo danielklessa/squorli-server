@@ -13,15 +13,15 @@ import { attachments } from "../db/schema";
 import { attachmentUrl } from "./messages";
 
 /**
- * Anhaenge: Datei erst hochladen (bekommt eine ID), dann per attachmentIds an eine Nachricht haengen.
- * Ablage: DATA_DIR/attachments/<id>, Metadaten in der DB. Download ist nur ueber die unerratbare ID moeglich
- * und braucht kein Token, damit <img src> funktioniert (wie bei Discord-CDN-Links). Verwaiste Uploads
- * (nie an eine Nachricht gehaengt) werden nach einer Stunde geloescht.
+ * Attachments: upload the file first (it gets an id), then attach it to a message via attachmentIds.
+ * Storage: DATA_DIR/attachments/<id>, metadata in the DB. Download is only possible via the unguessable id
+ * and needs no token so that <img src> works (like Discord CDN links). Orphaned uploads
+ * (never attached to a message) are deleted after an hour.
  */
 export async function registerAttachmentRoutes(app: FastifyInstance, db: Db, config: Config) {
   const dir = join(config.DATA_DIR, "attachments");
   await mkdir(dir, { recursive: true });
-  // @fastify/multipart ist in index.ts registriert (auch der Server-Icon-Upload in settings.ts nutzt es).
+  // @fastify/multipart is registered in index.ts (the server icon upload in settings.ts uses it too).
 
   app.post("/api/attachments", async (req, reply) => {
     const m = await requireMember(db, req, reply);
@@ -61,7 +61,7 @@ export async function registerAttachmentRoutes(app: FastifyInstance, db: Db, con
       .send(createReadStream(path));
   });
 
-  // Aufraeumen: verwaiste Uploads und Dateien geloeschter Nachrichten.
+  // Cleanup: orphaned uploads and files of deleted messages.
   async function sweep() {
     const orphanBefore = new Date(Date.now() - 3_600_000);
     const orphans = await db.delete(attachments)
@@ -72,7 +72,7 @@ export async function registerAttachmentRoutes(app: FastifyInstance, db: Db, con
   const timer = setInterval(() => { void sweep().catch((err) => app.log.warn({ err }, "attachment sweep")); }, 15 * 60_000);
   app.addHook("onClose", async () => clearInterval(timer));
 
-  /** Von messages.ts nach dem Loeschen aufgerufen, damit Dateien nicht liegen bleiben. */
+  /** Called by messages.ts after a deletion so files do not linger. */
   app.decorate("removeAttachmentFiles", async (ids: string[]) => {
     for (const id of ids) await rm(join(dir, id), { force: true });
   });

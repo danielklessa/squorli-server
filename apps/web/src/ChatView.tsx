@@ -4,6 +4,7 @@ import { askConfirm } from "./dialogs";
 import { Icon } from "./Icon";
 import type { ChannelMessages } from "./store";
 import type { ServerConnection } from "./serverConnection";
+import { fmtDay, fmtTime, t } from "./i18n";
 
 type Props = {
   channel: Channel;
@@ -29,8 +30,6 @@ function renderText(text: string) {
   ));
 }
 
-const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-const fmtDay = (iso: string) => new Date(iso).toLocaleDateString([], { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
 const fmtSize = (n: number) => (n > 1_048_576 ? `${(n / 1_048_576).toFixed(1)} MB` : n > 1024 ? `${Math.round(n / 1024)} kB` : `${n} B`);
 
 export function ChatView({ channel, messages, members, myUserId, myPermissions, typing, conn }: Props) {
@@ -47,7 +46,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
   const canAttach = hasPermission(myPermissions, Permission.ATTACH_FILES);
   const canManage = hasPermission(myPermissions, Permission.MANAGE_MESSAGES);
 
-  // Beim Kanalwechsel und bei neuen Nachrichten unten bleiben, ausser der Nutzer hat hochgescrollt.
+  // Stay at the bottom when switching channels and on new messages, unless the user has scrolled up.
   useEffect(() => { stickToBottom.current = true; setDraft(""); setFiles([]); setEditing(null); }, [channel.id]);
   useEffect(() => {
     const el = listRef.current;
@@ -89,7 +88,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
     try { await conn.api.editMessage(editing.id, text); setEditing(null); } catch (e) { setErr(String(e)); }
   }
 
-  const typers = Object.entries(typing).filter(([uid, t]) => uid !== myUserId && Date.now() - t < 4000).map(([uid]) => nameOf.get(uid) ?? "jemand");
+  const typers = Object.entries(typing).filter(([uid, t]) => uid !== myUserId && Date.now() - t < 4000).map(([uid]) => nameOf.get(uid) ?? t("chat.someone"));
 
   return (
     <section className="chat">
@@ -99,8 +98,8 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
       </header>
 
       <div className="messages" ref={listRef} onScroll={onScroll}>
-        {messages.loading && <p className="muted center">Lade …</p>}
-        {messages.loaded && !messages.hasMore && <p className="muted center">Anfang von #{channel.name}</p>}
+        {messages.loading && <p className="muted center">{t("common.loading")}</p>}
+        {messages.loaded && !messages.hasMore && <p className="muted center">{t("chat.beginning", { name: channel.name })}</p>}
         {messages.list.map((m, i) => {
           const prev = messages.list[i - 1];
           const grouped = prev && prev.authorId === m.authorId && new Date(m.createdAt).getTime() - new Date(prev.createdAt).getTime() < GROUP_MS;
@@ -112,7 +111,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
               <article className={`msg ${grouped && !newDay ? "grouped" : ""}`}>
                 {!(grouped && !newDay) && (
                   <div className="msg-head">
-                    <strong>{nameOf.get(m.authorId) ?? "ehemaliges Mitglied"}</strong>
+                    <strong>{nameOf.get(m.authorId) ?? t("chat.formerMember")}</strong>
                     <time className="muted" dateTime={m.createdAt}>{fmtTime(m.createdAt)}</time>
                   </div>
                 )}
@@ -121,11 +120,11 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
                     <div className="edit-box">
                       <textarea value={editing.text} autoFocus rows={2} onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
                         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void saveEdit(); } if (e.key === "Escape") setEditing(null); }} />
-                      <span className="muted">Enter = speichern · Esc = abbrechen</span>
+                      <span className="muted">{t("chat.editHint")}</span>
                     </div>
                   ) : (
                     <>
-                      {m.content && <p>{renderText(m.content)}{m.editedAt && <span className="muted"> (bearbeitet)</span>}</p>}
+                      {m.content && <p>{renderText(m.content)}{m.editedAt && <span className="muted"> {t("chat.edited")}</span>}</p>}
                       {m.attachments.map((a) => (
                         a.mimeType.startsWith("image/")
                           ? <a key={a.id} href={conn.api.abs(a.url)} target="_blank" rel="noreferrer"><img className="attachment-img" src={conn.api.abs(a.url)} alt={a.name} loading="lazy" /></a>
@@ -136,8 +135,8 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
                 </div>
                 {(mine || canManage) && editing?.id !== m.id && (
                   <div className="msg-actions">
-                    {mine && m.content && <button className="icon" title="Bearbeiten" onClick={() => setEditing({ id: m.id, text: m.content })}><Icon name="pencil" /></button>}
-                    <button className="icon" title="Löschen" onClick={() => { void askConfirm({ title: "Nachricht löschen?", text: m.content ? m.content.slice(0, 160) + (m.content.length > 160 ? "…" : "") : `${m.attachments.length} Anhang/Anhänge`, confirmLabel: "Löschen", danger: true }).then((ok) => { if (ok) return conn.api.deleteMessage(m.id); }).catch((e) => setErr(String(e))); }}><Icon name="trash-2" /></button>
+                    {mine && m.content && <button className="icon" title={t("chat.edit")} onClick={() => setEditing({ id: m.id, text: m.content })}><Icon name="pencil" /></button>}
+                    <button className="icon" title={t("common.delete")} onClick={() => { void askConfirm({ title: t("chat.deleteTitle"), text: m.content ? m.content.slice(0, 160) + (m.content.length > 160 ? "…" : "") : t("chat.attachments", { n: m.attachments.length }), confirmLabel: t("common.delete"), danger: true }).then((ok) => { if (ok) return conn.api.deleteMessage(m.id); }).catch((e) => setErr(String(e))); }}><Icon name="trash-2" /></button>
                   </div>
                 )}
               </article>
@@ -150,13 +149,13 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
         {err && <p className="error">{err}</p>}
         {files.length > 0 && (
           <div className="pending-files">
-            {files.map((f, i) => <span key={i} className="chip">{f.name} <button className="icon" title="Entfernen" onClick={() => setFiles(files.filter((_, j) => j !== i))}><Icon name="x" /></button></span>)}
+            {files.map((f, i) => <span key={i} className="chip">{f.name} <button className="icon" title={t("common.remove")} onClick={() => setFiles(files.filter((_, j) => j !== i))}><Icon name="x" /></button></span>)}
           </div>
         )}
         <div className="composer-row">
           {canAttach && (
-            <label className="icon-btn" title="Datei anhängen">
-              <Icon name="paperclip" title="Datei anhängen" /><input type="file" multiple hidden onChange={(e) => { setFiles([...files, ...Array.from(e.target.files ?? [])]); e.target.value = ""; }} />
+            <label className="icon-btn" title={t("chat.attach")}>
+              <Icon name="paperclip" title={t("chat.attach")} /><input type="file" multiple hidden onChange={(e) => { setFiles([...files, ...Array.from(e.target.files ?? [])]); e.target.value = ""; }} />
             </label>
           )}
           <textarea
@@ -164,12 +163,12 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKey}
             rows={1}
-            placeholder={canSend ? `Nachricht an #${channel.name}` : "Du darfst hier nicht schreiben"}
+            placeholder={canSend ? t("chat.placeholder", { name: channel.name }) : t("chat.noPermission")}
             disabled={!canSend || sending}
           />
-          <button onClick={submit} disabled={!canSend || sending || (!draft.trim() && files.length === 0)}>Senden</button>
+          <button onClick={submit} disabled={!canSend || sending || (!draft.trim() && files.length === 0)}>{t("chat.send")}</button>
         </div>
-        <div className="typing">{typers.length > 0 && `${typers.join(", ")} ${typers.length === 1 ? "tippt" : "tippen"} …`}</div>
+        <div className="typing">{typers.length > 0 && t(typers.length === 1 ? "chat.typingOne" : "chat.typingMany", { names: typers.join(", ") })}</div>
       </footer>
     </section>
   );

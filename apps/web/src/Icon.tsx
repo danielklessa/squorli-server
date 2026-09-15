@@ -1,9 +1,9 @@
 import "./icons/icons.css";
 
 /**
- * Symbol aus dem Lucide-Webfont (ISC-Lizenz, selbst gehostet; Namen: https://lucide.dev/icons).
- * tools/icons.mjs sammelt alle hier verwendeten Namen und erzeugt icons/icons.css; unbekannte Namen brechen den Build ab.
- * Farbe und Groesse kommen vom umgebenden Element (currentColor, font-size).
+ * Icon from the Lucide web font (ISC license, self-hosted; names: https://lucide.dev/icons).
+ * tools/icons.mjs collects all names used here and generates icons/icons.css; unknown names fail the build.
+ * Color and size come from the surrounding element (currentColor, font-size).
  */
 export function Icon({ name, className, title, rotate }: { name: string; className?: string; title?: string; rotate?: number }) {
   return (

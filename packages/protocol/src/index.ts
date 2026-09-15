@@ -1,8 +1,8 @@
 /**
- * Gemeinsames Protokoll zwischen Client und App-Server.
- * Eine Quelle der Wahrheit: Schemata hier, Typen werden abgeleitet.
+ * Shared protocol between client and app server.
+ * One source of truth: schemas here, types are derived from them.
  *
- * Medien laufen NICHT hier durch, sondern direkt zwischen Client und LiveKit.
+ * Media does NOT flow through here, but directly between client and LiveKit.
  */
 import { z } from "zod";
 
@@ -16,21 +16,21 @@ export { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { DisplayName } from "./directory";
 
-/** Bei inkompatiblen Aenderungen erhoehen. Server lehnt aeltere Clients ab. */
+/** Increment on incompatible changes. The server rejects older clients. */
 export const PROTOCOL_VERSION = 4; // v4: voice.moved/voice.stop, Member.streamBlocked, MODERATE_VOICE
 
-// ---------- REST: Auth (Challenge-Response mit Ed25519) ----------
+// ---------- REST: auth (challenge-response with Ed25519) ----------
 
-/** Einladungscode: URL-sicher, wie er in /invite/<code> steht. */
+/** Invite code: URL-safe, exactly as it appears in /invite/<code>. */
 export const InviteCode = z.string().regex(/^[A-Za-z0-9_-]{6,32}$/);
 
-// ChallengeRequest/ChallengeResponse liegen in directory.ts (Chat-Server und Verzeichnisdienst teilen den Challenge-Vertrag).
+// ChallengeRequest/ChallengeResponse live in directory.ts (chat server and directory service share the challenge contract).
 
 export const VerifyRequest = z.object({
   challengeId: Uuid,
   publicKey: PublicKey,
   signature: Signature,
-  /** Noetig, wenn der Server nicht offen ist und der Schluessel noch kein Mitglied ist. */
+  /** Required when the server is not open and the key is not a member yet. */
   invite: InviteCode.optional(),
 });
 export const VerifyResponse = z.object({
@@ -38,62 +38,62 @@ export const VerifyResponse = z.object({
   userId: Uuid,
   expiresAt: Iso,
 });
-/** Fehlercodes von /api/auth/verify, die der Client gesondert behandelt. */
+/** Error codes from /api/auth/verify that the client handles specially. */
 export const VerifyErrorCode = z.enum(["challenge_invalid", "signature_invalid", "invite_required", "invite_invalid", "banned"]);
 
-/** Was der Client signiert. Domain-Bindung verhindert Wiederverwendung auf anderen Servern. */
+/** What the client signs. The domain binding prevents reuse on other servers. */
 export function challengeMessage(domain: string, nonce: string): string {
   return `community-chat-login\n${domain}\n${nonce}`;
 }
 
-// ---------- Profil ----------
+// ---------- Profile ----------
 
-// DisplayName liegt in directory.ts (das Verzeichnis nutzt dasselbe Schema).
+// DisplayName lives in directory.ts (the directory uses the same schema).
 export const Me = z.object({
   userId: Uuid,
   publicKey: PublicKey,
   displayName: DisplayName.nullable(),
-  /** Verifiziertes Handle aus dem Verzeichnisdienst (M6), null ohne Dienst oder ohne Registrierung. */
+  /** Verified handle from the directory service (M6), null without a service or without a registration. */
   handle: z.string().nullable(),
 });
 export const UpdateMeRequest = z.object({ displayName: DisplayName.nullable() });
 
-/** Sitzung (Geraet) des angemeldeten Nutzers auf diesem Server (M6c, Geraeteverwaltung). Das Token bleibt geheim, `id` ist die Kennung. */
+/** Session (device) of the signed-in user on this server (M6c, device management). The token stays secret, `id` is the identifier. */
 export const SessionInfo = z.object({
   id: Uuid,
-  /** Aus dem User-Agent beim Login, z. B. "Chrome auf Windows"; null, wenn unbekannt. */
+  /** From the user agent at sign-in, e.g. "Chrome on Windows"; null if unknown. */
   label: z.string().nullable(),
   createdAt: Iso,
   lastUsedAt: Iso.nullable(),
   expiresAt: Iso,
-  /** Die Sitzung, mit der diese Anfrage gestellt wurde. */
+  /** The session this request was made with. */
   current: z.boolean(),
 });
 export type SessionInfo = z.infer<typeof SessionInfo>;
 
-/** Anzeigename mit Fallback auf die ersten Zeichen des Schluessels. */
+/** Display name with a fallback to the first characters of the key. */
 export function displayNameOf(u: { displayName: string | null; publicKey: string; handle?: string | null }): string {
   return u.displayName ?? (u.handle ? `@${u.handle}` : `anon-${u.publicKey.slice(0, 6)}`);
 }
 
-// ---------- Server-Struktur ----------
+// ---------- Server structure ----------
 
 export const ServerSettings = z.object({
   name: z.string().min(1).max(64),
-  /** true = jeder mit Schluessel darf beitreten; false = Einladung noetig. */
+  /** true = anyone with a key may join; false = an invite is required. */
   openJoin: z.boolean(),
-  /** Erster Eigentuemer (beim ersten Login festgelegt); weitere Eigentuemer stehen an den Mitgliedern (isOwner). */
+  /** First owner (determined at the first sign-in); further owners are marked on the members (isOwner). */
   ownerId: Uuid.nullable(),
-  /** Server-Icon aus der Verwaltung (mit Versions-Parameter fuer den Cache), null = keins. Dient dem Client auch als Favicon. */
+  /** Server icon from the admin area (with a version parameter for caching), null = none. The client also uses it as the favicon. */
   iconUrl: z.string().nullable(),
   /**
-   * true = Anmeldung nur mit Konto beim Verzeichnis (Schluessel muss dort ein Handle haben); Eigentuemer sind ausgenommen.
-   * Ohne DIRECTORY_URL wirkungslos (der Server kann kein Konto pruefen).
+   * true = sign-in only with an account at the directory (the key must have a handle there); owners are exempt.
+   * No effect without DIRECTORY_URL (the server cannot check an account).
    */
   requireAccount: z.boolean(),
-  /** true = REQUIRE_ACCOUNT ist per Konfiguration vorgegeben; die Verwaltung kann requireAccount dann nicht aendern (409 locked_by_config). */
+  /** true = REQUIRE_ACCOUNT is pinned by configuration; the admin area then cannot change requireAccount (409 locked_by_config). */
   requireAccountLocked: z.boolean(),
-  /** M6d: im oeffentlichen Serververzeichnis des Verzeichnisdienstes auflisten (mit Beschreibung); ohne DIRECTORY_URL wirkungslos. */
+  /** M6d: list in the directory service's public server directory (with a description); no effect without DIRECTORY_URL. */
   listed: z.boolean(),
   description: z.string().trim().max(200).nullable(),
 });
@@ -102,8 +102,8 @@ export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin:
 export const Category = z.object({ id: Uuid, name: z.string().min(1).max(64), position: z.number().int() });
 export const ChannelKind = z.enum(["text", "voice"]);
 /**
- * Sprachqualitaet je Sprachkanal (M3). Codec ist im Browser immer Opus; einstellbar sind Bitrate (kbit/s) und Stereo.
- * Mono mit DTX/RED = Sprache; Stereo ohne Browser-Klangbearbeitung = Musik/Instrumente.
+ * Voice quality per voice channel (M3). In the browser the codec is always Opus; bitrate (kbit/s) and stereo are configurable.
+ * Mono with DTX/RED = speech; stereo without the browser's audio processing = music/instruments.
  */
 export const AUDIO_BITRATES = [24, 32, 48, 64, 96, 128, 192, 256] as const;
 export const DEFAULT_AUDIO_BITRATE = 64;
@@ -116,9 +116,9 @@ export const Channel = z.object({
   topic: z.string().max(256).nullable(),
   categoryId: Uuid.nullable(),
   position: z.number().int(),
-  /** Opus-Bitrate in kbit/s (nur Sprachkanaele relevant). */
+  /** Opus bitrate in kbit/s (only relevant for voice channels). */
   audioBitrate: AudioBitrate,
-  /** Stereo senden (Musik); schaltet Echo-/Rauschunterdrueckung beim Sender ab. */
+  /** Send in stereo (music); turns off echo/noise suppression on the sender. */
   audioStereo: z.boolean(),
 });
 export const CreateCategoryRequest = z.object({ name: Category.shape.name });
@@ -145,9 +145,9 @@ export const Role = z.object({
   name: z.string().min(1).max(32),
   color: z.string().regex(/^#[0-9a-f]{6}$/).nullable(),
   permissions: z.number().int().nonnegative(),
-  /** Hoeher = maechtiger. Wer Rollen/Mitglieder verwaltet, darf nur unterhalb seiner hoechsten Position wirken. */
+  /** Higher = more powerful. Whoever manages roles/members may only act below their own highest position. */
   position: z.number().int(),
-  /** Die @everyone-Rolle: jedes Mitglied hat sie, sie ist nicht loeschbar. */
+  /** The @everyone role: every member has it and it cannot be deleted. */
   isDefault: z.boolean(),
 });
 export const CreateRoleRequest = z.object({ name: Role.shape.name, color: Role.shape.color.optional(), permissions: Role.shape.permissions.optional() });
@@ -165,19 +165,19 @@ export const Member = z.object({
   roleIds: z.array(Uuid),
   joinedAt: Iso,
   online: z.boolean(),
-  /** Moderator hat Kamera/Bildschirm fuer dieses Mitglied gesperrt (ueberstimmt STREAM_VIDEO aus Rollen). */
+  /** A moderator has blocked camera/screen for this member (overrides STREAM_VIDEO from roles). */
   streamBlocked: z.boolean(),
-  /** Verifiziertes Handle aus dem Verzeichnisdienst (M6), sonst null. */
+  /** Verified handle from the directory service (M6), otherwise null. */
   handle: z.string().nullable(),
-  /** Eigentuemer (mehrere moeglich): immer alle Rechte, steht ganz oben, kann nicht gekickt oder gebannt werden. */
+  /** Owner (several possible): always has every permission, sits at the very top, cannot be kicked or banned. */
   isOwner: z.boolean(),
 });
 export const SetMemberRolesRequest = z.object({ roleIds: z.array(Uuid) });
-/** Eigentuemerstatus setzen (nur durch Eigentuemer; der erste Eigentuemer laesst sich nicht entziehen). */
+/** Set owner status (only by owners; the first owner cannot be revoked). */
 export const SetOwnerRequest = z.object({ owner: z.boolean() });
-/** Mitglied in einen anderen Sprachkanal verschieben; null = aus dem Sprachkanal entfernen. */
+/** Move a member to another voice channel; null = remove them from the voice channel. */
 export const MoveMemberRequest = z.object({ channelId: Uuid.nullable() });
-/** Kamera und/oder Bildschirm eines Mitglieds beenden. */
+/** Stop a member's camera and/or screen. */
 export const StopStreamRequest = z.object({ camera: z.boolean().default(true), screen: z.boolean().default(true) });
 export const SetStreamBlockedRequest = z.object({ blocked: z.boolean() });
 export const BanRequest = z.object({ userId: Uuid, reason: z.string().max(256).nullable().optional() });
@@ -195,10 +195,10 @@ export const CreateInviteRequest = z.object({
   expiresInHours: z.number().int().positive().max(24 * 365).nullable().optional(),
   maxUses: z.number().int().positive().max(10_000).nullable().optional(),
 });
-/** Oeffentliche Vorschau einer Einladung (ohne Anmeldung abrufbar). */
+/** Public preview of an invite (retrievable without signing in). */
 export const InvitePreview = z.object({ serverName: z.string(), memberCount: z.number().int(), valid: z.boolean() });
 
-// ---------- Nachrichten ----------
+// ---------- Messages ----------
 
 export const MessageContent = z.string().trim().min(1).max(4000);
 export const Attachment = z.object({
@@ -206,12 +206,12 @@ export const Attachment = z.object({
   name: z.string(),
   size: z.number().int().nonnegative(),
   mimeType: z.string(),
-  /** Relativer Pfad zum Herunterladen. */
+  /** Relative path for downloading. */
   url: z.string(),
 });
 export const Message = z.object({
   id: Uuid,
-  /** Monoton steigend pro Server, fuer Reihenfolge und Cursor. */
+  /** Monotonically increasing per server, for ordering and cursors. */
   seq: z.number().int(),
   channelId: Uuid,
   authorId: Uuid,
@@ -227,34 +227,34 @@ export const CreateMessageRequest = z.object({
 export const UpdateMessageRequest = z.object({ content: MessageContent });
 export const MessagePage = z.object({ messages: z.array(Message), hasMore: z.boolean() });
 
-/** Kompletter Zustand, den ein Client nach dem Handshake braucht. */
+/** The complete state a client needs after the handshake. */
 export const ServerState = z.object({
   settings: ServerSettings,
   categories: z.array(Category),
   channels: z.array(Channel),
   roles: z.array(Role),
   members: z.array(Member),
-  /** Effektive Rechte des angemeldeten Nutzers. */
+  /** Effective permissions of the signed-in user. */
   myPermissions: z.number().int(),
 });
 
-// ---------- REST: LiveKit-Beitritt ----------
+// ---------- REST: joining LiveKit ----------
 
-/** Der Client darf nur Raeume anfragen, die als Sprachkanal existieren; der Server prueft Kanal und Recht. */
+/** The client may only request rooms that exist as a voice channel; the server checks channel and permission. */
 export const RtcTokenRequest = z.object({ channelId: Uuid });
 export const RtcTokenResponse = z.object({
-  /** Basis-URL fuer livekit-client (`Room.connect`), ohne Pfad. Das SDK haengt selbst /rtc an. */
+  /** Base URL for livekit-client (`Room.connect`), without a path. The SDK appends /rtc itself. */
   url: z.string().url(),
   token: z.string(),
 });
 
-// ---------- WebSocket: Ereignisse ----------
+// ---------- WebSocket: events ----------
 
 export const VoiceMember = z.object({ userId: Uuid, displayName: z.string() });
 
 export const ClientHello = z.object({ type: z.literal("hello"), protocolVersion: z.number().int(), sessionToken: z.string() });
 export const ClientPing = z.object({ type: z.literal("ping"), t: z.number() });
-/** Kanalzustand ist Absicht, nicht Medienstatus: "ich moechte als Mitglied gelistet sein". */
+/** Channel state is intent, not media state: "I want to be listed as a member". */
 export const ClientVoiceJoin = z.object({ type: z.literal("voice.join"), channelId: Uuid });
 export const ClientVoiceLeave = z.object({ type: z.literal("voice.leave") });
 export const ClientTyping = z.object({ type: z.literal("typing"), channelId: Uuid });
@@ -269,9 +269,9 @@ export const ServerWelcome = z.object({
   state: ServerState,
 });
 export const ServerPong = z.object({ type: z.literal("pong"), t: z.number() });
-/** Vollstaendiger Mitgliederstand eines Sprachkanals. Kein Delta: einfach und nach Reconnect korrekt. */
+/** Complete member state of a voice channel. Not a delta: simple, and correct after a reconnect. */
 export const ServerVoiceState = z.object({ type: z.literal("voice.state"), channelId: Uuid, members: z.array(VoiceMember) });
-/** Strukturaenderungen kommen als kompletter Stand des jeweiligen Teils. Klein genug, und nie inkonsistent. */
+/** Structure changes arrive as the complete state of the respective part. Small enough, and never inconsistent. */
 export const ServerStructure = z.object({
   type: z.literal("structure"),
   settings: ServerSettings.optional(),
@@ -280,17 +280,17 @@ export const ServerStructure = z.object({
   roles: z.array(Role).optional(),
   members: z.array(Member).optional(),
 });
-/** Eigene Rechte haben sich geaendert (Rolle zugewiesen/entzogen, Rolle bearbeitet). */
+/** Your own permissions changed (role assigned/revoked, role edited). */
 export const ServerMe = z.object({ type: z.literal("me"), myPermissions: z.number().int() });
 export const ServerMessageCreate = z.object({ type: z.literal("message.create"), message: Message });
 export const ServerMessageUpdate = z.object({ type: z.literal("message.update"), message: Message });
 export const ServerMessageDelete = z.object({ type: z.literal("message.delete"), channelId: Uuid, id: Uuid });
 export const ServerTyping = z.object({ type: z.literal("typing"), channelId: Uuid, userId: Uuid });
-/** Ein Moderator verschiebt dich in einen anderen Sprachkanal (null = aus dem Kanal); der Client tritt dort bei bzw. verlaesst. */
+/** A moderator moves you to another voice channel (null = out of the channel); the client joins there or leaves. */
 export const ServerVoiceMoved = z.object({ type: z.literal("voice.moved"), channelId: Uuid.nullable(), by: z.string() });
-/** Ein Moderator beendet deine Kamera und/oder Bildschirmfreigabe (LiveKit hat die Spuren bereits stummgeschaltet). */
+/** A moderator stops your camera and/or screen share (LiveKit has already muted the tracks). */
 export const ServerVoiceStop = z.object({ type: z.literal("voice.stop"), camera: z.boolean(), screen: z.boolean(), by: z.string() });
-/** Der Server hat dich entfernt (Kick/Ban); danach schliesst er die Verbindung. */
+/** The server removed you (kick/ban); it closes the connection afterwards. */
 export const ServerRemoved = z.object({ type: z.literal("removed"), reason: z.enum(["kicked", "banned"]), message: z.string().nullable() });
 export const ServerError = z.object({
   type: z.literal("error"),

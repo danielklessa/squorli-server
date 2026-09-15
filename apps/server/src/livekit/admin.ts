@@ -3,10 +3,10 @@ import type { FastifyBaseLogger } from "fastify";
 import type { Config } from "../config";
 
 /**
- * Moderation direkt bei LiveKit (M3): Kamera/Bildschirm eines Teilnehmers serverseitig stummschalten und
- * Publish-Rechte zur Laufzeit aendern. Der Client bekommt zusaetzlich ein WS-Ereignis, damit seine Oberflaeche
- * mitzieht; durchgesetzt wird es aber hier, unabhaengig davon, ob der Client mitspielt.
- * Alle Aufrufe sind best effort: ist der Teilnehmer nicht (mehr) im Raum, passiert nichts.
+ * Moderation directly at LiveKit (M3): mute a participant's camera/screen server-side and
+ * change publish permissions at runtime. The client additionally receives a WS event so its interface
+ * follows along; enforcement happens here, though, regardless of whether the client cooperates.
+ * All calls are best effort: if the participant is not (or no longer) in the room, nothing happens.
  */
 export class LivekitAdmin {
   private readonly svc: RoomServiceClient;
@@ -14,7 +14,7 @@ export class LivekitAdmin {
     this.svc = new RoomServiceClient(config.LIVEKIT_URL, config.LIVEKIT_API_KEY, config.LIVEKIT_API_SECRET);
   }
 
-  /** Kamera- und/oder Bildschirmspuren (inkl. Bildschirm-Ton) eines Teilnehmers stummschalten. */
+  /** Mute a participant's camera and/or screen tracks (including screen audio). */
   async stopStreams(room: string, identity: string, what: { camera: boolean; screen: boolean }): Promise<void> {
     try {
       const p = await this.svc.getParticipant(room, identity);
@@ -27,7 +27,7 @@ export class LivekitAdmin {
     }
   }
 
-  /** Publish-Rechte zur Laufzeit setzen: nur Mikrofon, oder Mikrofon + Kamera + Bildschirm. */
+  /** Set publish permissions at runtime: microphone only, or microphone + camera + screen. */
   async setCanStream(room: string, identity: string, allowed: boolean): Promise<void> {
     const sources = allowed
       ? [TrackSource.MICROPHONE, TrackSource.CAMERA, TrackSource.SCREEN_SHARE, TrackSource.SCREEN_SHARE_AUDIO]

@@ -6,6 +6,7 @@ import {
 } from "@squorli/protocol";
 import { z } from "zod";
 import { type Identity, identityFromPrivateKey, sign } from "./identity";
+import { t } from "./i18n";
 
 export class ApiError extends Error {
   constructor(method: string, path: string, readonly status: number, readonly code: string | null, readonly body: Record<string, unknown>) {
@@ -14,18 +15,18 @@ export class ApiError extends Error {
 }
 
 /**
- * Zugriff auf einen Chat-Server. `base` = "" fuer den Server, der diesen Client ausliefert (relative Pfade, Vite-Proxy im Dev),
- * sonst die Origin eines fremden Servers (Multi-Server-Client: die Server-Leiste wechselt zwischen Servern, ohne die Seite zu
- * verlassen; fremde Server antworten dank CORS mit Bearer-Token). Jede Instanz hat ihr eigenes Sitzungstoken.
+ * Access to one chat server. `base` = "" for the server that serves this client (relative paths, Vite proxy in dev),
+ * otherwise the origin of a foreign server (multi-server client: the server rail switches between servers without leaving
+ * the page; foreign servers answer thanks to CORS with a bearer token). Each instance has its own session token.
  */
 export class ServerApi {
   private token: string | null = null;
-  /** Wird gerufen, wenn der Server ein gesetztes Token mit 401 ablehnt (abgelaufen oder von einem anderen Geraet abgemeldet, M6c). */
+  /** Called when the server rejects a set token with a 401 (expired, or signed out from another device, M6c). */
   onUnauthorized: (() => void) | null = null;
   constructor(readonly base: string) {}
   setToken(t: string | null) { this.token = t; }
   getToken() { return this.token; }
-  /** Relative Server-URL (Anhaenge, Server-Icon) auf diesen Server beziehen. */
+  /** Resolve a relative server URL (attachments, server icon) against this server. */
   abs(url: string): string { return this.base && url.startsWith("/") ? `${this.base}${url}` : url; }
 
   private async request<T>(method: string, path: string, body?: unknown, opts: { auth?: boolean; form?: FormData } = {}): Promise<T> {
@@ -45,7 +46,7 @@ export class ServerApi {
   }
 
   // ---------- Auth
-  /** Anmelden: die Signatur ist an `domain` gebunden (PUBLIC_DOMAIN des Servers; eigener Server = Hostname der Adressleiste). */
+  /** Sign in: the signature is bound to `domain` (the server's PUBLIC_DOMAIN; own server = the hostname in the address bar). */
   async login(id: Identity, domain: string, invite?: string): Promise<VerifyResponse> {
     const challenge = ChallengeResponse.parse(await this.request("POST", "/api/auth/challenge", { publicKey: id.publicKey }, { auth: false }));
     const signature = await sign(id, challengeMessage(domain, challenge.nonce));
@@ -56,16 +57,16 @@ export class ServerApi {
 
   getMe() { return this.request<Me>("GET", "/api/me").then((m) => Me.parse(m)); }
   updateMe(displayName: string | null) { return this.request<Me>("PATCH", "/api/me", { displayName }).then((m) => Me.parse(m)); }
-  // ---------- Sitzungen / Geraete (M6c)
+  // ---------- Sessions / devices (M6c)
   getSessions() { return this.request<SessionInfo[]>("GET", "/api/me/sessions").then((s) => z.array(SessionInfo).parse(s)); }
   revokeSession(id: string) { return this.request("DELETE", `/api/me/sessions/${id}`); }
   revokeOtherSessions() { return this.request<{ ok: true; revoked: number }>("DELETE", "/api/me/sessions/others"); }
-  /** Eigene Sitzung serverseitig beenden (beim Abmelden); best effort. */
+  /** End your own session server-side (when signing out); best effort. */
   logoutSession() { return this.request("DELETE", "/api/me/sessions/current"); }
   getState() { return this.request<ServerState>("GET", "/api/state").then((s) => ServerState.parse(s)); }
   getInvitePreview(code: string) { return this.request<InvitePreview>("GET", `/api/invites/${encodeURIComponent(code)}`, undefined, { auth: false }).then((p) => InvitePreview.parse(p)); }
 
-  // ---------- Nachrichten
+  // ---------- Messages
   getMessages(channelId: string, before?: number) {
     return this.request<MessagePage>("GET", `/api/channels/${channelId}/messages?limit=50${before ? `&before=${before}` : ""}`).then((p) => MessagePage.parse(p));
   }
@@ -80,19 +81,19 @@ export class ServerApi {
     return this.request<Attachment>("POST", "/api/attachments", undefined, { form });
   }
 
-  // ---------- Sprache
+  // ---------- Voice
   rtcToken(channelId: string) { return this.request<RtcTokenResponse>("POST", "/api/rtc-token", { channelId }).then((r) => RtcTokenResponse.parse(r)); }
 
-  // ---------- Verwaltung
+  // ---------- Admin
   updateSettings(patch: { name?: string; openJoin?: boolean; requireAccount?: boolean; listed?: boolean; description?: string | null }) { return this.request("PATCH", "/api/settings", patch); }
-  /** Server-Icon (PNG/JPEG/WebP/GIF, 2 MB); erscheint in Seitenleiste und Favicon. */
+  /** Server icon (PNG/JPEG/WebP/GIF, 2 MB); appears in the sidebar and as the favicon. */
   async uploadServerIcon(file: File): Promise<{ ok: true; iconUrl: string | null }> {
     const form = new FormData();
     form.append("file", file, file.name);
     return this.request("PUT", "/api/settings/icon", undefined, { form });
   }
   deleteServerIcon() { return this.request("DELETE", "/api/settings/icon"); }
-  /** Eigentuemerstatus (nur Eigentuemer; der erste Eigentuemer ist unentziehbar). */
+  /** Owner status (owners only; the first owner cannot be revoked). */
   setOwner(userId: string, owner: boolean) { return this.request("PUT", `/api/members/${userId}/owner`, { owner }); }
   createCategory(name: string) { return this.request<Category>("POST", "/api/categories", { name }); }
   updateCategory(id: string, patch: { name?: string; position?: number }) { return this.request("PATCH", `/api/categories/${id}`, patch); }
@@ -116,36 +117,34 @@ export class ServerApi {
   revokeInvite(code: string) { return this.request("DELETE", `/api/invites/${encodeURIComponent(code)}`); }
 }
 
-/** Uebersetzt Login-Fehler in einen Satz, der sagt, was zu tun ist. */
+/** Turns sign-in errors into a sentence that says what to do. */
 export async function explainLoginError(err: unknown, api: ServerApi, here: string): Promise<string> {
-  if (err instanceof TypeError) return api.base ? `Der Server ${api.base} ist nicht erreichbar oder erlaubt keinen Zugriff aus anderen Clients (älterer Squorli-Server ohne CORS).` : "Der Server ist nicht erreichbar.";
+  if (err instanceof TypeError) return api.base ? t("err.serverUnreachableCors", { base: api.base }) : t("err.serverUnreachable");
   if (!(err instanceof ApiError)) return String(err);
   switch (err.code) {
     case "signature_invalid": {
       const health = await api.getHealth().catch(() => null);
-      if (health?.domain && health.domain !== here) {
-        return `Anmeldung abgelehnt: Der Server erwartet die Domain "${health.domain}" (PUBLIC_DOMAIN), diese Seite läuft unter "${here}". Beides muss übereinstimmen.`;
-      }
-      return `Anmeldung abgelehnt: Signatur ungültig (Domain "${here}"). Identität verwerfen und erneut versuchen.`;
+      if (health?.domain && health.domain !== here) return t("err.domainMismatch", { expected: health.domain, here });
+      return t("err.signatureInvalid", { here });
     }
-    case "challenge_invalid": return "Anmeldung abgelehnt: Challenge abgelaufen oder Server neu gestartet. Bitte erneut versuchen.";
-    case "invite_required": return "Dieser Server ist nur mit Einladung betretbar. Bitte Einladungscode eingeben.";
-    case "invite_invalid": return "Die Einladung ist ungültig, abgelaufen oder aufgebraucht.";
-    case "account_required": return "Dieser Server verlangt ein Konto beim Verzeichnis. Melde dich mit einem Konto an oder registriere ein Handle für diesen Schlüssel.";
-    case "banned": return `Du bist auf diesem Server gebannt${typeof err.body.reason === "string" && err.body.reason ? `: ${err.body.reason}` : "."}`;
+    case "challenge_invalid": return t("err.challengeInvalid");
+    case "invite_required": return t("err.inviteRequired");
+    case "invite_invalid": return t("err.inviteInvalid");
+    case "account_required": return t("err.accountRequired");
+    case "banned": return `${t("err.banned")}${typeof err.body.reason === "string" && err.body.reason ? `: ${err.body.reason}` : "."}`;
     default: return err.message;
   }
 }
 
 export type Health = {
   ok: boolean; domain: string; protocolVersion: number; directoryUrl: string | null; serverName: string | null; iconUrl: string | null;
-  /** Anmeldung nur mit Verzeichniskonto (Verwaltung > Server); der Server meldet false, wenn er kein Verzeichnis nutzt. */
+  /** Sign-in only with a directory account (Admin > Server); the server reports false if it does not use a directory. */
   requireAccount: boolean;
-  /** Serverversion (package.json), im Login unten neben dem Squorli-Hinweis. */
+  /** Server version (package.json), shown at the bottom of the login next to the Squorli note. */
   version: string;
 };
 
-// ---------- Verzeichnisdienst (M6): laeuft unter eigener URL, wird direkt aus dem Browser aufgerufen
+// ---------- Directory service (M6): runs under its own URL and is called directly from the browser
 async function directoryFetch<T>(dirUrl: string, method: string, path: string, body?: unknown): Promise<T> {
   const init: RequestInit = body !== undefined ? { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : { method };
   const res = await fetch(`${dirUrl}${path}`, init);
@@ -155,12 +154,12 @@ async function directoryFetch<T>(dirUrl: string, method: string, path: string, b
   }
   return (await res.json()) as T;
 }
-/** Handle zu einem Schluessel; null = nicht registriert. */
+/** Handle for a key; null = not registered. */
 export async function directoryLookup(dirUrl: string, publicKey: string): Promise<DirectoryAccount | null> {
   try { return DirectoryAccount.parse(await directoryFetch(dirUrl, "GET", `/api/keys/${publicKey}`)); }
   catch (e) { if (e instanceof ApiError && e.status === 404) return null; throw e; }
 }
-/** Handle registrieren: Besitznachweis per Signatur ueber eine Challenge, gebunden an den Host des Dienstes. */
+/** Register a handle: proof of ownership via a signature over a challenge, bound to the service's host. */
 export async function directoryRegister(dirUrl: string, id: Identity, rawHandle: string): Promise<DirectoryAccount> {
   const handle = Handle.parse(rawHandle);
   const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
@@ -168,7 +167,7 @@ export async function directoryRegister(dirUrl: string, id: Identity, rawHandle:
   const signature = await sign(id, directoryRegisterMessage(health.host, handle, ch.nonce));
   return DirectoryAccount.parse(await directoryFetch(dirUrl, "POST", "/api/register", { handle, publicKey: id.publicKey, challengeId: ch.challengeId, signature }));
 }
-/** M6b: Passwort-Backup fuer den eigenen Schluessel ablegen (Chiffretext signiert, Passwort bleibt im Client). */
+/** M6b: store a password backup of your own key (ciphertext signed, the password stays in the client). */
 export async function directoryBackupUpload(dirUrl: string, id: Identity, password: string): Promise<void> {
   const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
   const b = await createBackup(password, id.privateKey);
@@ -176,7 +175,7 @@ export async function directoryBackupUpload(dirUrl: string, id: Identity, passwo
   const signature = await sign(id, directoryBackupMessage(health.host, ch.nonce, b.ciphertext));
   await directoryFetch(dirUrl, "PUT", "/api/backup", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, ciphertext: b.ciphertext, params: b.params, authKey: b.authKey });
 }
-/** M6b: Schluessel per Handle + Passwort vom Verzeichnis holen und entschluesseln. M6c: `code` nach 401 totp_required (Authenticator oder Wiederherstellungscode). */
+/** M6b: fetch the key from the directory via handle + password and decrypt it. M6c: `code` after a 401 totp_required (authenticator or recovery code). */
 export async function directoryRestore(dirUrl: string, rawHandle: string, password: string, code?: string): Promise<Identity> {
   const handle = Handle.parse(rawHandle);
   const p = BackupParamsResponse.parse(await directoryFetch(dirUrl, "GET", `/api/backup/${handle}/params`));
@@ -184,24 +183,24 @@ export async function directoryRestore(dirUrl: string, rawHandle: string, passwo
   const blob = BackupBlob.parse(await directoryFetch(dirUrl, "POST", "/api/backup/fetch", { handle, authKey: keys.authKey, ...(code ? { code } : {}) }));
   let seed: string;
   try { seed = await openBackup(keys, blob.params.iv, blob.ciphertext); }
-  catch { throw new Error("Das Backup ließ sich nicht entschlüsseln (beschädigt?)."); }
+  catch { throw new Error(t("err.backupUndecryptable")); }
   const id = await identityFromPrivateKey(seed);
-  if (id.publicKey !== blob.publicKey) throw new Error("Das Backup passt nicht zum registrierten Schlüssel.");
+  if (id.publicKey !== blob.publicKey) throw new Error(t("err.backupMismatch"));
   return id;
 }
-/** Anzeigename im Verzeichnis: server = null -> global (alle Server), sonst nur fuer diesen Chat-Server (Host = dessen PUBLIC_DOMAIN). */
+/** Display name in the directory: server = null -> global (all servers), otherwise only for this chat server (host = its PUBLIC_DOMAIN). */
 export async function directorySetDisplayName(dirUrl: string, id: Identity, server: string | null, displayName: string | null): Promise<void> {
   const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
   const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
   const signature = await sign(id, directoryActionMessage(health.host, "profile-update", ch.nonce, directoryProfilePayload(server, displayName)));
   await directoryFetch(dirUrl, "POST", "/api/profile", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, server, displayName });
 }
-/** Handle-Suche fuer die Freundesliste (M7, oeffentlich, Praefix, hoechstens 10 Treffer). */
+/** Handle search for the friends list (M7, public, prefix, at most 10 hits). */
 export const directorySearchHandles = (dirUrl: string, q: string) => directoryFetch(dirUrl, "GET", `/api/handles?q=${encodeURIComponent(q)}`).then((r) => FriendSearchResponse.parse(r));
 export const directoryHealth = (dirUrl: string) => directoryFetch(dirUrl, "GET", "/api/health").then((r) => DirectoryHealth.parse(r));
-/** Oeffentliches Serververzeichnis (M6d): alle Server, die sich auflisten lassen. */
+/** Public server directory (M6d): all servers that opt into being listed. */
 export const directoryServers = (dirUrl: string) => directoryFetch(dirUrl, "GET", "/api/servers").then((r) => ServerListResponse.parse(r));
-/** Kontostatus (signiert): u. a. die Server, auf denen sich das Handle angemeldet hat (Server-Leiste, M6d). */
+/** Account status (signed): among other things, the servers the handle has signed in on (server rail, M6d). */
 export async function directoryAccountStatus(dirUrl: string, id: Identity): Promise<AccountStatus> {
   const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
   const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
@@ -211,26 +210,15 @@ export async function directoryAccountStatus(dirUrl: string, id: Identity): Prom
 export function explainDirectoryError(err: unknown): string {
   if (err instanceof ApiError) {
     switch (err.code) {
-      case "auth_invalid": return "Handle oder Passwort falsch.";
-      case "no_backup": return "Für dieses Handle gibt es kein Passwort-Backup. Lege es in dem Browser an, in dem das Handle registriert wurde („Passwort festlegen“ im Login).";
-      case "no_account": return "Dieser Schlüssel hat noch kein Handle.";
-      case "not_found": return "Unbekanntes Handle.";
-      case "bad_handle": return "Ungültiges Handle.";
-      case "handle_taken": return "Dieses Handle ist schon vergeben.";
-      case "key_registered": return `Dieser Schlüssel hat bereits das Handle @${String(err.body.handle ?? "?")}.`;
-      case "rate_limited": return "Zu viele Versuche, bitte kurz warten.";
-      case "bad_request": return `Ungültiges Handle: ${String(err.body.detail ?? "3-32 Zeichen, a-z, 0-9, Punkt, Unterstrich")}.`;
-      case "signature_invalid": return "Der Dienst hat die Signatur abgelehnt. Passt DIRECTORY_PUBLIC_URL des Dienstes zu seiner Adresse?";
-      case "challenge_invalid": return "Anfrage abgelaufen, bitte erneut versuchen.";
-      case "totp_required": return "Dieses Konto ist mit einem Authenticator geschützt. Bitte den Code aus der App oder einen Wiederherstellungscode eingeben.";
-      case "totp_invalid": return "Code ungültig.";
-      case "totp_reused": return "Dieser Code wurde schon verwendet. Bitte den nächsten aus der App abwarten.";
-      case "server_unknown": return "Dieser Server ist beim Verzeichnis nicht registriert; ein Name nur für diesen Server lässt sich deshalb nicht speichern.";
-      case "totp_unavailable": return "Der Verzeichnisdienst kann den Authenticator gerade nicht prüfen.";
+      case "auth_invalid": case "no_backup": case "no_account": case "not_found": case "bad_handle": case "handle_taken": case "rate_limited":
+      case "signature_invalid": case "challenge_invalid": case "totp_required": case "totp_invalid": case "totp_reused": case "server_unknown": case "totp_unavailable":
+        return t(`dir.${err.code}`);
+      case "key_registered": return t("dir.key_registered", { handle: String(err.body.handle ?? "?") });
+      case "bad_request": return t("dir.bad_request", { detail: String(err.body.detail ?? t("dir.handleRules")) });
       default: return err.message;
     }
   }
-  if (err instanceof Error && err.name === "ZodError") return "Ungültiges Handle: 3-32 Zeichen, a-z, 0-9, Punkt, Unterstrich; beginnt und endet mit Buchstabe oder Ziffer.";
-  if (err instanceof TypeError) return "Verzeichnisdienst nicht erreichbar (Netzwerk oder CORS). Läuft der Dienst unter der in /api/health genannten Adresse?";
+  if (err instanceof Error && err.name === "ZodError") return t("dir.zod");
+  if (err instanceof TypeError) return t("dir.unreachable");
   return String(err);
 }

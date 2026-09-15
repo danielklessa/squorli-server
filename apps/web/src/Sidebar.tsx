@@ -3,14 +3,15 @@ import { useState } from "react";
 import type { ServerApi } from "./api";
 import type { VoiceState } from "./voice/voiceClient";
 import { Icon } from "./Icon";
+import { t, tOr } from "./i18n";
 
 type Props = {
   server: ServerState;
   api: ServerApi;
-  /** Kanal, der im Hauptbereich angezeigt wird (Textkanal oder die Buehne des Sprachkanals): nur er ist hinterlegt. */
+  /** The channel shown in the main area (text channel or the voice channel's stage): only it is highlighted. */
   currentChannelId: string | null;
   voice: Record<string, VoiceMember[]>;
-  /** Eigene Sprachverbindung, wenn sie zu diesem Server gehoert; sonst null (Multi-Server-Client). */
+  /** Your own voice connection if it belongs to this server; otherwise null (multi-server client). */
   voiceState: VoiceState | null;
   unread: Record<string, boolean>;
   connection: string;
@@ -21,7 +22,7 @@ type Props = {
 };
 
 export function Sidebar({ server, api, currentChannelId, voice, voiceState, unread, connection, onSelect, onJoinVoice, onOpenAdmin, myUserId }: Props) {
-  // Drag & Drop: Sprachteilnehmer auf einen anderen Sprachkanal ziehen (sich selbst immer, andere mit MODERATE_VOICE).
+  // Drag & drop: drag a voice participant onto another voice channel (yourself always, others with MODERATE_VOICE).
   const canModerate = hasPermission(server.myPermissions, Permission.MODERATE_VOICE);
   const [dragging, setDragging] = useState<{ userId: string; from: string } | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -65,9 +66,9 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, unre
               const p = voiceState?.channelId === c.id ? voiceState.participants.find((x) => x.identity === m.userId) : undefined;
               const draggable = canDrag(m.userId);
               return <li key={m.userId} className={`${p?.speaking ? "speaking" : ""} ${draggable ? "draggable" : ""} ${dragging?.userId === m.userId ? "dragging" : ""}`}
-                draggable={draggable} title={draggable ? "In einen anderen Sprachkanal ziehen" : undefined}
+                draggable={draggable} title={draggable ? t("sidebar.dragHint") : undefined}
                 onDragStart={(e) => { if (!draggable) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", m.userId); setDragging({ userId: m.userId, from: c.id }); }}
-                onDragEnd={() => { setDragging(null); setDropTarget(null); }}><span className="dot" /><span className="member-name">{m.displayName}</span>{p?.micMuted && <Icon name="mic-off" className="muted" title="Mikrofon stumm" />}{p?.deafened && <Icon name="headphone-off" className="muted" title="Ton aus" />}{p?.cameraOn && <Icon name="video" title="Kamera an" />}{p?.screenOn && <Icon name="screen-share" title="teilt Bildschirm" />}</li>;
+                onDragEnd={() => { setDragging(null); setDropTarget(null); }}><span className="dot" /><span className="member-name">{m.displayName}</span>{p?.micMuted && <Icon name="mic-off" className="muted" title={t("voice.micMuted")} />}{p?.deafened && <Icon name="headphone-off" className="muted" title={t("voice.deafened")} />}{p?.cameraOn && <Icon name="video" title={t("voice.cameraOn")} />}{p?.screenOn && <Icon name="screen-share" title={t("voice.sharingScreen")} />}</li>;
             })}
           </ul>
         )}
@@ -80,8 +81,8 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, unre
       <header className="server-head">
         <img className={`brand-mark ${server.settings.iconUrl ? "server-icon" : ""}`} src={server.settings.iconUrl ? api.abs(server.settings.iconUrl) : "/brand/squorli-icon-small.svg"} alt="" width="22" height="22" />
         <strong>{server.settings.name}</strong>
-        {connection !== "connected" && <span className="muted"> · {connection}</span>}
-        {canAdmin && <button className="icon" title="Verwaltung" onClick={onOpenAdmin}><Icon name="settings" /></button>}
+        {connection !== "connected" && <span className="muted"> · {tOr(`conn.${connection}`, connection)}</span>}
+        {canAdmin && <button className="icon" title={t("sidebar.admin")} onClick={onOpenAdmin}><Icon name="settings" /></button>}
       </header>
       {dragErr && <p className="error small" style={{ padding: "0 0.9rem" }}>{dragErr}</p>}
       <div className="channel-list">

@@ -1,7 +1,7 @@
-// KOPIE-HINWEIS: liegt byte-identisch auch im Repo squorli-directory (packages/protocol/src); Quelle ist squorli-server, nach Aenderung kopieren.
+// COPY NOTE: also exists byte-identically in the squorli-directory repo (packages/protocol/src); the source is squorli-server, copy it over after any change.
 /**
- * Geraetebezeichnung aus dem User-Agent (M6c): "Chrome auf Windows", "Safari auf iOS". Bewusst grob und ohne Abhaengigkeit;
- * dient nur der Wiedererkennung in der Geraeteliste. Liegt im Protokollpaket, weil Chat-Server und Verzeichnisdienst es brauchen.
+ * Device label derived from the user agent (M6c): "Chrome on Windows", "Safari on iOS". Deliberately coarse and dependency-free;
+ * it only serves recognition in the device list. It lives in the protocol package because both chat server and directory service need it.
  */
 export function labelFromUserAgent(ua: string | undefined | null): string | null {
   if (!ua) return null;

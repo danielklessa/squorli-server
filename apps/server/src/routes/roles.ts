@@ -20,7 +20,7 @@ export async function registerRoleRoutes(app: FastifyInstance, db: Db, hub: Hub)
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
     const permissions = body.data.permissions ?? 0;
     if (!canGrant(m.actor, permissions)) return reply.code(403).send({ error: "cannot_grant" });
-    // Neue Rollen starten knapp ueber der Standardrolle; Reihenfolge danach per PATCH position.
+    // New roles start just above the default role; order them afterwards via PATCH position.
     const [row] = await db.insert(roles).values({ name: body.data.name, color: body.data.color ?? null, permissions, position: 1 }).returning();
     await broadcastStructure(db, hub, ["roles"]);
     return row;

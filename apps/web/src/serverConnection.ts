@@ -1,11 +1,12 @@
 import { PROTOCOL_VERSION, ServerEvent, type ClientEvent, type Me, type Message, type ServerState, type VoiceMember } from "@squorli/protocol";
 import { ServerApi, explainLoginError, type Health } from "./api";
 import type { Identity } from "./identity";
+import { t } from "./i18n";
 
 /**
- * Verbindung zu genau einem Chat-Server (Multi-Server-Client): Sitzung, WebSocket mit Wiederverbindung, Serverzustand,
- * Nachrichten-Cache, Sprachkanal-Praesenz, Tipp-Anzeige. Der Store haelt eine Verbindung je Server (eigener Server = der,
- * der den Client ausliefert; fremde Server aus der Server-Leiste ueber ihre Origin) und zeigt die aktive an.
+ * Connection to exactly one chat server (multi-server client): session, WebSocket with reconnect, server state,
+ * message cache, voice channel presence, typing indicator. The store holds one connection per server (own server = the one
+ * that serves the client; foreign servers from the server rail via their origin) and displays the active one.
  */
 export type Connection = "idle" | "logging-in" | "connecting" | "connected" | "reconnecting" | "error";
 
@@ -14,48 +15,48 @@ export type ChannelMessages = { list: Message[]; hasMore: boolean; loaded: boole
 export type RawLogEntry = { dir: "in" | "out"; at: number; text: string };
 
 export type ServerConnState = {
-  /** Schluessel im Store: eigener Server = Host der Adressleiste, fremde = Host aus dem Verzeichnis (PUBLIC_DOMAIN). */
+  /** Key in the store: own server = the host in the address bar, foreign ones = the host from the directory (PUBLIC_DOMAIN). */
   host: string;
-  /** Origin des Servers fuer REST/WS; "" = eigener Server (relative Pfade). */
+  /** Origin of the server for REST/WS; "" = own server (relative paths). */
   base: string;
   me: Me | null;
   userId: string | null;
   connection: Connection;
   error: string | null;
-  /** Server hat uns entfernt; Login erst nach Nutzeraktion erneut. */
+  /** The server removed us; sign in again only after a user action. */
   removed: { reason: "kicked" | "banned"; message: string | null } | null;
   server: ServerState | null;
   voice: Record<string, VoiceMember[]>;
   messages: Record<string, ChannelMessages>;
-  /** channelId -> userId -> Zeitstempel des letzten Tippens */
+  /** channelId -> userId -> timestamp of the last typing event */
   typing: Record<string, Record<string, number>>;
   currentChannelId: string | null;
-  /** Kanal mit ungelesenen Nachrichten (seit letztem Ansehen). */
+  /** Channel with unread messages (since it was last viewed). */
   unread: Record<string, boolean>;
   log: RawLogEntry[];
-  /** Servername und Icon aus /api/health (Icon bereits auf den Server bezogen), fuer Titel/Favicon/Leiste schon vor dem Login. */
+  /** Server name and icon from /api/health (the icon already resolved against the server), for title/favicon/rail even before sign-in. */
   serverName: string | null;
   iconUrl: string | null;
-  /** PUBLIC_DOMAIN dieses Servers (aus /api/health): Schluessel im Verzeichnis und Domain der Login-Signatur fremder Server. */
+  /** This server's PUBLIC_DOMAIN (from /api/health): its key in the directory and the domain of the login signature for foreign servers. */
   serverDomain: string | null;
-  /** Anmeldung nur mit Verzeichniskonto (aus /api/health). */
+  /** Sign-in only with a directory account (from /api/health). */
   requireAccount: boolean;
   serverVersion: string | null;
-  /** Verzeichnisdienst, den dieser Server nennt; null = keiner. */
+  /** Directory service named by this server; null = none. */
   directoryUrl: string | null;
 };
 
 export type ConnectionHooks = {
   onState: (s: ServerConnState) => void;
-  /** Sitzungstoken merken (null = vergessen). */
+  /** Remember the session token (null = forget it). */
   onToken: (token: string | null) => void;
-  /** Sitzung weg (Fernabmeldung, abgelaufen, keine Mitgliedschaft mehr): der Store entscheidet, was das fuer den Client heisst. */
+  /** Session gone (remote sign-out, expired, membership lost): the store decides what that means for the client. */
   onSessionLost: (message: string) => void;
-  /** Kick/Bann: Sprachverbindung beenden, falls sie zu diesem Server gehoert. */
+  /** Kick/ban: end the voice connection if it belongs to this server. */
   onRemoved: () => void;
-  /** Erstes welcome einer Sitzung (nicht nach Wiederverbindung): z. B. Serverliste beim Verzeichnis auffrischen. */
+  /** First welcome of a session (not after a reconnect): e.g. refresh the server list at the directory. */
   onConnected: () => void;
-  /** Moderation (M3): Verschieben in einen anderen Sprachkanal (null = raus) und Beenden von Kamera/Bildschirm. */
+  /** Moderation (M3): moving to another voice channel (null = out) and stopping camera/screen. */
   onVoiceMoved: (channelId: string | null, by: string) => void;
   onVoiceStop: (what: { camera: boolean; screen: boolean }, by: string) => void;
 };
@@ -79,13 +80,13 @@ export class ServerConnection {
       voice: {}, messages: {}, typing: {}, currentChannelId: null, unread: {}, log: [],
       serverName: null, iconUrl: null, serverDomain: null, requireAccount: false, serverVersion: null, directoryUrl: null,
     };
-    // Token vom Server abgelehnt (abgelaufen, von einem anderen Geraet abgemeldet): nicht mit totem Token weiterlaufen.
+    // Token rejected by the server (expired, signed out from another device): do not keep running with a dead token.
     this.api.onUnauthorized = () => { if (this.state.me) this.sessionLost("Die Sitzung ist abgelaufen oder wurde abgemeldet. Bitte erneut anmelden."); };
   }
 
   private set(p: Partial<ServerConnState>) { this.state = { ...this.state, ...p }; this.hooks.onState(this.state); }
 
-  /** /api/health lesen: Name, Icon, Domain, Verzeichnis. null, wenn der Server nicht erreichbar ist. */
+  /** Read /api/health: name, icon, domain, directory. null if the server is unreachable. */
   async refreshHealth(): Promise<Health | null> {
     const health = await this.api.getHealth().catch(() => null);
     this.set({
@@ -95,7 +96,7 @@ export class ServerConnection {
     return health;
   }
 
-  /** Gespeicherte Sitzung wiederverwenden, wenn sie noch gilt. */
+  /** Reuse the stored session if it is still valid. */
   async resume(token: string): Promise<boolean> {
     this.api.setToken(token);
     this.set({ connection: "connecting", error: null });
@@ -106,7 +107,7 @@ export class ServerConnection {
     return true;
   }
 
-  /** Anmelden (Challenge-Response) mit Signatur ueber `domain`, optional mit Einladung, dann WebSocket verbinden. */
+  /** Sign in (challenge-response) with a signature over `domain`, optionally with an invite, then connect the WebSocket. */
   async login(domain: string, invite?: string): Promise<void> {
     const id = this.identity();
     if (!id) return;
@@ -125,7 +126,7 @@ export class ServerConnection {
     }
   }
 
-  /** Abmelden: Sitzung auch serverseitig beenden (M6c, best effort), Verbindung schliessen. */
+  /** Sign out: end the session on the server side too (M6c, best effort) and close the connection. */
   logout() {
     if (this.api.getToken()) void this.api.logoutSession().catch(() => {});
     this.clearSession(null);
@@ -144,7 +145,7 @@ export class ServerConnection {
     this.set({ me: null, userId: null, connection: "idle", server: null, messages: {}, voice: {}, currentChannelId: null, removed: null, error });
   }
 
-  /** Verbindung beenden, ohne die Sitzung zu vergessen (z. B. Identitaetswechsel). */
+  /** Close the connection without forgetting the session (e.g. on an identity switch). */
   close() {
     this.wantConnection = false;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
@@ -171,8 +172,8 @@ export class ServerConnection {
     ws.onclose = (ev) => {
       if (this.ws === ws) this.ws = null;
       if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
-      // 4011 = Sitzung von einem anderen Geraet abgemeldet (M6c): nicht wiederverbinden, zurueck zum Login.
-      if (ev.code === 4011 && this.wantConnection) return this.sessionLost("Diese Sitzung wurde von einem anderen Gerät abgemeldet.");
+      // 4011 = session signed out from another device (M6c): do not reconnect, go back to the login.
+      if (ev.code === 4011 && this.wantConnection) return this.sessionLost(t("err.sessionRevoked"));
       if (!this.wantConnection) return;
       this.set({ connection: "reconnecting" });
       this.reconnectTimer = window.setTimeout(() => this.connect(), this.reconnectDelay);
@@ -201,7 +202,7 @@ export class ServerConnection {
         if (!wasReconnect) this.hooks.onConnected();
         if (this.pingTimer) clearInterval(this.pingTimer);
         this.pingTimer = window.setInterval(() => this.send({ type: "ping", t: Date.now() }), 20_000);
-        // Nach Wiederverbindung: Verlauf des aktuellen Kanals neu laden, es koennten Nachrichten fehlen.
+        // After a reconnect: reload the current channel's history, messages could be missing.
         if (wasReconnect && current) { this.set({ messages: { ...this.state.messages, [current]: EMPTY } }); void this.loadHistory(current); }
         else if (current) void this.loadHistory(current);
         break;
@@ -265,8 +266,8 @@ export class ServerConnection {
         break;
       case "error":
         if (e.code === "unauthorized") {
-          // Token ungueltig oder keine Mitgliedschaft mehr: nicht mit totem Socket im Chat bleiben.
-          this.sessionLost(e.message === "not a member" ? "Du bist auf diesem Server kein Mitglied mehr." : "Die Sitzung ist ungültig. Bitte erneut anmelden.");
+          // Token invalid or membership lost: do not stay in the chat with a dead socket.
+          this.sessionLost(e.message === "not a member" ? t("err.notMember") : t("err.sessionInvalid"));
         } else if (e.code === "protocol_version") {
           this.wantConnection = false;
           this.set({ connection: "error", error: `${e.code}: ${e.message}` });
@@ -277,7 +278,7 @@ export class ServerConnection {
     }
   }
 
-  // ---------- Kanaele und Nachrichten
+  // ---------- Channels and messages
   selectChannel(channelId: string) {
     this.set({ currentChannelId: channelId, unread: { ...this.state.unread, [channelId]: false } });
     if (!this.state.messages[channelId]?.loaded) void this.loadHistory(channelId);
@@ -313,7 +314,7 @@ export class ServerConnection {
   clearError() { this.set({ error: null }); }
 }
 
-/** Neueste Seite mit vorhandenem Cache zusammenfuehren (nach Reconnect), ohne Dubletten. */
+/** Merge the newest page with the existing cache (after a reconnect), without duplicates. */
 function mergeLatest(cur: Message[], page: Message[]): Message[] {
   if (!cur.length) return page;
   const known = new Set(cur.map((m) => m.id));
