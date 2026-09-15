@@ -1,4 +1,5 @@
 import { directoryServerUrl } from "@squorli/protocol";
+import { useEffect, useState, type MouseEvent } from "react";
 import { Icon } from "./Icon";
 import { t } from "./i18n";
 
@@ -7,18 +8,38 @@ export type RailServer = { key: string; host: string; name: string; sub: string 
 /** Live state per server from the store: unread items, running voice connection, connection state. */
 export type RailState = Record<string, { unread: boolean; voice: boolean; connection: string }>;
 
+type Menu = { key: string; host: string; name: string; x: number; y: number };
+
 /**
  * Server rail on the far left (M6d): your own server and every chat server your handle has signed in on according to the
  * directory (AccountStatus.servers). A click switches the displayed server in the client (multi-server client) without leaving
  * the page; a running voice connection survives (green dot on the server it runs on). Icons come
  * exclusively from the directory (GET /api/servers/<host>/icon), never from the foreign server; without an icon, initials.
+ * Right-click on a server opens a small menu: open, and delete your account on that server (through the directory).
  * At the bottom: "discover servers" opens the public server directory.
  */
-export function ServerRail({ servers, serverState, activeKey, onSelect, onDiscover, home }: {
+export function ServerRail({ servers, serverState, activeKey, onSelect, onDiscover, onLeave, home }: {
   servers: RailServer[]; serverState: RailState; activeKey: string | null; onSelect: (key: string, host: string) => void; onDiscover: () => void;
+  /** Delete your account on `host` (asks for confirmation itself). */
+  onLeave: (host: string, name: string) => void;
   /** M7: home view (friends + direct messages); null = no directory socket (no account). badge = open requests + unread messages. */
   home: { open: boolean; badge: number; onToggle: () => void } | null;
 }) {
+  const [menu, setMenu] = useState<Menu | null>(null);
+  // The menu closes on any click elsewhere or Escape (it is positioned at the pointer, outside the rail's scroll box).
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", close);
+    return () => { window.removeEventListener("pointerdown", close); window.removeEventListener("keydown", onKey); window.removeEventListener("resize", close); };
+  }, [menu]);
+  const openMenu = (s: RailServer) => (e: MouseEvent) => {
+    e.preventDefault();
+    setMenu({ key: s.key, host: s.host, name: s.name, x: Math.min(e.clientX, window.innerWidth - 260), y: Math.min(e.clientY, window.innerHeight - 100) });
+  };
   return (
     <nav className="rail" aria-label={t("rail.label")}>
       {home && (
@@ -33,10 +54,17 @@ export function ServerRail({ servers, serverState, activeKey, onSelect, onDiscov
       {servers.map((s) => {
         const st = serverState[s.key];
         return <RailEntry key={s.key} host={s.host} name={s.name} sub={s.sub} iconUrl={s.iconUrl} current={s.key === activeKey}
-          voice={st?.voice ?? false} unread={st?.unread ?? false} onOpen={() => onSelect(s.key, s.host)} />;
+          voice={st?.voice ?? false} unread={st?.unread ?? false} onOpen={() => onSelect(s.key, s.host)} onMenu={openMenu(s)} />;
       })}
       <span className="rail-sep" />
       <button className="rail-item discover" title={t("rail.discover")} onClick={onDiscover}><Icon name="compass" /></button>
+      {menu && (
+        <div className="rail-menu" role="menu" style={{ left: menu.x, top: menu.y }} onPointerDown={(e) => e.stopPropagation()}>
+          <div className="muted small rail-menu-head">{menu.name}<br />{menu.host}</div>
+          <button role="menuitem" className="secondary small" onClick={() => { setMenu(null); onSelect(menu.key, menu.host); }}><Icon name="external-link" /> {t("common.open")}</button>
+          <button role="menuitem" className="danger small" onClick={() => { setMenu(null); onLeave(menu.host, menu.name); }}><Icon name="user-x" /> {t("rail.menuLeave")}</button>
+        </div>
+      )}
     </nav>
   );
 }
@@ -48,8 +76,10 @@ export function initials(name: string): string {
 }
 
 /** Round server entry: icon from the directory or initials. With `onOpen` a button (switch within the client), otherwise a link to the server. */
-export function RailEntry({ host, name, sub, iconUrl, current, voice = false, unread = false, onOpen = null }: {
+export function RailEntry({ host, name, sub, iconUrl, current, voice = false, unread = false, onOpen = null, onMenu }: {
   host: string; name: string; sub: string | null; iconUrl: string | null; current: boolean; voice?: boolean; unread?: boolean; onOpen?: (() => void) | null;
+  /** Right-click: context menu (rail only). */
+  onMenu?: (e: MouseEvent) => void;
 }) {
   const title = `${name}${sub ? ` · ${sub}` : ""}\n${host}${voice ? `\n${t("rail.voiceConnected")}` : ""}`;
   const content = (
@@ -61,6 +91,6 @@ export function RailEntry({ host, name, sub, iconUrl, current, voice = false, un
   );
   const cls = `rail-item ${current ? "current" : ""}`;
   return onOpen
-    ? <button className={cls} title={title} aria-current={current ? "page" : undefined} onClick={onOpen}>{content}</button>
+    ? <button className={cls} title={title} aria-current={current ? "page" : undefined} onClick={onOpen} onContextMenu={onMenu}>{content}</button>
     : <a className={cls} href={directoryServerUrl(host)} title={title}>{content}</a>;
 }

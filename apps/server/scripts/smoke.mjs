@@ -411,6 +411,41 @@ check("unban + rejoin", sub === 200 && Cback.status === 200);
 const [sbanSelf] = await api("POST", "/api/bans", { userId: owner.userId }, owner.token);
 check("cannot ban self", sbanSelf === 400);
 
+// ---------- Account deletion via the directory (signed server-leave there): the directory pushes /api/directory/leave, the server
+// confirms with its token and deletes the user (ws close 4012, token dead, member gone); the first owner is refused.
+if (health0.directoryUrl) {
+  const dir = health0.directoryUrl;
+  const dj = async (method, path, body) => { const r = await fetch(dir + path, { method, headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined }); return [r.status, await r.json().catch(() => ({}))]; };
+  const [, dh] = await dj("GET", "/api/health");
+  const dsigned = async (key, action, path, payload, extra = {}) => {
+    const [, ch] = await dj("POST", "/api/challenge", { publicKey: key.publicKey });
+    const signature = hex(await ed.signAsync(new TextEncoder().encode(`community-directory-${action}\n${dh.host}\n${ch.nonce}\n${payload}`), key.priv));
+    return dj("POST", path, { publicKey: key.publicKey, challengeId: ch.challengeId, signature, ...extra });
+  };
+  const host = health0.domain.toLowerCase();
+  const [, chC] = await dj("POST", "/api/challenge", { publicKey: keyC.publicKey });
+  const handleC = `smokeleave_${keyC.publicKey.slice(0, 6)}`;
+  const sigC = hex(await ed.signAsync(new TextEncoder().encode(`community-directory-register\n${dh.host}\n${handleC}\n${chC.nonce}`), keyC.priv));
+  const [srC] = await dj("POST", "/api/register", { handle: handleC, publicKey: keyC.publicKey, challengeId: chC.challengeId, signature: sigC });
+  const Cl = await login(keyC); // the sign-in makes the server look the key up with its token = listed at the directory
+  const wsCl = await connectWs(Cl.token);
+  check("leave: handle for C, signed in, listed at the directory", (srC === 201 || srC === 409) && Cl.status === 200 && wsCl.welcome.type === "welcome", `${srC} ${Cl.status}`);
+  const [slo, rlo] = await dsigned(ownerKey, "server-leave", "/api/servers/leave", host, { server: host });
+  const [smeO] = await api("GET", "/api/me", undefined, owner.token);
+  check("leave: first owner refused (409 founder), owner untouched", slo === 409 && rlo.error === "founder" && smeO === 200, `${slo} ${rlo.error ?? ""}`);
+  const [slc, rlc] = await dsigned(keyC, "server-leave", "/api/servers/leave", host, { server: host });
+  const closeC = await wsCl.closed();
+  const [smeC] = await api("GET", "/api/me", undefined, Cl.token);
+  const [, stL] = await api("GET", "/api/state", undefined, owner.token);
+  check("leave: delivered, ws closed 4012, token dead, member gone", slc === 200 && rlc.delivered === true && closeC === 4012 && smeC === 401 && !stL.members.some((m) => m.userId === C.userId),
+    `${slc} ${JSON.stringify(rlc)} close ${closeC} me ${smeC}`);
+  const [, dst] = await dsigned(keyC, "account-status", "/api/account/status", "");
+  check("leave: server gone from the account's server list", Array.isArray(dst.servers) && !dst.servers.some((s) => s.host === host), JSON.stringify(dst.servers));
+  const Cnew = await login(keyC, invite2.code);
+  check("leave: joining again afterwards creates a new user", Cnew.status === 200 && Cnew.userId !== C.userId, `${Cnew.status}`);
+  await api("DELETE", `/api/members/${Cnew.userId}`, undefined, owner.token);
+}
+
 // ---------- Protocol version
 const wsOld = new WebSocket(BASE.replace(/^http/, "ws") + "/api/ws");
 await new Promise((r) => wsOld.on("open", r));

@@ -1,6 +1,6 @@
 import {
   deriveDmKey, directoryServerUrl, openDm, sealDm,
-  type AccountServer, type DirectoryAccount, type DirectoryServerEvent, type DmConversation, type DmMessage, type Friend,
+  type AccountServer, type DirectoryAccount, type DirectoryServerEvent, type DmConversation, type DmMessage, type Friend, type ServerLeaveResponse,
 } from "@squorli/protocol";
 import * as api from "./api";
 import { DirectoryLink, type LinkStatus } from "./directoryLink";
@@ -409,6 +409,26 @@ export class Store {
     catch (err) { throw new Error(api.explainDirectoryError(err)); }
     const acc = this.state.directoryAccount;
     if (acc && server === null) this.set({ directoryAccount: { ...acc, displayName } });
+  }
+
+  /**
+   * Delete your account on a chat server (rail context menu): the signed request goes to the directory, which notifies the
+   * server. If it confirmed (`delivered`), the own server has already closed our socket with 4012 (login screen with a message);
+   * a foreign server is closed here and its session forgotten. Throws with a translated message.
+   */
+  async leaveServer(directoryHost: string): Promise<ServerLeaveResponse> {
+    const id = this.state.identity; const url = this.state.directoryUrl;
+    if (!id || !url) throw new Error(t("dir.none"));
+    let r: ServerLeaveResponse;
+    try { r = await api.directoryLeaveServer(url, id, directoryHost); }
+    catch (err) { throw new Error(api.explainDirectoryError(err)); }
+    if (r.delivered) {
+      const key = this.hostFor(directoryHost);
+      if (key === this.homeHost) this.home.accountDeleted();
+      else { this.closeServer(key); this.storeToken(key, null); }
+    }
+    void this.refreshAccountServers();
+    return r;
   }
 
   /** M6b: store a password backup of the device key at the directory. */

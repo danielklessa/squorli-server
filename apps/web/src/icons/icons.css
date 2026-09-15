@@ -8,6 +8,7 @@
 .ic-chevron-up::before { content: "\e070"; }
 .ic-compass::before { content: "\e09b"; }
 .ic-crown::before { content: "\e1d6"; }
+.ic-external-link::before { content: "\e0b9"; }
 .ic-hash::before { content: "\e0ef"; }
 .ic-headphone-off::before { content: "\e62d"; }
 .ic-headphones::before { content: "\e0f1"; }
@@ -31,6 +32,7 @@
 .ic-trash-2::before { content: "\e18e"; }
 .ic-user::before { content: "\e19f"; }
 .ic-user-plus::before { content: "\e1a2"; }
+.ic-user-x::before { content: "\e1a3"; }
 .ic-video::before { content: "\e1a5"; }
 .ic-video-off::before { content: "\e1a6"; }
 .ic-volume-2::before { content: "\e1ab"; }

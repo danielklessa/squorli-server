@@ -1,4 +1,4 @@
-import { ChallengeResponse, DirectoryAccount, ServerRegisterResponse, ServerResolveResponse, directoryServerRegisterMessage } from "@squorli/protocol";
+import { ChallengeResponse, DirectoryAccount, ServerLeavesResponse, ServerRegisterResponse, ServerResolveResponse, directoryServerRegisterMessage } from "@squorli/protocol";
 import * as ed from "@noble/ed25519";
 import { count, eq, inArray } from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
@@ -185,6 +185,43 @@ export class DirectoryClient {
       this.log.warn({ err: err instanceof Error ? err.message : String(err) }, "Verzeichnis: Einzelabgleich fehlgeschlagen");
       return false;
     }
+  }
+  /**
+   * Account deletion requested through the directory (push POST /api/directory/leave or the pending list): confirm with our
+   * token via POST /api/servers/leave/confirm. Only a 200 (the directory had a pending request of this user for exactly our host,
+   * signed by the user) allows deleting; "not_pending" = nothing to do (a stranger or a stale push), null = directory unreachable.
+   */
+  async confirmLeave(publicKey: string): Promise<"confirmed" | "not_pending" | null> {
+    const url = this.config.DIRECTORY_URL;
+    if (!url) return null;
+    try {
+      if (!this.token && !(await this.register())) return null;
+      let res = await this.postConfirm(url, publicKey);
+      if (res.status === 401) { this.token = null; if (!(await this.register())) return null; res = await this.postConfirm(url, publicKey); }
+      if (res.status === 200) return "confirmed";
+      if (res.status === 404) return "not_pending";
+      this.log.warn({ status: res.status }, "Verzeichnis: Bestaetigung der Konto-Loeschung fehlgeschlagen");
+      return null;
+    } catch (err) {
+      this.log.warn({ err: err instanceof Error ? err.message : String(err) }, "Verzeichnis: Bestaetigung der Konto-Loeschung nicht moeglich");
+      return null;
+    }
+  }
+  /** Pending deletions for this server (missed pushes), fetched during the periodic reconciliation. */
+  async pendingLeaves(): Promise<string[]> {
+    const url = this.config.DIRECTORY_URL;
+    if (!url || !this.token) return [];
+    try {
+      const res = await fetch(`${url}/api/servers/leaves`, { headers: { authorization: `Bearer ${this.token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      if (!res.ok) return [];
+      return ServerLeavesResponse.parse(await res.json()).publicKeys;
+    } catch { return []; }
+  }
+  private postConfirm(url: string, publicKey: string): Promise<Response> {
+    return fetch(`${url}/api/servers/leave/confirm`, {
+      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${this.token}` },
+      body: JSON.stringify({ publicKey }), signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
   }
   private resolveMany(url: string, publicKeys: string[]): Promise<Response> {
     return fetch(`${url}/api/servers/resolve`, {

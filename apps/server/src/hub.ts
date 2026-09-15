@@ -69,6 +69,11 @@ export class Hub {
     }
   }
 
+  /** Close all connections of a user with a bare close code (no event), e.g. 4012 `account_deleted` after a deletion via the directory. */
+  closeUser(userId: string, code: number, reason: string) {
+    for (const ws of [...(this.byUser.get(userId) ?? [])]) ws.close(code, reason);
+  }
+
   /** Remote sign-out (M6c): close only the connections of this session. The client recognizes the code and goes to the login. */
   disconnectSession(sessionId: string, code = 4011, reason = "session_revoked") {
     for (const [ws, sid] of [...this.sessionOf]) if (sid === sessionId) ws.close(code, reason);

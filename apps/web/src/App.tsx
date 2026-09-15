@@ -10,6 +10,7 @@ import { VoiceDock, loadVoiceSettings } from "./VoiceDock";
 import { VoiceStage } from "./VoiceStage";
 import { CameraPicker } from "./CameraPicker";
 import { Icon } from "./Icon";
+import { askConfirm } from "./dialogs";
 import { ProfileDialog } from "./ProfileDialog";
 import { applyBranding } from "./branding";
 import { ServerBrowser } from "./ServerBrowser";
@@ -186,12 +187,23 @@ export function App() {
   const railState = Object.fromEntries(Object.entries(state.servers).map(([k, s]) => [k, {
     unread: Object.values(s.unread).some(Boolean), voice: k === voiceHost && voice.status !== "disconnected", connection: s.connection,
   }]));
+  // Rail context menu: delete your account on that server, requested through the directory (own confirmation dialog, no browser dialogs).
+  const leaveServer = async (host: string, name: string) => {
+    const ok = await askConfirm({ title: t("rail.leaveTitle", { name }), text: t("rail.leaveText"), confirmLabel: t("common.delete"), danger: true });
+    if (!ok) return;
+    try {
+      const r = await store.leaveServer(host);
+      if (!r.delivered) await askConfirm({ title: t("rail.leaveTitle", { name }), text: r.registered ? t("rail.leaveQueued") : t("rail.leaveUnregistered"), confirmLabel: t("common.ok") });
+    } catch (err) {
+      await askConfirm({ title: t("rail.leaveFailed"), text: err instanceof Error ? err.message : String(err), confirmLabel: t("common.ok") });
+    }
+  };
 
   return (
     <div className={`app ${state.directoryUrl ? "with-rail" : ""} ${homeOpen ? "home" : ""}`}>
       {state.directoryUrl && <ServerRail servers={railServers} serverState={railState} activeKey={homeOpen ? null : activeHost}
         onSelect={(key, host) => { if (key === state.homeHost) { store.openServer(homeDirHost); } else store.openServer(host); setStageOpen(key === voiceHost && stageOpen); }}
-        onDiscover={() => setShowBrowser(true)}
+        onDiscover={() => setShowBrowser(true)} onLeave={(host, name) => { void leaveServer(host, name); }}
         home={homeAvailable ? { open: homeOpen, badge: homeBadge, onToggle: () => store.openHome(!homeOpen) } : null} />}
       {showBrowser && state.directoryUrl && <ServerBrowser directoryUrl={state.directoryUrl} currentHost={home.serverDomain} onClose={() => setShowBrowser(false)} />}
       <div className="left">

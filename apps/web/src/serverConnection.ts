@@ -138,6 +138,11 @@ export class ServerConnection {
     this.hooks.onSessionLost(message);
   }
 
+  /** The account on this server was deleted at the user's request (via the directory): drop the session, show the login with a note. */
+  accountDeleted() {
+    if (this.state.me || this.api.getToken()) this.sessionLost(t("err.accountDeleted"));
+  }
+
   private clearSession(error: string | null) {
     this.close();
     this.api.setToken(null);
@@ -172,8 +177,9 @@ export class ServerConnection {
     ws.onclose = (ev) => {
       if (this.ws === ws) this.ws = null;
       if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
-      // 4011 = session signed out from another device (M6c): do not reconnect, go back to the login.
+      // 4011 = session signed out from another device (M6c), 4012 = account deleted via the directory: do not reconnect, go back to the login.
       if (ev.code === 4011 && this.wantConnection) return this.sessionLost(t("err.sessionRevoked"));
+      if (ev.code === 4012 && this.wantConnection) return this.sessionLost(t("err.accountDeleted"));
       if (!this.wantConnection) return;
       this.set({ connection: "reconnecting" });
       this.reconnectTimer = window.setTimeout(() => this.connect(), this.reconnectDelay);

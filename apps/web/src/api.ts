@@ -1,5 +1,5 @@
 import {
-  AccountStatus, Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, FriendSearchResponse, ServerListResponse, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
+  AccountStatus, Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, FriendSearchResponse, ServerLeaveResponse, ServerListResponse, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
   BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryActionMessage, directoryBackupMessage, directoryProfilePayload,
   directoryRegisterMessage, openBackup,
   type Attachment, type Category, type Channel, type Role,
@@ -195,6 +195,13 @@ export async function directorySetDisplayName(dirUrl: string, id: Identity, serv
   const signature = await sign(id, directoryActionMessage(health.host, "profile-update", ch.nonce, directoryProfilePayload(server, displayName)));
   await directoryFetch(dirUrl, "POST", "/api/profile", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, server, displayName });
 }
+/** Delete your account on one chat server (host = its PUBLIC_DOMAIN): signed at the directory, which notifies the server; it confirms and deletes the user. */
+export async function directoryLeaveServer(dirUrl: string, id: Identity, server: string): Promise<ServerLeaveResponse> {
+  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
+  const signature = await sign(id, directoryActionMessage(health.host, "server-leave", ch.nonce, server));
+  return ServerLeaveResponse.parse(await directoryFetch(dirUrl, "POST", "/api/servers/leave", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, server }));
+}
 /** Handle search for the friends list (M7, public, prefix, at most 10 hits). */
 export const directorySearchHandles = (dirUrl: string, q: string) => directoryFetch(dirUrl, "GET", `/api/handles?q=${encodeURIComponent(q)}`).then((r) => FriendSearchResponse.parse(r));
 export const directoryHealth = (dirUrl: string) => directoryFetch(dirUrl, "GET", "/api/health").then((r) => DirectoryHealth.parse(r));
@@ -212,6 +219,7 @@ export function explainDirectoryError(err: unknown): string {
     switch (err.code) {
       case "auth_invalid": case "no_backup": case "no_account": case "not_found": case "bad_handle": case "handle_taken": case "rate_limited":
       case "signature_invalid": case "challenge_invalid": case "totp_required": case "totp_invalid": case "totp_reused": case "server_unknown": case "totp_unavailable":
+      case "founder": case "server_refused":
         return t(`dir.${err.code}`);
       case "key_registered": return t("dir.key_registered", { handle: String(err.body.handle ?? "?") });
       case "bad_request": return t("dir.bad_request", { detail: String(err.body.detail ?? t("dir.handleRules")) });

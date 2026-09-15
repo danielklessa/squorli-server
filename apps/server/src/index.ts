@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
-import { DirectoryNotifyRequest, PROTOCOL_VERSION } from "@squorli/protocol";
+import { DirectoryLeaveRequest, DirectoryNotifyRequest, PROTOCOL_VERSION } from "@squorli/protocol";
 import Fastify from "fastify";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -22,6 +22,7 @@ import { registerMemberRoutes } from "./routes/members";
 import { registerMessageRoutes } from "./routes/messages";
 import { registerRoleRoutes } from "./routes/roles";
 import { registerSettingsRoutes } from "./routes/settings";
+import { deleteUserAccount, type DeleteUserResult } from "./users/deleteUser";
 import { registerUserRoutes } from "./users/routes";
 import { DirectoryClient, SYNC_INTERVAL_MS } from "./directory";
 import { broadcastStructure, loadSettings, setRequireAccountForced } from "./state";
@@ -76,6 +77,18 @@ async function main() {
     if (!notifyHandler) return reply.code(404).send({ error: "no_directory" });
     void notifyHandler(body.data.publicKey).catch((err) => req.log.warn({ err }, "Verzeichnis-Push"));
     return reply.code(204).send();
+  });
+  // Push from the directory: the user asked (signed, at the directory) to delete their account on this server. The push carries
+  // only the key; the server confirms with its own token (the directory answers 200 only for a pending request of this host),
+  // so a stranger can at most trigger a check. Handled synchronously: the directory reports `delivered` to the user.
+  let leaveHandler: ((publicKey: string) => Promise<DeleteUserResult>) | null = null;
+  app.post("/api/directory/leave", async (req, reply) => {
+    const body = DirectoryLeaveRequest.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    if (!leaveHandler) return reply.code(404).send({ error: "no_directory" });
+    const r = await leaveHandler(body.data.publicKey);
+    if (r === "deleted" || r === "not_found") return reply.code(204).send();
+    return reply.code(r === "unavailable" ? 502 : 409).send({ error: r });
   });
   app.get("/api/health", async () => ({
     ok: true,
@@ -187,7 +200,10 @@ async function main() {
   app.log.info({ proxyMode: config.PROXY_MODE, domain: config.PUBLIC_DOMAIN }, "app-server up");
   if (directory.enabled) {
     // Register, then reconcile all users' names every 5 minutes (changes on the account page arrive without a reload this way).
+    // Account deletion requested through the directory: founder check, confirm there (token), then delete locally.
+    leaveHandler = (publicKey) => deleteUserAccount(app, db, hub, presence, publicKey, () => directory!.confirmLeave(publicKey));
     const sync = async () => {
+      for (const key of await directory!.pendingLeaves()) await leaveHandler!(key);
       const changed = await directory!.syncAll((u) => presence.rename(u.userId, { displayName: u.displayName, publicKey: u.publicKey, handle: u.handle }));
       if (changed) await broadcastStructure(db, hub, ["members"]);
     };

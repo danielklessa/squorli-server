@@ -99,7 +99,7 @@ export const BackupBlob = z.object({ handle: Handle, publicKey: PublicKey, ciphe
 
 // ---- M6c: signed account actions (authenticator, recovery codes, account status). Same pattern as registration
 // and backup: challenge + signature over host, nonce and payload (for actions with a code, the code is the payload).
-export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends"]);
+export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends", "server-leave"]);
 export type DirectoryAction = z.infer<typeof DirectoryAction>;
 export function directoryActionMessage(directoryHost: string, action: DirectoryAction, nonce: string, payload = ""): string {
   return `community-directory-${action}\n${directoryHost}\n${nonce}\n${payload}`;
@@ -119,7 +119,25 @@ export const AccountServer = z.object({
   host: ServerHost, name: z.string().nullable(), displayName: DisplayName.nullable(), lastSeenAt: Iso, verified: z.boolean().default(false),
   /** The server's icon at the directory (M6d): time it was last taken over, null = none. URL: directoryServerIconUrl(). */
   iconUpdatedAt: Iso.nullable().default(null),
+  /** Account deletion on that server requested (server-leave) but not yet confirmed by the server; null = none pending. */
+  leaveRequestedAt: Iso.nullable().default(null),
 });
+
+// ---- Delete the account on one chat server (server-leave): the user signs the action with the server's host as the payload
+// (from the account page or from the chat client), the directory marks the entry and pushes
+// POST <proofUrl base>/api/directory/leave {publicKey} to that server. The server confirms with its bearer token via
+// POST /api/servers/leave/confirm (the directory answers 200 only for a pending request of exactly that host and removes the entry),
+// then deletes the user locally. A stranger posting to the server's endpoint can therefore only trigger a check.
+// Servers that missed the push pick pending requests up with GET /api/servers/leaves during their periodic reconciliation.
+export const ServerLeaveRequest = SignedActionRequest.extend({ server: ServerHost });
+/** `delivered` = the server confirmed and deleted the account during the request; false = pending (server unreachable) or, for an unregistered server, only the list entry was removed. */
+export const ServerLeaveResponse = z.object({ ok: z.literal(true), server: ServerHost, delivered: z.boolean(), registered: z.boolean() });
+export const DirectoryLeaveRequest = z.object({ publicKey: PublicKey });
+export const ServerLeaveConfirmRequest = z.object({ publicKey: PublicKey });
+export const ServerLeavesResponse = z.object({ publicKeys: z.array(PublicKey) });
+export type ServerLeaveRequest = z.infer<typeof ServerLeaveRequest>;
+export type ServerLeaveResponse = z.infer<typeof ServerLeaveResponse>;
+export type ServerLeavesResponse = z.infer<typeof ServerLeavesResponse>;
 
 // ---- Server registration: a chat server proves its key (signature over host + nonce) and control over
 // its host (the directory reads `proofUrl`, the server's /api/health, and compares `serverKey`). After that it may use the
