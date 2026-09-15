@@ -138,6 +138,8 @@ export class VoiceClient {
   private mic: MicPipeline | null = null;
   private publication: LocalTrackPublication | null = null;
   private readonly audioHost: HTMLElement;
+  private readonly remoteAudio = new Map<RemoteTrack, { element: HTMLMediaElement; identity: string }>();
+  private readonly videoAudioHosts = new Map<string, HTMLElement>();
   private readonly listeners = new Set<(s: VoiceState) => void>();
   state: VoiceState = {
     status: "disconnected", channelId: null, participants: [], micMuted: false, deafened: false, gateOpen: false, level: 0,
@@ -257,7 +259,7 @@ export class VoiceClient {
       .on(RoomEvent.ConnectionQualityChanged, () => this.refreshParticipants())
       .on(RoomEvent.ParticipantAttributesChanged, () => this.refreshParticipants())
       .on(RoomEvent.TrackSubscribed, (track, _pub, p) => { this.attachRemote(track, p.identity); if (track.kind === Track.Kind.Video) this.log(`video von ${p.identity.slice(0, 8)}: ${track.source}`); this.refreshTiles(); })
-      .on(RoomEvent.TrackUnsubscribed, (track, _pub, p) => { if (track.kind === Track.Kind.Audio) { track.detach().forEach((el) => el.remove()); this.dropMeter(p.identity); } this.refreshTiles(); })
+      .on(RoomEvent.TrackUnsubscribed, (track, _pub, p) => { if (track.kind === Track.Kind.Audio) { track.detach().forEach((el) => el.remove()); this.remoteAudio.delete(track); this.dropMeter(p.identity); } this.refreshTiles(); })
       .on(RoomEvent.LocalTrackPublished, (pub) => { this.log(`sende ${pub.source}`); this.refreshTiles(); })
       .on(RoomEvent.LocalTrackUnpublished, (pub) => {
         this.log(`beendet ${pub.source}`);
@@ -318,6 +320,9 @@ export class VoiceClient {
       room.removeAllListeners();
       await room.disconnect().catch(() => {});
     }
+    for (const { element } of this.remoteAudio.values()) element.remove();
+    this.remoteAudio.clear();
+    this.videoAudioHosts.clear();
     this.audioHost.replaceChildren();
     this.micMutedByUser = false;
     this.patch({ status: "disconnected", channelId: null, participants: [], gateOpen: false, level: 0, micMuted: false, deafened: false, inputDeviceId: null, cameraOn: false, screenOn: false, screenAudio: null, tiles: [] });
@@ -437,8 +442,26 @@ export class VoiceClient {
 
   /** Volume of a participant's screen audio (0..1); adjustable separately from the microphone. */
   setScreenAudioVolume(identity: string, volume: number): void {
-    const tile = this.state.tiles.find((t) => t.identity === identity && t.source === "screen");
-    tile?.audio?.setVolume(volume);
+    this.setVideoAudioVolume(`${identity}:screen`, volume);
+  }
+
+  private videoAudioTrack(tileId: string): RemoteAudioTrack | undefined {
+    for (const [track, { identity }] of this.remoteAudio) {
+      const kind = track.source === Track.Source.ScreenShareAudio ? "screen" : "camera";
+      // remoteAudio is populated only for audio tracks by attachRemote().
+      if (`${identity}:${kind}` === tileId) return track as RemoteAudioTrack;
+    }
+    return undefined;
+  }
+
+  getVideoAudioVolume(tileId: string): number | null {
+    return this.videoAudioTrack(tileId)?.getVolume() ?? null;
+  }
+
+  setVideoAudioVolume(tileId: string, volume: number): void {
+    if (!Number.isFinite(volume)) return;
+    this.videoAudioTrack(tileId)?.setVolume(Math.max(0, Math.min(1, volume)));
+    this.patch({});
   }
 
   private refreshTiles() {
@@ -465,7 +488,8 @@ export class VoiceClient {
   /** Lift the browser's autoplay block; must be called from within a user action. */
   async startAudio(): Promise<void> {
     await this.room?.startAudio();
-    this.patch({ canPlayback: this.room?.canPlaybackAudio ?? true });
+    const playback = await Promise.allSettled([...this.remoteAudio.values()].map(({ element }) => element.play()));
+    this.patch({ canPlayback: (this.room?.canPlaybackAudio ?? true) && playback.every((result) => result.status === "fulfilled") });
   }
 
   /**
@@ -484,7 +508,7 @@ export class VoiceClient {
    */
   async setDeafened(on: boolean): Promise<void> {
     this.patch({ deafened: on });
-    for (const el of this.audioHost.querySelectorAll("audio")) el.muted = on;
+    for (const { element } of this.remoteAudio.values()) element.muted = on;
     await this.applyMic();
     await this.room?.localParticipant.setAttributes({ deafened: on ? "1" : "" }).catch(() => {});
     this.log(on ? "ton aus (mikrofon mit stumm)" : `ton an (mikrofon ${this.micMutedByUser ? "bleibt stumm" : "wieder an"})`);
@@ -595,11 +619,34 @@ export class VoiceClient {
     return { path, sender, receivers, videoSend, videoRecv };
   }
 
+  /** Move the existing audio element, preserving LiveKit volume/sink management and avoiding duplicate playback. */
+  setVideoAudioHost(tileId: string, host: HTMLElement): () => void {
+    this.videoAudioHosts.set(tileId, host);
+    this.routeVideoAudio();
+    return () => {
+      if (this.videoAudioHosts.get(tileId) !== host) return;
+      this.videoAudioHosts.delete(tileId);
+      this.routeVideoAudio();
+    };
+  }
+
+  private routeVideoAudio(): void {
+    for (const [track, { element, identity }] of this.remoteAudio) {
+      const kind = track.source === Track.Source.ScreenShareAudio ? "screen" : "camera";
+      const host = this.videoAudioHosts.get(identity + ":" + kind) ?? this.audioHost;
+      if (element.parentElement === host) continue;
+      host.appendChild(element);
+      element.muted = this.state.deafened;
+      void element.play().catch(() => this.patch({ canPlayback: false }));
+    }
+  }
+
   private attachRemote(track: RemoteTrack, identity: string) {
     if (track.kind !== Track.Kind.Audio) return;
     const el = track.attach();
     el.muted = this.state.deafened; // deafening also applies to tracks that arrive later
-    this.audioHost.appendChild(el);
+    this.remoteAudio.set(track, { element: el, identity });
+    this.routeVideoAudio();
     if (track.source === Track.Source.ScreenShareAudio) void this.applyScreenSink();
     if (track.source === Track.Source.Microphone) this.addMeter(identity, track.mediaStreamTrack);
     this.patch({ canPlayback: this.room?.canPlaybackAudio ?? true });

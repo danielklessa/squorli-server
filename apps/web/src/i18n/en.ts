@@ -38,6 +38,7 @@ export const en: Messages = {
   "app.stoppedNotice": "{by} ended your {what}.",
   "app.asName": "as {name}",
   "app.noTextChannel": "There is no text channel.",
+  "app.navigation": "Navigation",
   "app.debug": "Debug",
   "status.connecting": "Connecting to {host} …",
   "status.banned": "You have been banned from this server",
@@ -257,6 +258,7 @@ export const en: Messages = {
   "home.pickFriend": "Pick a friend on the left to write. Direct messages are end-to-end encrypted: the directory only sees that you write, not what.",
 
   // ---- Member list
+  "members.roles": "Roles",
   "members.owners": "Owners",
   "members.online": "Online",
   "members.offline": "Offline",
@@ -344,7 +346,7 @@ export const en: Messages = {
   "dock.unblockMicHint": "The browser paused the audio context; a click releases the microphone and the speaker indicator",
   "dock.unblockMic": "Enable microphone",
   "dock.stageHint": "Show tiles and screen shares",
-  "dock.stage": "View",
+  "dock.stage": "Channel view",
   "dock.micLevel": "Microphone level",
   "voice.unmuteAll": "Sound and microphone back on",
   "voice.unmute": "Microphone back on",
@@ -391,6 +393,18 @@ export const en: Messages = {
   "settings.noBlur": "This browser does not support background effects.",
 
   // ---- Stage
+  "stage.poppedOut": "Showing in a pop-out",
+  "stage.restoreVideo": "Show here",
+  "stage.popupVideoHint": "Video. Double-click or press F for fullscreen.",
+  "stage.popupVolume": "Volume",
+  "stage.popout": "Open in a separate window",
+  "stage.fullscreen": "Fullscreen",
+  "stage.exitFullscreen": "Exit fullscreen",
+  "stage.fullscreenUnavailable": "This browser does not support fullscreen here.",
+  "stage.fullscreenFailed": "Could not change fullscreen mode. Please try again.",
+  "stage.popupBlocked": "The window was blocked. Allow pop-ups for this site and try again.",
+  "stage.popupFailed": "Could not open the video window.",
+  "stage.screenVideo": "Screen share",
   "stage.participants": "{n} participants",
   "stage.stereo": "stereo",
   "stage.mono": "mono",

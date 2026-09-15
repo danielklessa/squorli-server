@@ -4,6 +4,32 @@ This document is for people who work on the code. Operators who only want to run
 
 **Status: M3 (video and screen share) implemented in the browser, acceptance pending.** Multiple text and voice channels in categories, roles with permissions and hierarchy, invite links, kick and ban, text chat with history, editing, deleting and attachments, admin interface, member list with online status. Voice with voice activation/push-to-talk and device selection; camera with simulcast, stage with tile and speaker view, screen share with audio (Chromium) as a separate audio track, bandwidth in the debug view. New members are "Gast" (guest: view and voice only), admins grant "Mitglied" (member). Friends and end-to-end encrypted direct messages between friends are implemented via the optional Directory (M7). Not yet: desktop client, reactions, audit log.
 
+## Client UI and avatar integration
+
+The client maps the canonical version 2 brand tokens in `apps/web/src/styles.css`. Reuse `Avatar.tsx` for user identity rather than creating new initials or image implementations. Its `name`, optional `src`, `size` and optional `online` props cover messages, lists, profiles and voice tiles. Names appear beside the decorative image; presence has a translated accessible label. Failed images fall back to initials. The profile preview follows the edited display name.
+
+Avatar uploads and storage are future work: there is no avatar field in the current server or Directory contract. When implementing them, define validated protocol fields and storage first, resolve server-relative URLs through the appropriate `ServerApi`, and pass the resulting URL to the component. Do not load arbitrary third-party avatar services by default.
+
+Responsive review should cover desktop with/without Directory, mobile navigation expanded/collapsed, long names, grouped messages, profile dialogs, and voice tiles. Browser review of the 15 September 2026 refresh remains pending (no browser connected in the editing environment). Typecheck, 50 existing tests and production build passed.
+
+The voice dock presents connection/channel identity, a channel-view shortcut, unblock notices and microphone feedback separately. Muted microphones display a muted label and an empty meter; mute, deafen and camera controls expose `aria-pressed`. Mobile navigation scrolls so all voice controls remain reachable. The underlying voice state and media operations are unchanged.
+
+## Video windows and fullscreen
+
+Each camera/screen tile offers a pop-out and fullscreen action. `useVideoWindows` is owned by App so switching to text chat does not close the window. A pop-out has no frame or permanent app header/footer. Fullscreen and per-feed volume controls float over the video on hover or keyboard focus, and stay visible on touch devices. Double-click or F/Enter toggles fullscreen. The main tile shows a placeholder and a restore button instead of a second video. Closing the pop-out also restores the main view.
+
+The window opens synchronously from a user click and receives a React portal with the existing styles. `VoiceClient.setVideoAudioHost` moves the existing audio element into the pop-out rather than creating another playback instance. A camera pop-out receives that participant's microphone; a screen pop-out receives screen audio. Local video never plays the local microphone back. The same LiveKit track/element retains volume and sink settings; deafen updates all registered elements across documents. New audio subscriptions use the current destination. Cleanup returns audio to the main host; disconnect clears all destinations. If playback is blocked, a temporary unblock button appears on the video.
+
+Windows close when the video track disappears or the main page closes. Reopening an existing track focuses its window. Browsers may open a tab instead of a window, retain native window chrome or lack fullscreen support. Reference: [Fullscreen API](https://developer.mozilla.org/en-US/docs/Web/API/Element/requestFullscreen).
+
+Typecheck and 65 unit tests pass, including separate camera/screen routing, restoring the same audio element, deafen across windows and stale cleanup. Browser acceptance remains pending: two remote camera/screen streams, grid/focus/text switching, resize/fullscreen, autoplay blocking, audio-device changes, track replacement/end, and closing either window. No browser is connected in the editing environment.
+
+## Member context menus
+
+`ContextMenu.tsx` renders member actions through a portal into `document.body`, outside the member list scroll area. Right-click opens at the pointer; click or keyboard activation anchors to the member button. Roles and move destinations use `ContextSubmenu` with hover, click and ArrowRight support, viewport-edge flipping, and ArrowLeft/Escape to return. Up/Down and Home/End navigate menu items. Outside pointer/focus, outer scrolling and resize dismiss the menu. Destructive actions keep the existing confirmation dialogs and API permission checks.
+
+Placement is covered by six unit tests in `menuPosition.test.ts`. Interactive browser acceptance remains pending because the editing environment has no connected browser.
+
 ## Structure
 
 ```

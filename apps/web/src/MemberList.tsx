@@ -1,5 +1,7 @@
+import { Avatar } from "./Avatar";
 import { Permission, hasPermission, type Channel, type Friend, type Member, type Role, type VoiceMember } from "@squorli/protocol";
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
+import { ContextMenu, ContextSubmenu, type MenuAnchor } from "./ContextMenu";
 import type { ServerApi } from "./api";
 import { askConfirm, askInput } from "./dialogs";
 import { Icon } from "./Icon";
@@ -17,7 +19,12 @@ type Props = {
 
 /** Right column: owners at the very top, then members grouped by highest role, online first. Context actions depending on permissions. */
 export function MemberList({ api, members, roles, myUserId, myPermissions, ownerId, voice, channels, friends }: Props) {
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<({ userId: string } & MenuAnchor) | null>(null);
+  const openMenu = (event: MouseEvent<HTMLButtonElement>, userId: string) => {
+    event.preventDefault();
+    const box = event.currentTarget.getBoundingClientRect();
+    setOpen({ userId, trigger: event.currentTarget, x: event.type === "contextmenu" && event.clientX ? event.clientX : box.left, y: event.type === "contextmenu" && event.clientY ? event.clientY : box.bottom });
+  };
   const [err, setErr] = useState<string | null>(null);
   const roleById = new Map(roles.map((r) => [r.id, r]));
   const topRole = (m: Member) => m.roleIds.map((id) => roleById.get(id)).filter((r): r is Role => !!r).sort((a, b) => b.position - a.position)[0];
@@ -42,7 +49,8 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
 
   async function run(fn: () => Promise<unknown>) {
     setErr(null);
-    try { await fn(); setOpen(null); } catch (e) { setErr(String(e)); }
+    setOpen(null);
+    try { await fn(); } catch (e) { setErr(String(e)); }
   }
 
   return (
@@ -56,46 +64,46 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
               const r = topRole(m);
               const isMe = m.userId === myUserId;
               return (
-                <li key={m.userId} className={`member ${m.online ? "" : "offline"}`} onContextMenu={(e) => { e.preventDefault(); setOpen(open === m.userId ? null : m.userId); }}>
-                  <button className="member-btn" onClick={() => setOpen(open === m.userId ? null : m.userId)}>
-                    <span className={`presence ${m.online ? "on" : ""}`} />
-                    <span style={r?.color ? { color: r.color } : undefined}>{m.displayName}</span>
+                <li key={m.userId} className={`member ${m.online ? "" : "offline"}`}>
+                  <button className="member-btn" aria-haspopup="menu" aria-expanded={open?.userId === m.userId} onContextMenu={(e) => openMenu(e, m.userId)} onClick={(e) => openMenu(e, m.userId)}>
+                    <Avatar name={m.displayName} online={m.online} />
+                    <span className="member-identity"><span style={r?.color ? { color: r.color } : undefined}>{m.displayName}</span>{m.handle && <small>@{m.handle}</small>}</span>
                     {m.isOwner && <Icon name="crown" className="owner" title={t("members.owner")} />}
                     {m.streamBlocked && <Icon name="video-off" className="muted" title={t("members.streamBlocked")} />}
                     {isMe && <span className="muted"> {t("members.you")}</span>}
                   </button>
-                  {open === m.userId && (
-                    <div className="member-menu">
+                  {open?.userId === m.userId && (
+                    <ContextMenu anchor={open} label={m.displayName} onClose={() => setOpen(null)}>
+                      <div className="context-identity" role="presentation"><Avatar name={m.displayName} online={m.online} /><strong>{m.displayName}</strong></div>
                       <div className="muted small">{m.handle && <><strong>@{m.handle}</strong> · </>}{m.publicKey.slice(0, 16)}…</div>
                       {friends && !isMe && (() => {
                         // M7: add friend / write a message. Without a handle the member has no directory account, so friendship is not possible.
                         const st = friends.stateOf(m.publicKey);
                         return (
                           <div className="row friend-row">
-                            {st === "accepted" && <button className="secondary small" onClick={() => { setOpen(null); friends.onMessage(m.publicKey); }}><Icon name="message-circle" /> {t("members.writeMessage")}</button>}
+                            {st === "accepted" && <button role="menuitem" className="secondary small" onClick={() => { setOpen(null); friends.onMessage(m.publicKey); }}><Icon name="message-circle" /> {t("members.writeMessage")}</button>}
                             {st === "pending_out" && <span className="muted small">{t("members.requestSent")}</span>}
-                            {st === "pending_in" && <button className="secondary small" onClick={() => { setOpen(null); friends.onMessage(m.publicKey); }}>{t("members.wantsFriend")}</button>}
+                            {st === "pending_in" && <button role="menuitem" className="secondary small" onClick={() => { setOpen(null); friends.onMessage(m.publicKey); }}>{t("members.wantsFriend")}</button>}
                             {st === "blocked" && <span className="muted small">{t("members.blocked")}</span>}
                             {st === null && (m.handle
-                              ? <button className="secondary small" onClick={() => { setOpen(null); friends.onRequest(m.publicKey); }}><Icon name="user-plus" /> {t("home.addFriend")}</button>
+                              ? <button role="menuitem" className="secondary small" onClick={() => { setOpen(null); friends.onRequest(m.publicKey); }}><Icon name="user-plus" /> {t("home.addFriend")}</button>
                               : <span className="muted small" title={t("home.noAccountHint")}>{t("members.noDirectoryAccount")}</span>)}
                           </div>
                         );
                       })()}
-                      {canRoles && !isMe && (
-                        <div className="stack">
+                      {canRoles && !isMe && roles.some((role) => !role.isDefault) && (
+                        <ContextSubmenu label={t("members.roles")}>
                           {roles.filter((x) => !x.isDefault).map((x) => (
-                            <label key={x.id} className="check">
-                              <input type="checkbox" checked={m.roleIds.includes(x.id)}
-                                onChange={(e) => run(() => api.setMemberRoles(m.userId, e.target.checked ? [...m.roleIds, x.id] : m.roleIds.filter((id) => id !== x.id)))} />
+                            <button key={x.id} role="menuitemcheckbox" aria-checked={m.roleIds.includes(x.id)} onClick={() => run(() => api.setMemberRoles(m.userId, m.roleIds.includes(x.id) ? m.roleIds.filter((id) => id !== x.id) : [...m.roleIds, x.id]))}>
                               <span style={x.color ? { color: x.color } : undefined}>{x.name}</span>
-                            </label>
+                              {m.roleIds.includes(x.id) && <Icon name="check" />}
+                            </button>
                           ))}
-                        </div>
+                        </ContextSubmenu>
                       )}
                       {iAmOwner && !isMe && (!m.isOwner || m.userId !== ownerId) && (
                         <div className="row">
-                          <button className="secondary small" onClick={() => run(async () => {
+                          <button role="menuitem" className="secondary small" onClick={() => run(async () => {
                             const ok = await askConfirm(m.isOwner
                               ? { title: t("members.revokeOwnerTitle", { name: m.displayName }), text: t("members.revokeOwnerText"), confirmLabel: t("members.revoke"), danger: true }
                               : { title: t("members.makeOwnerTitle", { name: m.displayName }), text: t("members.makeOwnerText"), confirmLabel: t("members.appoint") });
@@ -110,15 +118,14 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
                             <span className="muted small">{t("members.voiceChannel")}: {inVoice ? channels.find((c) => c.id === inVoice)?.name ?? "?" : t("members.notConnected")}</span>
                             {inVoice && (
                               <>
-                                <select value="" onChange={(e) => { const to = e.target.value; if (to) void run(() => api.moveMember(m.userId, to === "__out" ? null : to)); }}>
-                                  <option value="">{t("members.moveTo")}</option>
-                                  {voiceChannels.filter((c) => c.id !== inVoice).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                  <option value="__out">{t("members.removeFromVoice")}</option>
-                                </select>
-                                <button className="secondary small" onClick={() => run(() => api.stopMemberStreams(m.userId, { camera: true, screen: true }))}>{t("members.stopStreams")}</button>
+                                <ContextSubmenu label={t("members.moveTo")}>
+                                  {voiceChannels.filter((c) => c.id !== inVoice).map((c) => <button role="menuitem" key={c.id} onClick={() => run(() => api.moveMember(m.userId, c.id))}><Icon name="volume-2" /> {c.name}</button>)}
+                                  <button role="menuitem" className="danger" onClick={() => run(() => api.moveMember(m.userId, null))}>{t("members.removeFromVoice")}</button>
+                                </ContextSubmenu>
+                                <button role="menuitem" className="secondary small" onClick={() => run(() => api.stopMemberStreams(m.userId, { camera: true, screen: true }))}>{t("members.stopStreams")}</button>
                               </>
                             )}
-                            <button className={`${m.streamBlocked ? "" : "danger"} small`} onClick={() => run(() => api.setStreamBlocked(m.userId, !m.streamBlocked))}>
+                            <button role="menuitem" className={`${m.streamBlocked ? "" : "danger"} small`} onClick={() => run(() => api.setStreamBlocked(m.userId, !m.streamBlocked))}>
                               {m.streamBlocked ? t("members.allowStreams") : t("members.blockStreams")}
                             </button>
                           </div>
@@ -126,11 +133,11 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
                       })()}
                       {!isMe && !m.isOwner && (canKick || canBan) && (
                         <div className="row">
-                          {canKick && <button className="secondary small" onClick={() => run(async () => { if (await askConfirm({ title: t("members.kickTitle", { name: m.displayName }), text: t("members.kickText"), confirmLabel: t("members.kick"), danger: true })) await api.kickMember(m.userId); })}>{t("members.kick")}</button>}
-                          {canBan && <button className="danger small" onClick={() => run(async () => { const reason = await askInput({ title: t("members.banTitle", { name: m.displayName }), text: t("members.banText"), label: t("members.reason"), placeholder: t("members.reasonPlaceholder"), optional: true, confirmLabel: t("members.ban"), danger: true }); if (reason !== null) await api.banMember(m.userId, reason || null); })}>{t("members.ban")}</button>}
+                          {canKick && <button role="menuitem" className="secondary small" onClick={() => run(async () => { if (await askConfirm({ title: t("members.kickTitle", { name: m.displayName }), text: t("members.kickText"), confirmLabel: t("members.kick"), danger: true })) await api.kickMember(m.userId); })}>{t("members.kick")}</button>}
+                          {canBan && <button role="menuitem" className="danger small" onClick={() => run(async () => { const reason = await askInput({ title: t("members.banTitle", { name: m.displayName }), text: t("members.banText"), label: t("members.reason"), placeholder: t("members.reasonPlaceholder"), optional: true, confirmLabel: t("members.ban"), danger: true }); if (reason !== null) await api.banMember(m.userId, reason || null); })}>{t("members.ban")}</button>}
                         </div>
                       )}
-                    </div>
+                    </ContextMenu>
                   )}
                 </li>
               );

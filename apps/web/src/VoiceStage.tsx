@@ -1,3 +1,5 @@
+import { FullscreenButton, TrackVideo } from "./VideoWindows";
+import { Avatar } from "./Avatar";
 import { Permission, displayNameOf, hasPermission, type Channel, type Member } from "@squorli/protocol";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { VoiceClient, explainScreenAudio, isChromium, type VideoTile, type VoiceParticipant, type VoiceState } from "./voice/voiceClient";
@@ -14,6 +16,9 @@ type Props = {
   onToggleCamera: () => Promise<void>;
   onToggleBlur: () => Promise<void>;
   onLeave: () => Promise<void>;
+  onPopout: (tile: VideoTile) => void;
+  poppedIds: Set<string>;
+  onRestore: (id: string) => void;
 };
 
 type Layout = "grid" | "focus";
@@ -26,7 +31,7 @@ type Item = { key: string; participant: VoiceParticipant; tile: VideoTile | null
  * "Speaker" follows the active speaker or the newest screen share without pinning.
  * Receive quality follows the tile size (adaptiveStream in the voice core); here the <video> only has to have the right size.
  */
-export function VoiceStage({ client, voice, channel, members, myPermissions, onToggleCamera, onToggleBlur, onLeave }: Props) {
+export function VoiceStage({ client, voice, channel, members, myPermissions, onToggleCamera, onToggleBlur, onLeave, onPopout, poppedIds, onRestore }: Props) {
   // Names from the server's member list (arrives via WS immediately on every rename), not from the LiveKit token,
   // which is only created on joining. Unknown identities (bots, "external") keep the LiveKit name.
   const participants = voice.participants.map((p) => {
@@ -92,15 +97,15 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, onT
       ) : layout === "grid" || !focus ? (
         <div className="stage-grid" ref={grid.ref}>
           <div className="stage-grid-inner" style={{ gridTemplateColumns: `repeat(${grid.cols}, ${grid.tileWidth}px)` }}>
-            {items.map((i) => <Tile key={i.key} item={i} client={client} pinned={false} onClick={() => focusOn(i.key)} />)}
+            {items.map((i) => <Tile key={i.key} item={i} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} pinned={false} onClick={() => focusOn(i.key)} />)}
           </div>
         </div>
       ) : (
         <div className="stage-focus">
-          <div className="stage-main"><Tile item={focus} client={client} big pinned={pinned === focus.key} onClick={unfocus} /></div>
+          <div className="stage-main"><Tile item={focus} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} big pinned={pinned === focus.key} onClick={unfocus} /></div>
           {rest.length > 0 && (
             <div className="stage-strip">
-              {rest.map((i) => <Tile key={i.key} item={i} client={client} pinned={false} onClick={() => focusOn(i.key)} />)}
+              {rest.map((i) => <Tile key={i.key} item={i} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} pinned={false} onClick={() => focusOn(i.key)} />)}
             </div>
           )}
         </div>
@@ -154,13 +159,22 @@ function useFittedGrid(n: number) {
   return { ref, ...best };
 }
 
-function Tile({ item, client, big, pinned, onClick }: { item: Item; client: VoiceClient; big?: boolean; pinned: boolean; onClick: () => void }) {
+function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onRestore }: { item: Item; client: VoiceClient; big?: boolean; pinned: boolean; onClick: () => void; onPopout: (tile: VideoTile) => void; poppedIds: Set<string>; onRestore: (id: string) => void }) {
   const { participant: p, tile } = item;
-  const [volume, setVolume] = useState(1);
-  const cls = ["tile", item.kind, p.speaking && item.kind === "camera" ? "speaking" : "", big ? "big" : "", tile ? "" : "avatar"].join(" ");
+  const ref = useRef<HTMLDivElement>(null);
+  const target = useCallback(() => ref.current, []);
+  const [error, setError] = useState("");
+  const volume = tile ? client.getVideoAudioVolume(tile.id) ?? 1 : 1;
+  const popped = !!tile && poppedIds.has(tile.id);
+  const cls = ["tile", item.kind, p.speaking && item.kind === "camera" ? "speaking" : "", big ? "big" : "", tile && !popped ? "" : "avatar"].join(" ");
   return (
-    <div className={cls} onClick={onClick} title={big ? t("stage.backToGrid") : t("stage.enlarge")}>
-      {tile ? <Video tile={tile} /> : <div className="avatar-circle">{initials(p.name)}</div>}
+    <div ref={ref} className={cls} onClick={() => { if (!ref.current?.ownerDocument.fullscreenElement) onClick(); }} title={big ? t("stage.backToGrid") : t("stage.enlarge")}>
+      {popped ? <div className="tile-popped"><Icon name="external-link" /><span>{t("stage.poppedOut")}</span><button className="secondary small" onClick={(event) => { event.stopPropagation(); onRestore(tile!.id); }}>{t("stage.restoreVideo")}</button></div> : tile ? <TrackVideo tile={tile} /> : <Avatar name={p.name} size="large" />}
+      {tile && !popped && <div className="tile-window-actions" onClick={(event) => event.stopPropagation()}>
+        <button className="icon" title={t("stage.popout")} aria-label={t("stage.popout")} onClick={() => { setError(""); try { onPopout(tile); } catch (error) { setError(error instanceof Error ? error.message : t("stage.popupFailed")); } }}><Icon name="external-link" /></button>
+        <FullscreenButton target={target} onError={setError} />
+      </div>}
+      {error && <div className="tile-window-error" role="alert" onClick={(event) => event.stopPropagation()}>{error}<button className="icon" title={t("common.dismiss")} onClick={() => setError("")}><Icon name="x" /></button></div>}
       <div className="tile-label">
         <span>{item.kind === "screen" && <><Icon name="monitor" /> </>}{p.isLocal ? `${p.name} ${t("members.you")}` : p.name}</span>
         {item.kind === "camera" && p.micMuted && <> <Icon name="mic-off" title={t("voice.micMuted")} /></>}
@@ -170,22 +184,8 @@ function Tile({ item, client, big, pinned, onClick }: { item: Item; client: Voic
       </div>
       {item.kind === "screen" && tile?.audio && (
         <input className="tile-volume" type="range" min={0} max={1} step={0.05} value={volume} title={t("stage.screenVolume")}
-          onClick={(e) => e.stopPropagation()} onChange={(e) => { const v = Number(e.target.value); setVolume(v); client.setScreenAudioVolume(p.identity, v); }} />
+          onClick={(e) => e.stopPropagation()} onChange={(e) => { const v = Number(e.target.value); client.setScreenAudioVolume(p.identity, v); }} />
       )}
     </div>
   );
 }
-
-/** Attaches the LiveKit track to a <video>; adaptiveStream measures its size to pick the simulcast layer. */
-function Video({ tile }: { tile: VideoTile }) {
-  const ref = useRef<HTMLVideoElement>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    tile.track.attach(el);
-    return () => { tile.track.detach(el); };
-  }, [tile.track]);
-  return <video ref={ref} className={tile.isLocal && tile.source === "camera" ? "mirror" : ""} autoPlay playsInline muted />;
-}
-
-const initials = (name: string) => name.split(/\s+/).map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase() || "?";

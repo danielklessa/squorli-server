@@ -1,3 +1,4 @@
+import { Avatar } from "./Avatar";
 import type { DirectoryAccount, Me, SessionInfo } from "@squorli/protocol";
 import { useCallback, useEffect, useState } from "react";
 import type { ServerApi } from "./api";
@@ -96,6 +97,7 @@ export function ProfileDialog({ api, me, directoryUrl, directoryAccount, serverD
 
             {tab === "profile" && (
               <>
+                <div className="profile-preview"><Avatar name={name || me.displayName || "?"} size="large" /><div><strong>{name || me.displayName}</strong>{me.handle && <div className="muted small">@{me.handle}</div>}</div></div>
                 <h3>{t("profile.nameHere")}</h3>
                 <input value={name} maxLength={32} autoFocus onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void save(); }} />
                 <span className="muted small">{withDirectory ? t("profile.nameHereHintDir") : t("profile.nameHereHint")}</span>

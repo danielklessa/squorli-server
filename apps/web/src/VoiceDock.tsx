@@ -1,3 +1,4 @@
+import { Avatar } from "./Avatar";
 import type { Channel } from "@squorli/protocol";
 import { useEffect, useRef, useState } from "react";
 import { loadVoiceSettings, saveVoiceSettings, type VoiceSettings } from "./voice/settings";
@@ -95,33 +96,41 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, onL
   return (
     <div className="dock">
       {joined && (
-        <div className="dock-voice">
+        <div className={`dock-voice ${voice.status === "connected" ? "connected" : "connecting"}`}>
           <div className="dock-status">
-            <span className={voice.status === "connected" ? "ok" : "warn"}>{voice.status === "connected" ? t("dock.connected") : tOr(`conn.${voice.status}`, voice.status)}</span>
-            <span className="muted"> · <Icon name="volume-2" /> {serverName ? `${serverName} / ` : ""}{channel?.name ?? "…"}</span>
+            <span className="dock-connection-icon"><Icon name={voice.status === "connected" ? "volume-2" : "phone"} /></span>
+            <div className="dock-connection-copy">
+              <strong className="dock-connection-label" role="status">{voice.status === "connected" ? t("dock.connected") : tOr(`conn.${voice.status}`, voice.status)}</strong>
+              <span className="dock-channel" title={serverName ? `${serverName} / ${channel?.name ?? "…"}` : channel?.name}>{channel?.name ?? "…"}</span>
+              {serverName && <span className="dock-server" title={serverName}>{serverName}</span>}
+            </div>
+          </div>
+          {onOpenStage && <button className="dock-stage" title={t("dock.stageHint")} onClick={onOpenStage}><Icon name="monitor" /><span>{t("dock.stage")}</span><Icon name="chevron-down" rotate={270} /></button>}
+          <div className="dock-notices">
             {!voice.canPlayback && <button className="small warn" title={t("dock.unblockAudioHint")} onClick={() => client.startAudio()}>{t("dock.unblockAudio")}</button>}
             {voice.status === "connected" && voice.audioContext !== "running" && voice.audioContext !== "none" && <button className="small warn" title={t("dock.unblockMicHint")} onClick={() => client.prepareAudio()}>{t("dock.unblockMic")}</button>}
-            {onOpenStage && <button className="small secondary" title={t("dock.stageHint")} onClick={onOpenStage}>{t("dock.stage")}</button>}
           </div>
           {voice.error && <p className="error small">{voice.error}</p>}
           {voice.notice && <p className="warn-box small">{voice.notice} <button className="icon" title={t("common.dismiss")} onClick={() => client.setNotice(null)}><Icon name="x" /></button></p>}
-          <div className="meter small-meter" title={t("dock.micLevel")}>
-            <div className="meter-fill" style={{ width: `${levelPct}%` }} />
-            {settings.mode === "vad" && <div className="meter-threshold" style={{ left: `${thresholdPct}%` }} />}
+          <div className={`dock-input ${voice.micMuted ? "is-muted" : ""}`}>
+            <span className="dock-input-label"><Icon name={voice.micMuted ? "mic-off" : "mic"} />{voice.micMuted ? t("voice.micMuted") : t("dock.micLevel")}</span>
+            <div className="meter small-meter" aria-hidden="true">
+              <div className="meter-fill" style={{ width: `${voice.micMuted ? 0 : levelPct}%` }} />
+              {settings.mode === "vad" && !voice.micMuted && <div className="meter-threshold" style={{ left: `${thresholdPct}%` }} />}
+            </div>
           </div>
           {/* quick actions of the voice connection: its own area above the name row */}
           <div className="dock-row dock-controls">
-            <button className={`icon ${voice.micMuted ? "danger" : ""}`} title={voice.micMuted ? (voice.deafened ? t("voice.unmuteAll") : t("voice.unmute")) : t("voice.mute")} onClick={() => client.setMuted(!voice.micMuted)}><Icon name={voice.micMuted ? "mic-off" : "mic"} /></button>
-            <button className={`icon ${voice.deafened ? "danger" : ""}`} title={voice.deafened ? t("voice.undeafen") : t("voice.deafen")} onClick={() => client.setDeafened(!voice.deafened)}><Icon name={voice.deafened ? "headphone-off" : "headphones"} /></button>
-            {canStream && <button className={`icon ${voice.cameraOn ? "on" : ""}`} title={voice.cameraOn ? t("voice.cameraOff") : t("voice.cameraOnBtn")} onClick={() => { void onToggleCamera(); }}><Icon name={voice.cameraOn ? "video" : "video-off"} /></button>}
-            <span className="spacer" />
-            <button className="icon hangup" title={t("voice.leave")} onClick={() => onLeave()}><Icon name="phone" rotate={135} /></button>
+            <button aria-label={t("voice.mute")} aria-pressed={voice.micMuted} className={`icon ${voice.micMuted ? "danger" : ""}`} title={voice.micMuted ? (voice.deafened ? t("voice.unmuteAll") : t("voice.unmute")) : t("voice.mute")} onClick={() => client.setMuted(!voice.micMuted)}><Icon name={voice.micMuted ? "mic-off" : "mic"} /></button>
+            <button aria-label={t("voice.deafen")} aria-pressed={voice.deafened} className={`icon ${voice.deafened ? "danger" : ""}`} title={voice.deafened ? t("voice.undeafen") : t("voice.deafen")} onClick={() => client.setDeafened(!voice.deafened)}><Icon name={voice.deafened ? "headphone-off" : "headphones"} /></button>
+            {canStream && <button aria-label={t("voice.cameraOnBtn")} aria-pressed={voice.cameraOn} className={`icon ${voice.cameraOn ? "on" : ""}`} title={voice.cameraOn ? t("voice.cameraOff") : t("voice.cameraOnBtn")} onClick={() => { void onToggleCamera(); }}><Icon name={voice.cameraOn ? "video" : "video-off"} /></button>}
+            <button aria-label={t("voice.leave")} className="icon hangup" title={t("voice.leave")} onClick={() => onLeave()}><Icon name="phone" rotate={135} /></button>
           </div>
         </div>
       )}
       {!joined && voice.error && <p className="error small">{voice.error}</p>}
       <div className="dock-row">
-        <button className="dock-name" onClick={onOpenProfile} title={t("dock.changeName")}>{displayName}</button>
+        <button className="dock-name" onClick={onOpenProfile} title={t("dock.changeName")}><Avatar name={displayName} /><span className="dock-identity"><strong>{displayName}</strong><small>{t("profile.tab.profile")}</small></span></button>
         <button className="icon" title={t("dock.settings")} onClick={() => setShowSettings(true)}><Icon name="settings" /></button>
       </div>
 

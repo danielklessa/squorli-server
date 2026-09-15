@@ -1,3 +1,4 @@
+import { Avatar } from "./Avatar";
 import type { Friend, FriendSearchResult, Member } from "@squorli/protocol";
 import { useEffect, useMemo, useState } from "react";
 import { DmView } from "./DmView";
@@ -83,7 +84,7 @@ export function HomeSidebar({ state, store, members }: { state: State; store: St
             return (
               <li key={f.publicKey} className={`channel friend ${state.currentPeer === f.publicKey ? "active" : ""} ${unread ? "unread" : ""} ${f.online ? "" : "offline"}`}>
                 <button className="channel-btn" onClick={() => store.selectPeer(f.publicKey)} title={`@${f.handle}`}>
-                  <span className={`presence ${f.online ? "on" : ""}`} />
+                  <Avatar name={friendName(f)} online={f.online} />
                   <span className="channel-name">{friendName(f)}</span>
                   {unread > 0 && <span className="count">{unread}</span>}
                 </button>

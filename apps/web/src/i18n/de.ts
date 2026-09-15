@@ -39,6 +39,7 @@ export const de = {
   "app.stoppedNotice": "{by} hat deine {what} beendet.",
   "app.asName": "als {name}",
   "app.noTextChannel": "Kein Textkanal vorhanden.",
+  "app.navigation": "Navigation",
   "app.debug": "Debug",
   "status.connecting": "Verbinde mit {host} …",
   "status.banned": "Du wurdest auf diesem Server gebannt",
@@ -258,6 +259,7 @@ export const de = {
   "home.pickFriend": "Wähle links einen Freund, um zu schreiben. Direktnachrichten sind Ende-zu-Ende verschlüsselt: das Verzeichnis sieht nur, dass ihr schreibt, nicht was.",
 
   // ---- Member list
+  "members.roles": "Rollen",
   "members.owners": "Eigentümer",
   "members.online": "Online",
   "members.offline": "Offline",
@@ -345,7 +347,7 @@ export const de = {
   "dock.unblockMicHint": "Der Browser hat den Audio-Kontext angehalten; Klick gibt Mikrofon und Sprecheranzeige frei",
   "dock.unblockMic": "Mikrofon freigeben",
   "dock.stageHint": "Kacheln und Bildschirmfreigaben anzeigen",
-  "dock.stage": "Ansicht",
+  "dock.stage": "Kanalansicht",
   "dock.micLevel": "Mikrofonpegel",
   "voice.unmuteAll": "Ton und Mikrofon wieder an",
   "voice.unmute": "Mikrofon wieder an",
@@ -392,6 +394,18 @@ export const de = {
   "settings.noBlur": "Dieser Browser unterstützt keine Hintergrund-Effekte.",
 
   // ---- Stage
+  "stage.poppedOut": "Wird im Pop-out angezeigt",
+  "stage.restoreVideo": "Hier anzeigen",
+  "stage.popupVideoHint": "Video. Doppelklick oder F f?r Vollbild.",
+  "stage.popupVolume": "Lautstärke",
+  "stage.popout": "In eigenem Fenster ?ffnen",
+  "stage.fullscreen": "Vollbild",
+  "stage.exitFullscreen": "Vollbild verlassen",
+  "stage.fullscreenUnavailable": "Dieser Browser unterst?tzt hier kein Vollbild.",
+  "stage.fullscreenFailed": "Vollbild konnte nicht ge?ffnet werden. Bitte erneut versuchen.",
+  "stage.popupBlocked": "Das Fenster wurde blockiert. Erlaube Pop-ups f?r diese Seite und versuche es erneut.",
+  "stage.popupFailed": "Das Videofenster konnte nicht ge?ffnet werden.",
+  "stage.screenVideo": "Bildschirmfreigabe",
   "stage.participants": "{n} Teilnehmer",
   "stage.stereo": "Stereo",
   "stage.mono": "Mono",

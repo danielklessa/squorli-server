@@ -1,3 +1,4 @@
+import { Avatar } from "./Avatar";
 import { DM_DELETE_BOTH_MS, type Friend } from "@squorli/protocol";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { askConfirm } from "./dialogs";
@@ -62,7 +63,7 @@ export function DmView({ friend, thread, myKey, store }: { friend: Friend; threa
   return (
     <section className="chat">
       <header className="chat-head">
-        <span className={`presence ${friend.online ? "on" : ""}`} /><strong>{name}</strong>
+        <Avatar name={name} online={friend.online} /><strong>{name}</strong>
         <span className="muted topic">@{friend.handle}{friend.online ? ` · ${t("dm.online")}` : ""}</span>
         <span className="spacer" />
         <button className="icon" title={t("dm.clearTitle")} onClick={() => { void askConfirm({ title: t("dm.clearConfirmTitle", { name }), text: t("dm.clearConfirmText"), confirmLabel: t("common.delete"), danger: true }).then((ok) => { if (ok) store.clearDm(friend.publicKey); }); }}><Icon name="trash-2" /></button>
@@ -83,6 +84,7 @@ export function DmView({ friend, thread, myKey, store }: { friend: Friend; threa
               <article className={`msg ${grouped && !newDay ? "grouped" : ""}`}>
                 {!(grouped && !newDay) && (
                   <div className="msg-head">
+                    <Avatar name={mine ? t("dm.you") : name} />
                     <strong>{mine ? t("dm.you") : name}</strong>
                     <time className="muted" dateTime={m.sentAt}>{fmtTime(m.sentAt)}</time>
                   </div>

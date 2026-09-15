@@ -1,3 +1,4 @@
+import { useVideoWindows } from "./VideoWindows";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AdminPanel } from "./AdminPanel";
 import { ChatView } from "./ChatView";
@@ -27,7 +28,9 @@ export function App() {
   const client = useMemo(() => new VoiceClient(), []);
   const [state, setState] = useState<State>(store.state);
   const [voice, setVoice] = useState<VoiceState>(client.state);
+  const videoWindows = useVideoWindows(voice.tiles, client);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [navigationOpen, setNavigationOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showDebug, setShowDebug] = useState(() => new URLSearchParams(window.location.search).has("debug"));
   /** Stage (tiles/screen) instead of chat in the main area; voice keeps running independently. */
@@ -200,17 +203,19 @@ export function App() {
   };
 
   return (
-    <div className={`app ${state.directoryUrl ? "with-rail" : ""} ${homeOpen ? "home" : ""}`}>
+    <div className={`app ${state.directoryUrl ? "with-rail" : ""} ${homeOpen ? "home" : ""} ${navigationOpen ? "navigation-open" : ""}`}>
+      {videoWindows.windows}
+      <button className="mobile-navigation secondary" aria-expanded={navigationOpen} aria-controls="app-navigation" onClick={() => setNavigationOpen((open) => !open)}><Icon name={navigationOpen ? "x" : "hash"} />{t("app.navigation")}</button>
       {state.directoryUrl && <ServerRail servers={railServers} serverState={railState} activeKey={homeOpen ? null : activeHost}
         onSelect={(key, host) => { if (key === state.homeHost) { store.openServer(homeDirHost); } else store.openServer(host); setStageOpen(key === voiceHost && stageOpen); }}
         onDiscover={() => setShowBrowser(true)} onLeave={(host, name) => { void leaveServer(host, name); }}
         home={homeAvailable ? { open: homeOpen, badge: homeBadge, onToggle: () => store.openHome(!homeOpen) } : null} />}
       {showBrowser && state.directoryUrl && <ServerBrowser directoryUrl={state.directoryUrl} currentHost={home.serverDomain} onClose={() => setShowBrowser(false)} />}
-      <div className="left">
+      <div className="left" id="app-navigation">
         {homeOpen ? <HomeSidebar state={state} store={store} members={server?.members ?? []} /> : server ? <Sidebar
           server={server} api={conn.api} currentChannelId={showStage && voiceChannel ? voiceChannel.id : active.currentChannelId} voice={active.voice}
           voiceState={voiceHost === activeHost ? voice : null} unread={active.unread}
-          connection={active.connection} onSelect={(id) => { conn.selectChannel(id); setStageOpen(false); }}
+          connection={active.connection} onSelect={(id) => { conn.selectChannel(id); setStageOpen(false); setNavigationOpen(false); }}
           onJoinVoice={(id) => { void joinVoice(activeHost, id).catch(() => {}); }} onOpenAdmin={() => setShowAdmin(true)} myUserId={active.userId ?? ""}
         /> : <nav className="sidebar"><header className="server-head"><img className="brand-mark" src="/brand/squorli-icon-small.svg" alt="" width="22" height="22" /><strong>{active.serverName ?? active.host}</strong></header></nav>}
         <VoiceDock client={client} voice={voice} channel={voiceChannel} serverName={voiceHost && voiceHost !== activeHost ? voiceServer?.server?.settings.name ?? voiceHost : null}
@@ -226,7 +231,7 @@ export function App() {
           <ServerStatus s={active} onRetry={() => store.retryServer(activeHost)} onClose={() => store.closeServer(activeHost)} />
         ) : showStage && voiceChannel ? (
           <VoiceStage client={client} voice={voice} channel={voiceChannel} members={server.members} myPermissions={server.myPermissions}
-            onToggleCamera={toggleCamera} onToggleBlur={toggleBlur} onLeave={leaveVoice} />
+            onToggleCamera={toggleCamera} onToggleBlur={toggleBlur} onLeave={leaveVoice} onPopout={videoWindows.open} poppedIds={videoWindows.poppedIds} onRestore={videoWindows.restore} />
         ) : current ? (
           <ChatView
             channel={current} messages={active.messages[current.id] ?? { list: [], hasMore: true, loaded: false, loading: false }}

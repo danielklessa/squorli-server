@@ -1,3 +1,4 @@
+import { Avatar } from "./Avatar";
 import { Permission, hasPermission, type Channel, type Member, type Message } from "@squorli/protocol";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { askConfirm } from "./dialogs";
@@ -111,6 +112,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
               <article className={`msg ${grouped && !newDay ? "grouped" : ""}`}>
                 {!(grouped && !newDay) && (
                   <div className="msg-head">
+                    <Avatar name={nameOf.get(m.authorId) ?? t("chat.formerMember")} />
                     <strong>{nameOf.get(m.authorId) ?? t("chat.formerMember")}</strong>
                     <time className="muted" dateTime={m.createdAt}>{fmtTime(m.createdAt)}</time>
                   </div>

@@ -15,9 +15,11 @@
 .ic-key-round::before { content: "\e4a7"; }
 .ic-link::before { content: "\e102"; }
 .ic-lock::before { content: "\e10b"; }
+.ic-maximize::before { content: "\e112"; }
 .ic-message-circle::before { content: "\e116"; }
 .ic-mic::before { content: "\e118"; }
 .ic-mic-off::before { content: "\e119"; }
+.ic-minimize::before { content: "\e11a"; }
 .ic-monitor::before { content: "\e11d"; }
 .ic-monitor-smartphone::before { content: "\e3a6"; }
 .ic-paperclip::before { content: "\e12d"; }

@@ -1,3 +1,4 @@
+import { Avatar } from "./Avatar";
 import { Permission, hasPermission, type Channel, type ServerState, type VoiceMember } from "@squorli/protocol";
 import { useState } from "react";
 import type { ServerApi } from "./api";
@@ -55,7 +56,7 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, unre
         onDragOver={(e) => { if (droppable) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dropTarget !== c.id) setDropTarget(c.id); } }}
         onDragLeave={(e) => { if (dropTarget === c.id && !e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(null); }}
         onDrop={(e) => { if (droppable) { e.preventDefault(); onDrop(c.id); } }}>
-        <button className="channel-btn" onClick={() => (c.kind === "text" ? onSelect(c.id) : onJoinVoice(c.id))} title={c.topic ?? undefined}>
+        <button className="channel-btn" aria-current={active ? "page" : undefined} onClick={() => (c.kind === "text" ? onSelect(c.id) : onJoinVoice(c.id))} title={c.topic ?? undefined}>
           <span className="channel-icon"><Icon name={c.kind === "text" ? "hash" : "volume-2"} /></span>
           <span className="channel-name">{c.name}</span>
           {c.kind === "voice" && members.length > 0 && <span className="count">{members.length}</span>}
@@ -68,7 +69,7 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, unre
               return <li key={m.userId} className={`${p?.speaking ? "speaking" : ""} ${draggable ? "draggable" : ""} ${dragging?.userId === m.userId ? "dragging" : ""}`}
                 draggable={draggable} title={draggable ? t("sidebar.dragHint") : undefined}
                 onDragStart={(e) => { if (!draggable) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", m.userId); setDragging({ userId: m.userId, from: c.id }); }}
-                onDragEnd={() => { setDragging(null); setDropTarget(null); }}><span className="dot" /><span className="member-name">{m.displayName}</span>{p?.micMuted && <Icon name="mic-off" className="muted" title={t("voice.micMuted")} />}{p?.deafened && <Icon name="headphone-off" className="muted" title={t("voice.deafened")} />}{p?.cameraOn && <Icon name="video" title={t("voice.cameraOn")} />}{p?.screenOn && <Icon name="screen-share" title={t("voice.sharingScreen")} />}</li>;
+                onDragEnd={() => { setDragging(null); setDropTarget(null); }}><Avatar name={m.displayName} size="small" /><span className="member-name">{m.displayName}</span>{p?.micMuted && <Icon name="mic-off" className="muted" title={t("voice.micMuted")} />}{p?.deafened && <Icon name="headphone-off" className="muted" title={t("voice.deafened")} />}{p?.cameraOn && <Icon name="video" title={t("voice.cameraOn")} />}{p?.screenOn && <Icon name="screen-share" title={t("voice.sharingScreen")} />}</li>;
             })}
           </ul>
         )}
