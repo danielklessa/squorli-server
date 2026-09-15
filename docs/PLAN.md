@@ -351,3 +351,7 @@ Already decided: permissive license, PTT and voice activation both, screen share
 2. Work through the test matrix from 3.6 with a small test page: getDisplayMedia with `audio: true` in Chrome, Firefox, Safari on all available operating systems; replace the "prüfen" (check) rows with the result. One afternoon.
 3. Start LiveKit locally via Docker, open a room with the bundled example client, put 15 bots in, watch resources. One day. Confirms or refutes the component choice before code is written.
 4. Set up the monorepo, start M0.
+
+## Standard container installation
+
+The default user installation requires no Git clone, Node.js or application build. Download only .env.example, deploy/compose.yml, Caddyfile, livekit.yaml and the optional nginx port overlay into a fresh squorli directory. Configure .env with APP_IMAGE and the matching proxy mode, then run Compose pull and up --no-build from squorli/deploy. Updates pull the image without git pull; never overwrite existing secrets by repeating the initial download. Source cloning and --build belong only to a separate optional developer workflow at the end of both public guides. Both languages must stay equivalent.

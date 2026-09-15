@@ -128,4 +128,30 @@ docker compose --env-file ../.env --profile bundled up -d --build   # or the ext
 
 ## License
 
-Squorli Server is licensed under the [Apache License, Version 2.0](LICENSE) (Copyright 2026 Daniel Klessa, see [NOTICE](NOTICE)). Contributions are accepted under the same license. Squorli Directory is separate and is not open source.
+Squorli Server is licensed under the [Apache License, Version 2.0](LICENSE) (Copyright 2026 Daniel Klessa, see [NOTICE](NOTICE)). Contributions are accepted under the same license. Squorli Directory is separate and is not open source.## Production (standard: published Docker image, no Git clone)
+
+Requirements: Docker Engine with the Compose plugin, curl and OpenSSL on a Linux host. You do not need Git, Node.js or a local application build. Point your domain to the host and open 80/tcp, 443/tcp, 7881/tcp and 7882/udp. Follow the complete guide in [English](https://squorli.com/en/docs/install/) or [German](https://squorli.com/de/docs/install/).
+
+Create a new installation directory and download only the deployment configuration:
+
+```bash
+mkdir -p squorli/deploy/caddy squorli/deploy/livekit squorli/deploy/proxies
+cd squorli
+curl -fL https://raw.githubusercontent.com/danielklessa/squorli-server/main/.env.example -o .env
+curl -fL https://raw.githubusercontent.com/danielklessa/squorli-server/main/deploy/compose.yml -o deploy/compose.yml
+curl -fL https://raw.githubusercontent.com/danielklessa/squorli-server/main/deploy/caddy/Caddyfile -o deploy/caddy/Caddyfile
+curl -fL https://raw.githubusercontent.com/danielklessa/squorli-server/main/deploy/livekit/livekit.yaml -o deploy/livekit/livekit.yaml
+curl -fL https://raw.githubusercontent.com/danielklessa/squorli-server/main/deploy/proxies/nginx.ports.yml -o deploy/proxies/nginx.ports.yml
+```
+
+Run the download step only once in a fresh directory; repeating it overwrites configuration. Edit .env, replace the hostname and secrets, set PROXY_MODE=bundled and APP_IMAGE=ghcr.io/danielklessa/squorli-server:latest. Generate separate secrets with `openssl rand -hex 32`. Reserve the first login with OWNER_PUBLIC_KEY or restrict access until you claim ownership. The nginx overlay is only needed for an external proxy.
+
+```bash
+cd deploy
+docker compose --env-file ../.env --profile bundled pull
+docker compose --env-file ../.env --profile bundled up -d --no-build
+```
+
+Always pass `--env-file ../.env`. The downloaded Compose file also describes a source build; `--no-build` explicitly uses the published image and needs no Dockerfile or source checkout. Caddy, PostgreSQL and LiveKit are started alongside the app.
+
+

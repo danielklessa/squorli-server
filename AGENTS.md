@@ -334,3 +334,7 @@ Fixed in M1: the RTC URL ended in `/rtc` (the SDK appends it itself); the LiveKi
 | 2026-09-13 | Prod Compose: `--env-file ../.env` in all commands (placeholders were otherwise empty). |
 | 2026-09-13 | Proxy docs: `nginx.ports.yml` overlay added (compose.yml publishes no HTTP ports in external mode), nginx.conf with redirect/IPv6/http2, README with verification steps. |
 | 2026-09-13 | M1 implemented: protocol v2 (voice.join/leave/state, /api/me, rtc-token per channelId), VoicePresence, fixed channel "lobby", web client with livekit-client (VoicePanel, DebugPanel, voice/ core: VAD/PTT via GainNode), migration 0001 (display_name), `pnpm bots`, `pnpm smoke`, LiveKit dev with `--node-ip` and matching secret. TURN documented, off. Acceptance across two networks open. |
+
+## Standard container installation
+
+The default user installation requires no Git clone, Node.js or application build. Download only .env.example, deploy/compose.yml, Caddyfile, livekit.yaml and the optional nginx port overlay into a fresh squorli directory. Configure .env with APP_IMAGE and the matching proxy mode, then run Compose pull and up --no-build from squorli/deploy. Updates pull the image without git pull; never overwrite existing secrets by repeating the initial download. Source cloning and --build belong only to a separate optional developer workflow at the end of both public guides. Both languages must stay equivalent.

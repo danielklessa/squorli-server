@@ -43,3 +43,7 @@ Video and screen sharing are implemented and have been tested successfully with 
 The canonical package is squorli-server/docs/brand. Mirror the complete package into squorli-directory/docs/brand and squorli-website/docs/brand. Mirror the selected runtime SVGs and CSS tokens into each application's brand asset folder. Product-positioning changes must also update affected READMEs, plans and public website copy in the same work step.
 
 From squorli-website run `pnpm brand:sync` after editing the canonical package, then `pnpm brand:check`. The scripts compare bytes and never delete unexpected files. Missing sibling checkouts or unexpected extra files require manual review; do not silently create a divergent brand package.
+
+## Standard container installation
+
+The default user installation requires no Git clone, Node.js or application build. Download only .env.example, deploy/compose.yml, Caddyfile, livekit.yaml and the optional nginx port overlay into a fresh squorli directory. Configure .env with APP_IMAGE and the matching proxy mode, then run Compose pull and up --no-build from squorli/deploy. Updates pull the image without git pull; never overwrite existing secrets by repeating the initial download. Source cloning and --build belong only to a separate optional developer workflow at the end of both public guides. Both languages must stay equivalent.
