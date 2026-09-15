@@ -28,7 +28,7 @@ Only direct messages between friends are described as end-to-end encrypted. Do n
 
 The owner identifies Squorli Server as the open-source project and Squorli Directory as not open source. Squorli Server is licensed under the Apache License, Version 2.0 (file `LICENSE` in the server repository, copyright Daniel Klessa). Name that license exactly in public copy; do not describe it as MIT or as pending.
 
-Video and screen sharing are implemented; real-camera acceptance and restrictive-network/TURN testing remain pending. Screen audio depends on a supported Chromium browser. Do not present roadmap targets as measured capabilities.
+Video and screen sharing are implemented and have been tested successfully with real webcams and screen shares (15 September 2026); restrictive-network/TURN testing remains pending. Screen audio depends on a supported Chromium browser. Do not present roadmap targets as measured capabilities.
 
 ## Language and visual rules
 

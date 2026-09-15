@@ -132,7 +132,7 @@ Mandatory for Release 1, but the browsers impose hard limits that no code gets a
 What follows from this:
 
 1. **Officially supported in Release 1:** Screen share with audio in Chromium browsers and in the desktop client on Windows. Everything else: video without audio with a clear notice in the user interface, not silently.
-2. **Work through the test matrix:** The test page for this has been at `/test/screenshare.html` since M3 (shipped with the client, in dev at http://localhost:5173/test/screenshare.html). For each browser and operating system try tab, window and entire screen and replace the "verify" rows above. Status 2026-09-13: not yet filled in.
+2. **Work through the test matrix:** The test page for this has been at `/test/screenshare.html` since M3 (shipped with the client, in dev at http://localhost:5173/test/screenshare.html). For each browser and operating system try tab, window and entire screen and replace the "verify" rows above. Status 2026-09-15: screen share transmission (picture) has been tested successfully end to end; the per-browser audio rows are not yet filled in.
 3. **macOS system audio in the desktop client** is the most expensive row. If the verification effort turns out to be high, it will be documented as a known limitation for Release 1 instead of blocking the release.
 4. **Technically:** The audio of the share is published as a separate audio track, not mixed with the microphone. That way listeners can control it separately and the presenter does not hear themselves twice. To be verified whether LiveKit handles multiple audio tracks per participant cleanly (to my knowledge yes).
 
@@ -191,7 +191,7 @@ First measurement on 13 September 2026, locally (Docker Desktop, Windows): `pnpm
 | Server | Upload (distribution) | one listener = 4.1 Mbit/s | 15 listeners ≈ 60 Mbit/s |
 | Server | CPU / RAM (LiveKit) | ~9 % of one core, ~135 MB with 15 cameras + 1 listener | linear with listeners, no transcoding |
 
-Thanks to `adaptiveStream`, the tile view only fetches the simulcast layer that matches the tile size; a speaker focus with a large tile pulls the 720p layer (~1.5 Mbit/s) for that one track and 180p for the small tiles. Still open: the same measurement with real cameras over the internet (M3 acceptance) and the ingest on the server (`docker stats` on the target host there, not locally).
+Thanks to `adaptiveStream`, the tile view only fetches the simulcast layer that matches the tile size; a speaker focus with a large tile pulls the 720p layer (~1.5 Mbit/s) for that one track and 180p for the small tiles. Status 2026-09-15: webcam transmission with real cameras has been tested successfully. Still open: the bandwidth measurement with real cameras over the internet (M3 acceptance) and the ingest on the server (`docker stats` on the target host there, not locally).
 
 CPU stays moderate as long as media is only forwarded. Recording and server-side transcoding would tip that over and stay out of release 1.
 
@@ -265,6 +265,7 @@ Multiple channels (voice and text), categories, roles with permissions, invite l
 ### M3 – Video and screen share (medium to large)
 Camera on/off, tile view with simulcast layers depending on tile size, speaker focus, screen share in the browser with audio as a separate audio track (Chromium officially, other browsers picture without audio with a notice, see 3.6). Bandwidth measurement, adjustment of the defaults. This is where the difference to the competition arises; plan time for polish accordingly.
 **Done when:** 15 real cameras (or bots with realistic test video) run smoothly on a defined target server, a screen share with tab audio from Chrome arrives at everyone, and the bandwidth table in section 4.3 has been replaced by measured values.
+**Status 15 September 2026:** Video transmission (webcam and screen share) has been tested successfully with real devices. Still open: the 15-camera run on a target server and the browser matrix in 3.6.
 
 ### M4 – Desktop client (medium)
 Electron shell: push-to-talk with a global hotkey, screen share with system audio (Windows for sure; macOS and Linux depending on the result of the test matrix in 3.6), tray, autostart, notifications, auto-update. Before that the Tauri prototype from 3.4, if you want to keep the decision open.
