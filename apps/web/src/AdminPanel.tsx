@@ -105,7 +105,8 @@ function ChannelsTab({ api, server, run }: { api: ServerApi; server: ServerState
     const idx = sorted.indexOf(item);
     const other = sorted[idx + dir];
     if (!other) return;
-    const upd = kind === "channel" ? api.updateChannel : api.updateCategory;
+    // Bound call: a bare `api.updateChannel` loses `this` and fails inside `request`.
+    const upd = (targetId: string, patch: { position: number }) => kind === "channel" ? api.updateChannel(targetId, patch) : api.updateCategory(targetId, patch);
     void run(async () => { await upd(item.id, { position: other.position }); await upd(other.id, { position: item.position }); });
   };
   return (
