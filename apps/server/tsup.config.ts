@@ -3,7 +3,7 @@ import { defineConfig } from "tsup";
 export default defineConfig({
   entry: ["src/index.ts"],
   format: ["esm"],
-  target: "node22",
+  target: "node24",
   clean: true,
   // The protocol package only exists as TypeScript source; include it in the bundle
   // so dist/index.js runs without type stripping and without a workspace link.

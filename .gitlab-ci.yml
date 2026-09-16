@@ -16,7 +16,7 @@ variables:
 
 test:
   stage: test
-  image: node:22-alpine
+  image: node:24-alpine
   variables:
     PNPM_HOME: $CI_PROJECT_DIR/.pnpm
   cache:

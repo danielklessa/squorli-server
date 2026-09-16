@@ -42,7 +42,7 @@ docs/PLAN.md     Project plan
 
 ## Development
 
-Prerequisites: Node 22, pnpm (`corepack enable`), Docker.
+Prerequisites: Node 24 (LTS), pnpm (`corepack enable`), Docker.
 
 ```bash
 pnpm install

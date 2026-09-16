@@ -106,7 +106,7 @@ Dockerfile             Multi-stage build, target `app` (web + server); `pnpm dep
 .env.development       Template for local development (copy to apps/server/.env)
 ```
 
-Workspace: pnpm 10 (`packageManager` in package.json, `corepack enable`), Node >= 22 (tested with Node 25).
+Workspace: pnpm 10 (`packageManager` in package.json, `corepack enable`), Node >= 24 (LTS, tested with Node 24.21.0).
 Package names: `@squorli/server`, `@squorli/web`, `@squorli/protocol` (the directory service `@squorli/directory` lives in `../squorli-directory`). The protocol package is consumed as TypeScript source (no build step). `packages/protocol/src/permissions.ts` = permission bitmask (append new permissions at the end).
 
 ## 2a. Sibling repo `../squorli-directory` (not published) and synchronized copies
