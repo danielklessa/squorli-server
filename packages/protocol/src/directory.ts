@@ -20,7 +20,8 @@ export type ChallengeResponse = z.infer<typeof ChallengeResponse>;
  *
  * M6a: registration and resolution. M6b: encrypted key backup.
  * M6c: TOTP authenticator and recovery codes as a second factor for key retrieval, signed account actions,
- * list of key retrievals. SMTP remains prepared.
+ * list of key retrievals. E-mail (17 September 2026): a confirmed address gets a notice on every key retrieval and can
+ * request an 8-digit e-mail code as a substitute for the authenticator (only after the correct password or a valid signature).
  */
 
 /** Handle without @: 3-32 characters, lowercase letters, digits, dot, underscore; starts and ends alphanumeric. */
@@ -77,8 +78,11 @@ export const BackupAuthKey = Hex(32);
 export function directoryBackupMessage(directoryHost: string, nonce: string, ciphertext: string): string {
   return `community-directory-backup\n${directoryHost}\n${nonce}\n${ciphertext}`;
 }
-// ---- M6c: second factor. 6 digits = TOTP code, otherwise a recovery code (xxxxx-xxxxx); the service decides by shape.
+// ---- M6c: second factor. 6 digits = TOTP code, 8 digits = e-mail code (sent to the confirmed address), otherwise a recovery
+// code (xxxxx-xxxxx); the service decides by shape.
 export const SecondFactorCode = z.string().trim().min(6).max(20);
+/** E-mail code (confirmation of an address, or the second factor by e-mail): 8 digits, valid once for a few minutes. */
+export const EmailCode = z.string().trim().regex(/^\d{8}$/, "8 Ziffern");
 
 export const BackupUploadRequest = z.object({
   publicKey: PublicKey,
@@ -99,13 +103,27 @@ export const BackupBlob = z.object({ handle: Handle, publicKey: PublicKey, ciphe
 
 // ---- M6c: signed account actions (authenticator, recovery codes, account status). Same pattern as registration
 // and backup: challenge + signature over host, nonce and payload (for actions with a code, the code is the payload).
-export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends", "server-leave", "sound-settings"]);
+export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends", "server-leave", "sound-settings", "email-set", "email-verify", "email-code"]);
 export type DirectoryAction = z.infer<typeof DirectoryAction>;
 export function directoryActionMessage(directoryHost: string, action: DirectoryAction, nonce: string, payload = ""): string {
   return `community-directory-${action}\n${directoryHost}\n${nonce}\n${payload}`;
 }
 export const SignedActionRequest = z.object({ publicKey: PublicKey, challengeId: Uuid, signature: Signature });
 export const CodeActionRequest = SignedActionRequest.extend({ code: SecondFactorCode });
+
+// ---- E-mail in the account (17 September 2026, only when the service has SMTP: features.email). The address is stored
+// unconfirmed first; `email-set` (payload = address, empty = remove) mails an 8-digit code, `email-verify` (payload = code)
+// confirms it. A confirmed address gets a notice on every key retrieval and serves as a fallback second factor: `email-code`
+// (signed, no payload) or POST /api/email/code with handle + auth key (i.e. after the correct password) mails a code that
+// counts like an authenticator code wherever `SecondFactorCode` is accepted.
+export const EmailAddress = z.string().trim().toLowerCase().min(6).max(254).regex(/^[^\s@<>()]+@[^\s@<>()]+\.[^\s@<>()]+$/, "E-Mail-Adresse");
+export const EmailUpdateRequest = SignedActionRequest.extend({ email: EmailAddress.nullable() });
+export const EmailVerifyRequest = SignedActionRequest.extend({ code: EmailCode });
+/** Request an e-mail code with the password (sign-in without the authenticator): same proof as BackupFetchRequest. */
+export const EmailCodeRequest = z.object({ handle: Handle, authKey: BackupAuthKey });
+/** `sentTo` = the address, masked (d***@example.org). */
+export const EmailCodeResponse = z.object({ ok: z.literal(true), sentTo: z.string() });
+export type EmailCodeResponse = z.infer<typeof EmailCodeResponse>;
 
 // ---- Display names in the directory: global (server = null) or per chat server (server = that server's host). Registered chat servers
 // fetch `GET /api/keys/<key>?server=<host>` on sign-in (with their server token) and adopt serverDisplayName ?? displayName.
@@ -222,7 +240,7 @@ export const KeyFetch = z.object({
   at: Iso,
   label: z.string().nullable(),
   origin: z.string().nullable(),
-  factor: z.enum(["password", "totp", "recovery"]),
+  factor: z.enum(["password", "totp", "recovery", "email"]),
 });
 export const AccountStatus = DirectoryAccount.extend({
   totpEnabled: z.boolean(),
@@ -233,6 +251,9 @@ export const AccountStatus = DirectoryAccount.extend({
   servers: z.array(AccountServer),
   /** Voice cue settings stored in the account; null = never set (the client keeps its per-device settings). */
   soundSettings: SoundSettings.nullable().default(null),
+  /** Confirmed e-mail address (null = none) and an address waiting for its confirmation code (null = none). */
+  email: EmailAddress.nullable().default(null),
+  emailPending: EmailAddress.nullable().default(null),
 });
 
 export const DirectoryHealth = z.object({
@@ -240,7 +261,7 @@ export const DirectoryHealth = z.object({
   service: z.literal("directory"),
   /** Host that registration signatures are bound to. */
   host: z.string(),
-  /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. */
+  /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. `email`: SMTP configured (address, notices, e-mail code). */
   features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false) }),
   time: Iso,
 });

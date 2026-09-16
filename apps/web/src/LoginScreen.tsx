@@ -1,5 +1,6 @@
 import { BACKUP_MIN_PASSWORD, type InvitePreview } from "@squorli/protocol";
 import { useEffect, useState } from "react";
+import * as api from "./api";
 import { askConfirm } from "./dialogs";
 import { homeState, type State, type Store } from "./store";
 import { LOCALES, localePreference, setLocalePreference, t, type LocalePreference } from "./i18n";
@@ -34,6 +35,10 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
   const [accPw, setAccPw] = useState("");
   const [accCode, setAccCode] = useState("");
   const [needCode, setNeedCode] = useState(false);
+  // Code by e-mail: offered when the directory says (after the correct password) that the account has a confirmed address.
+  const [emailOffered, setEmailOffered] = useState(false);
+  const [emailNote, setEmailNote] = useState<string | null>(null);
+  const [emailBusy, setEmailBusy] = useState(false);
   const [showOther, setShowOther] = useState(false);
 
   // Account required (admin): a browser key without a handle is not offered at all (no box, no toggle);
@@ -59,7 +64,17 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
   function onLoginError(err: unknown) {
     const code = (err as { code?: string | null }).code;
     if (code === "invite_required" || code === "invite_invalid") setNeedInvite(true);
-    if (code === "totp_required") setNeedCode(true);
+    if (code === "totp_required") { setNeedCode(true); setEmailOffered((err as { body?: { email?: unknown } }).body?.email === true); }
+  }
+  async function sendEmailCode() {
+    const url = state.directoryUrl;
+    if (!url) return;
+    setEmailBusy(true); setEmailNote(null);
+    try {
+      const r = await api.directoryEmailCode(url, accHandle.trim().replace(/^@/, ""), accPw);
+      setEmailNote(t("login.emailCodeSent", { to: r.sentTo }));
+    } catch (err) { setEmailNote(api.explainDirectoryError(err)); }
+    finally { setEmailBusy(false); }
   }
 
   async function go() {
@@ -78,7 +93,7 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
     }
     try {
       await store.loginWithHandle(accHandle.trim().replace(/^@/, ""), accPw, invite.trim() || undefined, accCode.trim() || undefined);
-      setAccPw(""); setAccCode(""); setNeedCode(false);
+      setAccPw(""); setAccCode(""); setNeedCode(false); setEmailOffered(false); setEmailNote(null);
       afterLogin();
     } catch (err) { onLoginError(err); }
   }
@@ -107,8 +122,10 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
         <div className="row">
           <input value={accCode} onChange={(e) => setAccCode(e.target.value)} placeholder={t("login.codePlaceholder")} inputMode="numeric" autoComplete="one-time-code" maxLength={20} autoFocus disabled={busy}
             onKeyDown={(e) => { if (e.key === "Enter") void goAccount(); }} />
+          {emailOffered && <button type="button" className="secondary" onClick={() => void sendEmailCode()} disabled={busy || emailBusy}>{emailBusy ? t("login.emailCodeSending") : t("login.emailCode")}</button>}
         </div>
       )}
+      {needCode && emailNote && <span className="muted small">{emailNote}</span>}
       <span className="muted small">
         {t("login.noAccount")} <a href={state.directoryUrl ?? "#"} target="_blank" rel="noreferrer">{t("login.createAt", { host: dirHost ?? "" })}</a>{t("login.thenSignIn")}
         {" · "}<a href={`${state.directoryUrl ?? ""}/?handle=${encodeURIComponent(accHandle.trim().replace(/^@/, ""))}`} target="_blank" rel="noreferrer">{t("login.manageAccount")}</a> {t("login.manageAccountHint")}

@@ -1,5 +1,5 @@
 import {
-  AccountStatus, Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, FriendSearchResponse, ServerLeaveResponse, ServerListResponse, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
+  AccountStatus, Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, EmailCodeResponse, FriendSearchResponse, ServerLeaveResponse, ServerListResponse, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
   BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryActionMessage, directoryBackupMessage, directoryProfilePayload,
   directoryRegisterMessage, directorySoundSettingsPayload, openBackup, type SoundSettings,
   type Attachment, type Category, type Channel, type Role,
@@ -188,6 +188,16 @@ export async function directoryRestore(dirUrl: string, rawHandle: string, passwo
   if (id.publicKey !== blob.publicKey) throw new Error(t("err.backupMismatch"));
   return id;
 }
+/**
+ * Code by e-mail as the second factor (after a 401 totp_required whose body says `email: true`): proves the password again
+ * (handle + auth key) and the directory mails an 8-digit code to the confirmed address; it then goes into `code` of directoryRestore.
+ */
+export async function directoryEmailCode(dirUrl: string, rawHandle: string, password: string): Promise<EmailCodeResponse> {
+  const handle = Handle.parse(rawHandle);
+  const p = BackupParamsResponse.parse(await directoryFetch(dirUrl, "GET", `/api/backup/${handle}/params`));
+  const keys = await deriveBackupKeys(password, p.salt, p.iterations);
+  return EmailCodeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/email/code", { handle, authKey: keys.authKey }));
+}
 /** Display name in the directory: server = null -> global (all servers), otherwise only for this chat server (host = its PUBLIC_DOMAIN). */
 export async function directorySetDisplayName(dirUrl: string, id: Identity, server: string | null, displayName: string | null): Promise<void> {
   const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
@@ -226,7 +236,7 @@ export function explainDirectoryError(err: unknown): string {
     switch (err.code) {
       case "auth_invalid": case "no_backup": case "no_account": case "not_found": case "bad_handle": case "handle_taken": case "rate_limited":
       case "signature_invalid": case "challenge_invalid": case "totp_required": case "totp_invalid": case "totp_reused": case "server_unknown": case "totp_unavailable":
-      case "founder": case "server_refused":
+      case "founder": case "server_refused": case "email_unavailable": case "no_email": case "mail_failed": case "totp_disabled":
         return t(`dir.${err.code}`);
       case "key_registered": return t("dir.key_registered", { handle: String(err.body.handle ?? "?") });
       case "bad_request": return t("dir.bad_request", { detail: String(err.body.detail ?? t("dir.handleRules")) });
