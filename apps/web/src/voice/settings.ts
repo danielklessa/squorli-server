@@ -1,5 +1,8 @@
 /**
- * Voice settings per device (PLAN 3.5: "the user chooses per device"). Stored in localStorage.
+ * Voice settings per device (PLAN 3.5: "the user chooses per device"). Stored in localStorage; this is the "local profile"
+ * that always works, also on servers without a directory. One part of it, the join/leave cues (`sounds`), additionally
+ * follows the directory account (store.ts): a change here is reported to subscribers with its source, so the store can
+ * push user changes to the directory and apply the account's settings without echoing them back.
  */
 import { DEFAULT_SOUND_SETTINGS, normalizeSoundSettings, type SoundSettings } from "./sounds";
 
@@ -22,9 +25,12 @@ export type VoiceSettings = {
   cameraQuality: "360p" | "720p";
   /** Camera background blur: 0 = off, otherwise the radius (10 light, 20 strong). Only in browsers that support it. */
   cameraBlur: number;
-  /** Cues when you or someone else joins or leaves the voice room; each one switchable. */
+  /** Cues when you or someone else joins or leaves the voice room; each one switchable. With a directory account these follow the account. */
   sounds: SoundSettings;
 };
+
+/** Who changed the settings: the user on this device, or the directory account (applied from the account, not pushed back). */
+export type VoiceSettingsSource = "user" | "directory";
 
 const KEY = "chat.voice.v1";
 
@@ -42,7 +48,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   sounds: { ...DEFAULT_SOUND_SETTINGS },
 };
 
-export function loadVoiceSettings(): VoiceSettings {
+function readStored(): VoiceSettings {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...DEFAULT_VOICE_SETTINGS };
@@ -54,6 +60,28 @@ export function loadVoiceSettings(): VoiceSettings {
   }
 }
 
-export function saveVoiceSettings(s: VoiceSettings): void {
+let current: VoiceSettings | null = null;
+const listeners = new Set<(s: VoiceSettings, source: VoiceSettingsSource) => void>();
+
+/** Current settings (read from localStorage once, then cached; every save updates the cache). */
+export function loadVoiceSettings(): VoiceSettings {
+  if (!current) current = readStored();
+  return current;
+}
+
+export function saveVoiceSettings(s: VoiceSettings, source: VoiceSettingsSource = "user"): void {
+  current = s;
   try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* private mode or similar: then simply not */ }
+  for (const fn of listeners) fn(s, source);
+}
+
+/** Be told about every save (App, VoiceDock and the store share one copy this way). Returns the unsubscribe function. */
+export function subscribeVoiceSettings(fn: (s: VoiceSettings, source: VoiceSettingsSource) => void): () => void {
+  listeners.add(fn);
+  return () => { listeners.delete(fn); };
+}
+
+/** Same cue settings? (Order-independent field comparison; volumes compared exactly, the slider steps are 0.05.) */
+export function sameSoundSettings(a: SoundSettings, b: SoundSettings): boolean {
+  return a.selfJoin === b.selfJoin && a.selfLeave === b.selfLeave && a.peerJoin === b.peerJoin && a.peerLeave === b.peerLeave && a.volume === b.volume;
 }

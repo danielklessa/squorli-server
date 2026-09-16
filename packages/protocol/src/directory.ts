@@ -99,7 +99,7 @@ export const BackupBlob = z.object({ handle: Handle, publicKey: PublicKey, ciphe
 
 // ---- M6c: signed account actions (authenticator, recovery codes, account status). Same pattern as registration
 // and backup: challenge + signature over host, nonce and payload (for actions with a code, the code is the payload).
-export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends", "server-leave"]);
+export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends", "server-leave", "sound-settings"]);
 export type DirectoryAction = z.infer<typeof DirectoryAction>;
 export function directoryActionMessage(directoryHost: string, action: DirectoryAction, nonce: string, payload = ""): string {
   return `community-directory-${action}\n${directoryHost}\n${nonce}\n${payload}`;
@@ -114,6 +114,22 @@ export function directoryProfilePayload(server: string | null, displayName: stri
   return `${server ?? ""}\n${displayName ?? ""}`;
 }
 export const ProfileUpdateRequest = SignedActionRequest.extend({ server: ServerHost.nullable(), displayName: DisplayName.nullable() });
+
+// ---- Voice cue settings in the account (16 September 2026): the switches for the four join/leave cues plus one volume follow the
+// account across chat servers and devices. The chat client keeps a per-device copy (its "local profile") so servers without a
+// directory keep working; with an account it reads the settings via /api/account/status and writes them with the signed
+// action `sound-settings`. The payload is the canonical line "<selfJoin><selfLeave><peerJoin><peerLeave>\n<volume>" (1/0 per cue).
+export const SoundSettings = z.object({
+  selfJoin: z.boolean(), selfLeave: z.boolean(), peerJoin: z.boolean(), peerLeave: z.boolean(),
+  /** 0..1, applied on top of the per-tone gain. */
+  volume: z.number().min(0).max(1),
+});
+export type SoundSettings = z.infer<typeof SoundSettings>;
+export function directorySoundSettingsPayload(s: SoundSettings): string {
+  const bit = (b: boolean) => (b ? "1" : "0");
+  return `${bit(s.selfJoin)}${bit(s.selfLeave)}${bit(s.peerJoin)}${bit(s.peerLeave)}\n${s.volume}`;
+}
+export const SoundSettingsUpdateRequest = SignedActionRequest.extend({ soundSettings: SoundSettings });
 /** A chat server that has looked up the key (a sign-in there), with the display name that applies there (account page). `verified` = registered with the directory. */
 export const AccountServer = z.object({
   host: ServerHost, name: z.string().nullable(), displayName: DisplayName.nullable(), lastSeenAt: Iso, verified: z.boolean().default(false),
@@ -215,6 +231,8 @@ export const AccountStatus = DirectoryAccount.extend({
   recoveryCodesLeft: z.number().int().min(0),
   fetches: z.array(KeyFetch),
   servers: z.array(AccountServer),
+  /** Voice cue settings stored in the account; null = never set (the client keeps its per-device settings). */
+  soundSettings: SoundSettings.nullable().default(null),
 });
 
 export const DirectoryHealth = z.object({

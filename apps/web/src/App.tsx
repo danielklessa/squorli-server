@@ -7,7 +7,7 @@ import { HomeMain, HomeSidebar } from "./Home";
 import { LoginScreen } from "./LoginScreen";
 import { MemberList } from "./MemberList";
 import { Sidebar } from "./Sidebar";
-import { VoiceDock, loadVoiceSettings } from "./VoiceDock";
+import { VoiceDock } from "./VoiceDock";
 import { VoiceStage } from "./VoiceStage";
 import { CameraPicker } from "./CameraPicker";
 import { Icon } from "./Icon";
@@ -16,11 +16,11 @@ import { ProfileDialog } from "./ProfileDialog";
 import { applyBranding } from "./branding";
 import { ServerBrowser } from "./ServerBrowser";
 import { ServerRail, type RailServer } from "./ServerRail";
-import { saveVoiceSettings } from "./voice/settings";
+import { loadVoiceSettings, saveVoiceSettings } from "./voice/settings";
+import { useVoiceSettings } from "./voice/useVoiceSettings";
 import { Permission, directoryServerIconUrl, directoryServerUrl, hasPermission } from "@squorli/protocol";
 import { Store, activeState, homeState, type State } from "./store";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
-import type { VoiceSettings } from "./voice/settings";
 import { t } from "./i18n";
 
 export function App() {
@@ -36,7 +36,7 @@ export function App() {
   /** Stage (tiles/screen) instead of chat in the main area; voice keeps running independently. */
   const [stageOpen, setStageOpen] = useState(false);
   const [showBrowser, setShowBrowser] = useState(false);
-  const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>(() => loadVoiceSettings());
+  const voiceSettings = useVoiceSettings();
   /** Camera picker open (list of cameras) when there is more than one at switch-on time. */
   const [cameraPick, setCameraPick] = useState<MediaDeviceInfo[] | null>(null);
   /**
@@ -60,19 +60,21 @@ export function App() {
   const toggleBlur = useCallback(async () => {
     const next = voice.cameraBlur > 0 ? 0 : (voiceSettings.cameraBlur || 10);
     const s = { ...voiceSettings, cameraBlur: next };
-    setVoiceSettings(s); saveVoiceSettings(s);
+    saveVoiceSettings(s);
     await client.setCameraBlur(next);
   }, [client, voice.cameraBlur, voiceSettings]);
 
   const pickCamera = useCallback(async (deviceId: string, blur: number) => {
     setCameraPick(null);
     const next = { ...voiceSettings, cameraDeviceId: deviceId, cameraBlur: blur };
-    setVoiceSettings(next); saveVoiceSettings(next);
+    saveVoiceSettings(next);
     await client.setCameraEnabled(true, deviceId, next.cameraQuality, next.cameraBlur);
   }, [client, voiceSettings]);
 
   useEffect(() => store.subscribe(setState), [store]);
   useEffect(() => client.subscribe(setVoice), [client]);
+  // Cue settings reach the voice client from here, whether the user changed them or the directory account supplied them.
+  useEffect(() => client.setSoundSettings(voiceSettings.sounds), [client, voiceSettings.sounds]);
   useEffect(() => {
     // A kick, ban or session loss on the voice connection's server ends it.
     store.onRemoved = (host) => { if (host === voiceHostRef.current) { void client.leave(); setVoiceHost(null); } };
@@ -221,7 +223,7 @@ export function App() {
         <VoiceDock client={client} voice={voice} channel={voiceChannel} serverName={voiceHost && voiceHost !== activeHost ? voiceServer?.server?.settings.name ?? voiceHost : null}
           displayName={me?.displayName ?? home.me.displayName ?? "…"} onLeave={leaveVoice} onOpenProfile={() => setShowProfile(true)}
           onOpenStage={voiceChannel && !showStage && voiceHost ? () => { store.openServer(voiceHost === state.homeHost ? homeDirHost : voiceHost); setStageOpen(true); } : null}
-          canStream={!!voiceServer?.server && hasPermission(voiceServer.server.myPermissions, Permission.STREAM_VIDEO)} onSettings={setVoiceSettings} onToggleCamera={toggleCamera} />
+          canStream={!!voiceServer?.server && hasPermission(voiceServer.server.myPermissions, Permission.STREAM_VIDEO)} soundSync={state.directoryUrl && state.directoryAccount ? "account" : "device"} soundSyncError={state.soundSyncError} onToggleCamera={toggleCamera} />
       </div>
 
       <main className="main">

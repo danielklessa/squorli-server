@@ -1,7 +1,8 @@
 import { Avatar } from "./Avatar";
 import type { Channel } from "@squorli/protocol";
 import { useEffect, useRef, useState } from "react";
-import { loadVoiceSettings, saveVoiceSettings, type VoiceSettings } from "./voice/settings";
+import { saveVoiceSettings, type VoiceSettings } from "./voice/settings";
+import { useVoiceSettings } from "./voice/useVoiceSettings";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 import { Icon } from "./Icon";
 import { BLUR_OPTIONS } from "./CameraPicker";
@@ -20,8 +21,10 @@ type Props = {
   /** Show the stage (tiles) in the main area; null when it is already open. */
   onOpenStage: (() => void) | null;
   canStream: boolean;
-  /** Report settings changes upwards (the stage needs the camera device/quality). */
-  onSettings?: (s: VoiceSettings) => void;
+  /** Where the cue settings live: "account" = in the directory account (all servers and devices), "device" = only in this browser. */
+  soundSync: "device" | "account";
+  /** Last failure while saving the cues in the account; null = none. */
+  soundSyncError: string | null;
   onToggleCamera: () => Promise<void>;
 };
 
@@ -45,8 +48,8 @@ const isTypingTarget = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
 
 /** Bottom area of the sidebar: your own name, voice status, mute, leave, settings. */
-export function VoiceDock({ client, voice, channel, serverName, displayName, onLeave, onOpenProfile, onOpenStage, canStream, onSettings, onToggleCamera }: Props) {
-  const [settings, setSettings] = useState<VoiceSettings>(() => loadVoiceSettings());
+export function VoiceDock({ client, voice, channel, serverName, displayName, onLeave, onOpenProfile, onOpenStage, canStream, soundSync, soundSyncError, onToggleCamera }: Props) {
+  const settings = useVoiceSettings();
   const [showSettings, setShowSettings] = useState(false);
   const [tab, setTab] = useState<SettingsTab>("voice");
   const [devices, setDevices] = useState<{ inputs: MediaDeviceInfo[]; outputs: MediaDeviceInfo[]; cameras: MediaDeviceInfo[] }>({ inputs: [], outputs: [], cameras: [] });
@@ -57,11 +60,10 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, onL
 
   function update(patch: Partial<VoiceSettings>) {
     const next = { ...settingsRef.current, ...patch };
-    setSettings(next); saveVoiceSettings(next); onSettings?.(next);
+    saveVoiceSettings(next);
     if (patch.mode) client.setMode(patch.mode);
     if (patch.vadThreshold !== undefined) client.setThreshold(patch.vadThreshold);
     if (patch.vadHangoverMs !== undefined) client.setHangover(patch.vadHangoverMs);
-    if (patch.sounds) client.setSoundSettings(patch.sounds);
   }
 
   useEffect(() => {
@@ -244,6 +246,8 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, onL
                     onChange={(e) => update({ sounds: { ...settingsRef.current.sounds, volume: Number(e.target.value) } })} />
                 </label>
                 <span className="muted small">{t("settings.soundsHint")}</span>
+                <span className="muted small">{soundSync === "account" ? t("settings.soundsSyncAccount") : t("settings.soundsSyncDevice")}</span>
+                {soundSyncError && <p className="error small">{t("settings.soundsSyncError", { error: soundSyncError })}</p>}
               </>
             )}
 
@@ -287,4 +291,3 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, onL
   );
 }
 
-export { loadVoiceSettings };

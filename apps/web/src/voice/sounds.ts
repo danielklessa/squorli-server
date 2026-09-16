@@ -7,6 +7,8 @@
  * - peerJoin / peerLeave: triangle, narrower interval (E5<->A5), shorter and quieter, the "someone else moved" pair.
  * Rising = arriving, falling = leaving.
  */
+import type { SoundSettings as ProtocolSoundSettings } from "@squorli/protocol";
+
 export type SoundCue = "selfJoin" | "selfLeave" | "peerJoin" | "peerLeave";
 
 export const SOUND_CUES: readonly SoundCue[] = ["selfJoin", "selfLeave", "peerJoin", "peerLeave"];
@@ -35,15 +37,8 @@ export const CUE_TONES: Record<SoundCue, readonly Tone[]> = {
   ],
 };
 
-/** On/off per cue plus one common volume; part of the per-device voice settings. */
-export type SoundSettings = {
-  selfJoin: boolean;
-  selfLeave: boolean;
-  peerJoin: boolean;
-  peerLeave: boolean;
-  /** 0..1, applied on top of the per-tone gain. */
-  volume: number;
-};
+/** On/off per cue plus one common volume; part of the per-device voice settings and, with an account, stored in the directory (protocol schema). */
+export type SoundSettings = ProtocolSoundSettings;
 
 export const DEFAULT_SOUND_SETTINGS: SoundSettings = {
   selfJoin: true,

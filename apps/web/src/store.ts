@@ -7,6 +7,8 @@ import { DirectoryLink, type LinkStatus } from "./directoryLink";
 import { loadOrCreateIdentity, storeIdentity, type Identity } from "./identity";
 import { ServerConnection, type ServerConnState } from "./serverConnection";
 import { t } from "./i18n";
+import { loadVoiceSettings, sameSoundSettings, saveVoiceSettings, subscribeVoiceSettings } from "./voice/settings";
+import { normalizeSoundSettings, type SoundSettings } from "./voice/sounds";
 
 export type { ChannelMessages, Connection, RawLogEntry, ServerConnState } from "./serverConnection";
 
@@ -36,6 +38,8 @@ export type State = {
   directoryError: string | null;
   /** Servers the handle has signed in on (directory, AccountStatus.servers): the server rail. null = unknown/no account. */
   accountServers: AccountServer[] | null;
+  /** Last failure while saving the voice cue settings in the account (settings tab "Sounds"); null = fine. */
+  soundSyncError: string | null;
   // ---- M7: friends and direct messages over the directory socket
   /** Connection to the directory socket; "idle" also when there is no directory or no account. */
   directoryLink: LinkStatus;
@@ -73,14 +77,18 @@ export class Store {
   /** Moderation (M3) on `host`: moving to another voice channel (null = out) and stopping camera/screen. */
   onVoiceMoved: ((host: string, channelId: string | null, by: string) => void) | null = null;
   onVoiceStop: ((host: string, what: { camera: boolean; screen: boolean }, by: string) => void) | null = null;
+  /** Cue settings as the directory account holds them (null = none there or no account); user changes are pushed when they differ. */
+  private accountSounds: SoundSettings | null = null;
+  private soundPushTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     const home = this.createConnection(this.homeHost, "");
     this.state = {
       identity: null, homeHost: this.homeHost, activeHost: this.homeHost, servers: { [this.homeHost]: home.state },
-      directoryUrl: null, directoryAccount: undefined, directoryError: null, accountServers: null,
+      directoryUrl: null, directoryAccount: undefined, directoryError: null, accountServers: null, soundSyncError: null,
       directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null, friendsError: null,
     };
+    subscribeVoiceSettings((s, source) => { if (source === "user") this.scheduleSoundPush(s.sounds); });
   }
 
   subscribe(fn: (s: State) => void) { this.listeners.add(fn); fn(this.state); return () => { this.listeners.delete(fn); }; }
@@ -352,9 +360,41 @@ export class Store {
   /** Server rail: fetch the account's server list from the directory (signed). Only with a handle; errors are not a sign-in problem. */
   async refreshAccountServers(): Promise<void> {
     const id = this.state.identity; const url = this.state.directoryUrl;
-    if (!id || !url || !this.state.directoryAccount) { this.set({ accountServers: null }); return; }
-    try { this.set({ accountServers: (await api.directoryAccountStatus(url, id)).servers }); }
-    catch (err) { console.warn("Serverliste vom Verzeichnis nicht verfuegbar", err); }
+    if (!id || !url || !this.state.directoryAccount) { this.accountSounds = null; this.set({ accountServers: null }); return; }
+    try {
+      const status = await api.directoryAccountStatus(url, id);
+      this.set({ accountServers: status.servers });
+      this.adoptAccountSounds(status.soundSettings);
+    } catch (err) { console.warn("Serverliste vom Verzeichnis nicht verfuegbar", err); }
+  }
+
+  // ---------- Voice cue settings in the account: the per-device copy in localStorage (voice/settings.ts) stays the working
+  // copy, so servers without a directory keep working; with an account the account's copy wins on load and every user
+  // change is pushed there (signed, coalesced for slider drags).
+  /** Account status arrived: take the account's cue settings over on this device, or seed the account with the local ones if it has none yet. */
+  private adoptAccountSounds(remote: SoundSettings | null): void {
+    const local = loadVoiceSettings();
+    if (!remote) { this.accountSounds = null; this.scheduleSoundPush(local.sounds, 0); return; }
+    const sounds = normalizeSoundSettings(remote);
+    this.accountSounds = sounds;
+    if (!sameSoundSettings(local.sounds, sounds)) saveVoiceSettings({ ...local, sounds }, "directory");
+  }
+  private scheduleSoundPush(sounds: SoundSettings, delayMs = 800): void {
+    if (!this.state.identity || !this.state.directoryUrl || !this.state.directoryAccount) return;
+    if (this.accountSounds && sameSoundSettings(this.accountSounds, sounds)) return;
+    if (this.soundPushTimer) clearTimeout(this.soundPushTimer);
+    this.soundPushTimer = setTimeout(() => { this.soundPushTimer = null; void this.pushSounds(); }, delayMs);
+  }
+  private async pushSounds(): Promise<void> {
+    const id = this.state.identity; const url = this.state.directoryUrl;
+    if (!id || !url || !this.state.directoryAccount) return;
+    const sounds = loadVoiceSettings().sounds;
+    if (this.accountSounds && sameSoundSettings(this.accountSounds, sounds)) return;
+    try {
+      await api.directorySetSoundSettings(url, id, sounds);
+      this.accountSounds = sounds;
+      if (this.state.soundSyncError) this.set({ soundSyncError: null });
+    } catch (err) { this.set({ soundSyncError: api.explainDirectoryError(err) }); }
   }
 
   /** Register a handle at the directory (M6a). */

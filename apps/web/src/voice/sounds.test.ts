@@ -1,3 +1,4 @@
+import { SoundSettings as SoundSettingsSchema, directorySoundSettingsPayload } from "@squorli/protocol";
 import { describe, expect, it } from "vitest";
 import { CUE_TONES, DEFAULT_SOUND_SETTINGS, SOUND_CUES, normalizeSoundSettings, shouldPlayCue } from "./sounds";
 
@@ -38,6 +39,12 @@ describe("join/leave cues", () => {
     expect(shouldPlayCue("selfJoin", on, { deafened: true })).toBe(false);
     expect(shouldPlayCue("selfJoin", { ...on, volume: 0 }, { deafened: false })).toBe(false);
     expect(shouldPlayCue("peerLeave", { ...on, peerLeave: false }, { deafened: false })).toBe(false);
+  });
+
+  it("is exactly what the directory account stores, signed over a canonical line", () => {
+    expect(SoundSettingsSchema.parse(DEFAULT_SOUND_SETTINGS)).toEqual(DEFAULT_SOUND_SETTINGS);
+    expect(SoundSettingsSchema.safeParse({ ...DEFAULT_SOUND_SETTINGS, volume: 1.5 }).success).toBe(false);
+    expect(directorySoundSettingsPayload({ ...DEFAULT_SOUND_SETTINGS, peerLeave: false, volume: 0.35 })).toBe("1110\n0.35");
   });
 
   it("lets the settings preview play a switched-off cue, but not while deafened", () => {
