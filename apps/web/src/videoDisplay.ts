@@ -14,3 +14,9 @@ export function attachVideoView<T>(track: { attach: (element: T) => unknown; det
   track.attach(element);
   return () => { track.detach(element); };
 }
+/** Fit the video content within the available space, preserving its aspect ratio. */
+export function fitVideoWindow(ratio: number, preferredWidth: number, maxWidth: number, maxHeight: number) {
+  const aspect = Number.isFinite(ratio) && ratio > 0 ? ratio : 16 / 9;
+  const width = Math.max(1, Math.min(preferredWidth, maxWidth, maxHeight * aspect));
+  return { width: Math.round(width), height: Math.max(1, Math.round(width / aspect)) };
+}

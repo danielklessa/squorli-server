@@ -40,5 +40,6 @@
 .ic-video::before { content: "\e1a5"; }
 .ic-video-off::before { content: "\e1a6"; }
 .ic-volume-2::before { content: "\e1ab"; }
+.ic-volume-x::before { content: "\e1ac"; }
 .ic-wand-sparkles::before { content: "\e35b"; }
 .ic-x::before { content: "\e1b2"; }

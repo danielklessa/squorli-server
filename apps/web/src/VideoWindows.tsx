@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { VoiceClient, VideoTile } from "./voice/voiceClient";
 import { Icon } from "./Icon";
+import { VideoAudioControls } from "./VideoAudioControls";
 import { t } from "./i18n";
-import { attachVideoView, toggleVideoFullscreen } from "./videoDisplay";
+import { attachVideoView, fitVideoWindow, toggleVideoFullscreen } from "./videoDisplay";
 
 export function TrackVideo({ tile }: { tile: VideoTile }) {
   const ref = useRef<HTMLVideoElement>(null);
@@ -64,7 +65,13 @@ export function useVideoWindows(tiles: VideoTile[], client: VoiceClient) {
     const existing = entriesRef.current.find((entry) => entry.id === tile.id && isOpen(entry));
     if (existing) { existing.window.focus(); return; }
     // Must be synchronous inside the user's click, before any asynchronous work.
-    const popup = window.open("about:blank", "_blank", "popup,width=960,height=600,resizable=yes,scrollbars=yes");
+    const settings = tile.track.mediaStreamTrack.getSettings();
+    const video = Array.from(document.querySelectorAll("video")).find((element) =>
+      element.srcObject instanceof MediaStream && element.srcObject.getVideoTracks().includes(tile.track.mediaStreamTrack));
+    const ratio = video?.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight
+      : settings.width && settings.height ? settings.width / settings.height : 16 / 9;
+    const size = fitVideoWindow(ratio, 960, window.screen.availWidth, Math.max(1, window.screen.availHeight - 120));
+    const popup = window.open("about:blank", "_blank", `popup,width=${size.width},height=${size.height},resizable=yes,scrollbars=no`);
     if (!popup) throw new Error(t("stage.popupBlocked"));
     try {
       const base = popup.document.createElement("base"); base.href = document.baseURI; popup.document.head.appendChild(base);
@@ -78,45 +85,57 @@ export function useVideoWindows(tiles: VideoTile[], client: VoiceClient) {
       setEntries((old) => [...old.filter((entry) => entry.id !== tile.id), { id: tile.id, window: popup, document: popup.document }]);
     } catch { popup.close(); throw new Error(t("stage.popupFailed")); }
   };
-  const windows = entries.map((entry) => {
-    const tile = tiles.find((tile) => tile.id === entry.id);
-    return tile && isOpen(entry) ? <VideoWindow key={entry.id} entry={entry} tile={tile} client={client} /> : null;
-  });
   const restore = (id: string) => {
     entriesRef.current.find((entry) => entry.id === id)?.window.close();
     setEntries((old) => old.filter((entry) => entry.id !== id));
   };
+  const windows = entries.map((entry) => {
+    const tile = tiles.find((tile) => tile.id === entry.id);
+    return tile && isOpen(entry) ? <VideoWindow key={entry.id} entry={entry} tile={tile} client={client} onClose={() => restore(entry.id)} /> : null;
+  });
   return { open, windows, restore, poppedIds: new Set(entries.filter(isOpen).map((entry) => entry.id)) };
 }
 
-function VideoWindow({ entry, tile, client }: { entry: Entry; tile: VideoTile; client: VoiceClient }) {
+function VideoWindow({ entry, tile, client, onClose }: { entry: Entry; tile: VideoTile; client: VoiceClient; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLDivElement>(null);
   const target = useCallback(() => ref.current, []);
   const volume = client.getVideoAudioVolume(tile.id);
   const [error, setError] = useState("");
+  const [focused, setFocused] = useState(() => entry.document.hasFocus());
+  useEffect(() => {
+    const focus = () => setFocused(true);
+    const blur = () => setFocused(false);
+    entry.window.addEventListener("focus", focus);
+    entry.window.addEventListener("blur", blur);
+    setFocused(entry.document.hasFocus());
+    return () => {
+      entry.window.removeEventListener("focus", focus);
+      entry.window.removeEventListener("blur", blur);
+    };
+  }, [entry]);
   useEffect(() => client.setVideoAudioHost(tile.id, audioRef.current!), [client, tile.id]);
   useEffect(() => { ref.current?.focus(); }, []);
   useEffect(() => { entry.document.title = tile.name + " | Squorli"; }, [entry.document, tile.name]);
+
   const fullscreen = async () => {
     try { if (ref.current && !await toggleVideoFullscreen(ref.current)) setError(t("stage.fullscreenUnavailable")); }
     catch { setError(t("stage.fullscreenFailed")); }
   };
-  return createPortal(<div ref={ref} className="video-window" tabIndex={0} aria-label={t("stage.popupVideoHint")}
+  return createPortal(<div ref={ref} className={`video-window${focused ? " focused" : ""}${volume !== null ? " has-volume" : ""}`} tabIndex={0} aria-label={t("stage.popupVideoHint")}
     onDoubleClick={() => { void fullscreen(); }} onClick={() => { void client.startAudio(); }}
     onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key.toLowerCase() === "f" || event.key === "Enter")) { event.preventDefault(); void fullscreen(); } }}>
     <TrackVideo tile={tile} />
     <div ref={audioRef} hidden />
-    <div className="video-window-controls" onDoubleClick={(event) => event.stopPropagation()}>
-      {volume !== null && <label className="video-window-volume">
-        <Icon name="volume-2" />
-        <span className="video-volume-label">{t("stage.popupVolume")}</span>
-        <input type="range" min={0} max={1} step={0.01} value={volume} aria-label={t("stage.popupVolume")}
-          onChange={(event) => client.setVideoAudioVolume(tile.id, Number(event.target.value))} />
-        <output>{Math.round(volume * 100)}%</output>
-      </label>}
+    <div className="tile-label" title={tile.name}>
+      {tile.source === "screen" && <><Icon name="monitor" /> </>}
+      {tile.name}{tile.isLocal && ` ${t("members.you")}`}
+    </div>
+    <div className="tile-window-actions" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+      <button className="icon" title={t("common.close")} aria-label={t("common.close")} onClick={onClose}><Icon name="x" /></button>
       <FullscreenButton target={target} onError={setError} />
     </div>
+    <VideoAudioControls client={client} tile={tile} />
     {error && <div className="video-window-notice" role="alert">{error}<button className="icon" title={t("common.dismiss")} onClick={() => setError("")}><Icon name="x" /></button></div>}
     {!client.state.canPlayback && <button className="video-window-notice" onClick={() => { void client.startAudio(); }}>{t("dock.unblockAudio")}</button>}
   </div>, entry.document.body);

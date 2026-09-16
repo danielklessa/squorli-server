@@ -23,6 +23,32 @@ function setup() {
 }
 
 describe("pop-out audio routing", () => {
+  it("mutes only screen playback and restores its volume across a pop-out", async () => {
+    const { client, screen, audio } = setup();
+    const mic = audio(Track.Source.Microphone), share = audio(Track.Source.ScreenShareAudio);
+    client.setVideoAudioVolume("alice:screen", 0.65);
+    client.toggleVideoAudioMuted("alice:screen");
+    expect(share.volume).toBe(0);
+    expect(mic.volume).toBe(0.4);
+    const restore = client.setVideoAudioHost("alice:screen", screen);
+    await client.setDeafened(true);
+    client.toggleVideoAudioMuted("alice:screen");
+    expect(share.volume).toBe(0.65);
+    expect(share.muted).toBe(true);
+    restore();
+    await client.setDeafened(false);
+    expect(share.volume).toBe(0.65);
+    expect(share.muted).toBe(false);
+  });
+  it("restores the previous volume after moving the slider to zero", () => {
+    const { client, audio } = setup();
+    const share = audio(Track.Source.ScreenShareAudio);
+    client.setScreenAudioVolume("alice", 0);
+    client.toggleVideoAudioMuted("alice:screen");
+    expect(share.volume).toBe(0.4);
+    client.toggleVideoAudioMuted("unknown:screen");
+    expect(share.volume).toBe(0.4);
+  });
   it("adjusts only the selected feed and retains its volume after restoring", () => {
     const { client, camera, audio } = setup();
     const mic = audio(Track.Source.Microphone), share = audio(Track.Source.ScreenShareAudio);

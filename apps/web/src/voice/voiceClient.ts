@@ -286,7 +286,10 @@ export class VoiceClient {
       .on(RoomEvent.ConnectionQualityChanged, () => this.refreshParticipants())
       .on(RoomEvent.ParticipantAttributesChanged, () => this.refreshParticipants())
       .on(RoomEvent.TrackSubscribed, (track, _pub, p) => { this.attachRemote(track, p.identity); if (track.kind === Track.Kind.Video) this.log(`video von ${p.identity.slice(0, 8)}: ${track.source}`); this.refreshTiles(); })
-      .on(RoomEvent.TrackUnsubscribed, (track, _pub, p) => { if (track.kind === Track.Kind.Audio) { track.detach().forEach((el) => el.remove()); this.remoteAudio.delete(track); this.dropMeter(p.identity); } this.refreshTiles(); })
+      // LiveKit emits TrackUnsubscribed before clearing publication.track, so exclude the ended track explicitly;
+      // otherwise the tile survives with a stopped track and the viewers keep a black frame.
+      .on(RoomEvent.TrackUnsubscribed, (track, _pub, p) => { if (track.kind === Track.Kind.Audio) { track.detach().forEach((el) => el.remove()); this.remoteAudio.delete(track); this.dropMeter(p.identity); } this.refreshTiles(track); })
+      .on(RoomEvent.TrackUnpublished, (pub, p) => { this.log(`${p.identity.slice(0, 8)} beendet ${pub.source}`); this.refreshTiles(); })
       .on(RoomEvent.LocalTrackPublished, (pub) => { this.log(`sende ${pub.source}`); this.refreshTiles(); })
       .on(RoomEvent.LocalTrackUnpublished, (pub) => {
         this.log(`beendet ${pub.source}`);
@@ -494,13 +497,29 @@ export class VoiceClient {
     return this.videoAudioTrack(tileId)?.getVolume() ?? null;
   }
 
+  private readonly videoAudioPreviousVolume = new WeakMap<RemoteAudioTrack, number>();
+
+  toggleVideoAudioMuted(tileId: string): void {
+    const track = this.videoAudioTrack(tileId);
+    if (!track) return;
+    const volume = track.getVolume();
+    if (volume > 0) this.videoAudioPreviousVolume.set(track, volume);
+    this.setVideoAudioVolume(tileId, volume > 0 ? 0 : this.videoAudioPreviousVolume.get(track) ?? 1);
+  }
+
   setVideoAudioVolume(tileId: string, volume: number): void {
     if (!Number.isFinite(volume)) return;
-    this.videoAudioTrack(tileId)?.setVolume(Math.max(0, Math.min(1, volume)));
+    const track = this.videoAudioTrack(tileId);
+    const next = Math.max(0, Math.min(1, volume));
+    if (track) {
+      if (track.getVolume() > 0) this.videoAudioPreviousVolume.set(track, track.getVolume());
+      track.setVolume(next);
+    }
     this.patch({});
   }
 
-  private refreshTiles() {
+  /** @param ended a track that is going away right now but is still referenced by its publication (see TrackUnsubscribed) */
+  private refreshTiles(ended?: RemoteTrack) {
     const room = this.room;
     if (!room) return;
     const tiles: VideoTile[] = [];
@@ -508,11 +527,11 @@ export class VoiceClient {
     for (const p of all) {
       const isLocal = p === room.localParticipant;
       const cam = p.getTrackPublication(Track.Source.Camera)?.track;
-      if ((cam instanceof LocalVideoTrack || cam instanceof RemoteVideoTrack) && !cam.isMuted) {
+      if ((cam instanceof LocalVideoTrack || cam instanceof RemoteVideoTrack) && cam !== ended && !cam.isMuted) {
         tiles.push({ id: `${p.identity}:camera`, identity: p.identity, name: p.name || p.identity, isLocal, source: "camera", track: cam, audio: null, hasAudio: false });
       }
       const scr = p.getTrackPublication(Track.Source.ScreenShare)?.track;
-      if (scr instanceof LocalVideoTrack || scr instanceof RemoteVideoTrack) {
+      if ((scr instanceof LocalVideoTrack || scr instanceof RemoteVideoTrack) && scr !== ended) {
         const audioPub = p.getTrackPublication(Track.Source.ScreenShareAudio);
         const audio = audioPub?.track instanceof RemoteAudioTrack ? audioPub.track : null;
         tiles.push({ id: `${p.identity}:screen`, identity: p.identity, name: p.name || p.identity, isLocal, source: "screen", track: scr, audio, hasAudio: !!audioPub });

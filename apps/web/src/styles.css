@@ -460,7 +460,7 @@ button.icon.on { color: var(--brand); }
 .tile-window-error { position: absolute; inset: 3.5rem 0.5rem auto; padding: 0.75rem; border-radius: var(--r); background: var(--bg); color: var(--danger); font-size: 0.875rem; max-height: calc(100% - 4rem); overflow-y: auto; }
 .tile:fullscreen { width: 100%; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; background: var(--bg); cursor: default; }
 .tile:fullscreen video { object-fit: contain; }
-.tile:fullscreen .tile-window-actions { top: 1rem; right: 1rem; }
+.tile:fullscreen .tile-window-actions, .video-window:fullscreen .tile-window-actions { top: 1rem; right: 1rem; }
 .video-window-body { margin: 0; height: 100dvh; overflow: hidden; background: #000; }
 .video-window { position: relative; width: 100%; height: 100%; background: #000; outline: none; }
 .video-window > video { display: block; width: 100%; height: 100%; object-fit: contain; }
@@ -471,15 +471,17 @@ button.icon.on { color: var(--brand); }
 .tile-popped > .ic { font-size: 1.5rem; }
 .stage-strip .tile-popped { gap: 0.125rem; font-size: 0.75rem; padding: 0.25rem 0.25rem 1.5rem; }
 .stage-strip .tile-popped > .ic { display: none; }
-/* Controls float over the picture; no permanent frame or space reserved around the video. */
-.video-window-controls { position: absolute; left: 1rem; right: 1rem; bottom: 1rem; display: flex; align-items: center; justify-content: flex-end; gap: 1rem; padding: 0.5rem 0.75rem; border: 0; border-radius: 12px; background: rgba(0,0,0,.75); color: #fff; opacity: 0; pointer-events: none; transition: opacity 0.15s; }
-.video-window:hover .video-window-controls, .video-window-controls:focus-within { opacity: 1; pointer-events: auto; }
-.video-window-volume { display: flex; align-items: center; gap: 0.75rem; margin-right: auto; min-width: 0; font-size: 0.875rem; }
-.video-window-volume input { width: clamp(4rem, 24vw, 12rem); min-width: 0; accent-color: #fff; }
-.video-window-volume output { min-width: 3rem; font-variant-numeric: tabular-nums; }
-.video-window-controls button.icon { color: #fff; min-width: 2.5rem; min-height: 2.5rem; }
-.video-window-controls button.icon:hover { background: rgba(255,255,255,.15); }
-.video-window-controls :focus-visible { outline-color: #fff; }
-.video-window-notice { bottom: 5rem; }
-@media (hover: none) { .video-window-controls { opacity: 1; pointer-events: auto; } }
-@media (max-width: 480px) { .video-volume-label { display: none; } .video-window-controls { gap: 0.5rem; left: 0.5rem; right: 0.5rem; } }
+/* Use the stage controls in separate windows, including keyboard and touch access. */
+.tile .tile-window-actions, .tile .tile-volume,
+.video-window .tile-window-actions, .video-window .tile-volume { opacity: 0; pointer-events: none; transition: opacity .15s; }
+.tile:hover .tile-window-actions, .tile:hover .tile-volume,
+.tile .tile-window-actions:focus-within, .tile .tile-volume:focus-within { opacity: 1; pointer-events: auto; }
+.video-window.focused:hover .tile-window-actions, .video-window.focused:hover .tile-volume,
+.video-window.focused .tile-window-actions:focus-within, .video-window.focused .tile-volume:focus-within { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .tile .tile-window-actions, .tile .tile-volume, .video-window.focused .tile-window-actions, .video-window.focused .tile-volume { opacity: 1; pointer-events: auto; } }
+.has-volume { --video-audio-width: min(12rem, 60%); }
+.has-volume .tile-label { max-width: calc(100% - var(--video-audio-width) - 1.2rem); min-height: 2.25rem; line-height: 2.05rem; }
+.video-audio-controls { display: flex; align-items: center; gap: 0.25rem; bottom: 0.4rem; width: var(--video-audio-width); padding: 0.125rem 0.375rem; border-radius: 10px; background: var(--bg); color: var(--text); }
+.video-audio-controls input { flex: 1; width: 0; min-width: 0; }
+.video-audio-controls button.icon { flex: none; min-width: 2rem; min-height: 2rem; color: var(--text); }
+.video-audio-controls output { flex: none; min-width: 4ch; white-space: nowrap; font-size: 0.75rem; font-variant-numeric: tabular-nums; text-align: right; }

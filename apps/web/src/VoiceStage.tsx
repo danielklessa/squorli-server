@@ -1,4 +1,5 @@
 import { FullscreenButton, TrackVideo } from "./VideoWindows";
+import { VideoAudioControls } from "./VideoAudioControls";
 import { Avatar } from "./Avatar";
 import { Permission, displayNameOf, hasPermission, type Channel, type Member } from "@squorli/protocol";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -164,9 +165,9 @@ function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onResto
   const ref = useRef<HTMLDivElement>(null);
   const target = useCallback(() => ref.current, []);
   const [error, setError] = useState("");
-  const volume = tile ? client.getVideoAudioVolume(tile.id) ?? 1 : 1;
+  const hasAudioControls = item.kind === "screen" && !!tile && !tile.isLocal && client.getVideoAudioVolume(tile.id) !== null;
   const popped = !!tile && poppedIds.has(tile.id);
-  const cls = ["tile", item.kind, p.speaking && item.kind === "camera" ? "speaking" : "", big ? "big" : "", tile && !popped ? "" : "avatar"].join(" ");
+  const cls = ["tile", item.kind, hasAudioControls ? "has-volume" : "", p.speaking && item.kind === "camera" ? "speaking" : "", big ? "big" : "", tile && !popped ? "" : "avatar"].join(" ");
   return (
     <div ref={ref} className={cls} onClick={() => { if (!ref.current?.ownerDocument.fullscreenElement) onClick(); }} title={big ? t("stage.backToGrid") : t("stage.enlarge")}>
       {popped ? <div className="tile-popped"><Icon name="external-link" /><span>{t("stage.poppedOut")}</span><button className="secondary small" onClick={(event) => { event.stopPropagation(); onRestore(tile!.id); }}>{t("stage.restoreVideo")}</button></div> : tile ? <TrackVideo tile={tile} /> : <Avatar name={p.name} size="large" />}
@@ -182,10 +183,7 @@ function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onResto
         {item.kind === "screen" && tile?.hasAudio && <> <Icon name="volume-2" title={t("stage.withAudio")} /></>}
         {pinned && <> <Icon name="pin" title={t("stage.pinned")} /></>}
       </div>
-      {item.kind === "screen" && tile?.audio && (
-        <input className="tile-volume" type="range" min={0} max={1} step={0.05} value={volume} title={t("stage.screenVolume")}
-          onClick={(e) => e.stopPropagation()} onChange={(e) => { const v = Number(e.target.value); client.setScreenAudioVolume(p.identity, v); }} />
-      )}
+      {hasAudioControls && tile && <VideoAudioControls client={client} tile={tile} />}
     </div>
   );
 }

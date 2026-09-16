@@ -437,6 +437,8 @@ export const en: Messages = {
   "stage.withAudio": "with audio",
   "stage.pinned": "pinned",
   "stage.screenVolume": "Volume of the screen audio",
+  "stage.mutePlayback": "Mute audio for me",
+  "stage.unmutePlayback": "Unmute audio for me",
 
   // ---- Debug panel
   "debug.heading": "Voice and video",

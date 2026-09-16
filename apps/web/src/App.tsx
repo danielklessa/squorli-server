@@ -18,7 +18,7 @@ import { ServerBrowser } from "./ServerBrowser";
 import { ServerRail, type RailServer } from "./ServerRail";
 import { loadVoiceSettings, saveVoiceSettings } from "./voice/settings";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
-import { Permission, directoryServerIconUrl, directoryServerUrl, hasPermission } from "@squorli/protocol";
+import { Permission, directoryServerIconUrl, directoryServerUrl, displayNameOf, hasPermission } from "@squorli/protocol";
 import { Store, activeState, homeState, type State } from "./store";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 import { t } from "./i18n";
@@ -28,7 +28,6 @@ export function App() {
   const client = useMemo(() => new VoiceClient(), []);
   const [state, setState] = useState<State>(store.state);
   const [voice, setVoice] = useState<VoiceState>(client.state);
-  const videoWindows = useVideoWindows(voice.tiles, client);
   const [showAdmin, setShowAdmin] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
@@ -122,6 +121,10 @@ export function App() {
   }, [client, store, voice.channelId, leaveVoice]);
 
   const voiceServer = voiceHost ? state.servers[voiceHost] ?? null : null;
+  const videoWindows = useVideoWindows(voice.tiles.map((tile) => {
+    const member = voiceServer?.server?.members.find((member) => member.userId === tile.identity);
+    return member ? { ...tile, name: displayNameOf(member) } : tile;
+  }), client);
   const voiceChannel = voiceServer?.server?.channels.find((c) => c.id === voice.channelId) ?? null;
 
   // The channel's voice profile changed (admin) -> switch the microphone over live.

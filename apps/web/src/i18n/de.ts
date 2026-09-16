@@ -438,6 +438,8 @@ export const de = {
   "stage.withAudio": "mit Ton",
   "stage.pinned": "angeheftet",
   "stage.screenVolume": "Lautstärke des Bildschirm-Tons",
+  "stage.mutePlayback": "Ton für mich stummschalten",
+  "stage.unmutePlayback": "Ton für mich einschalten",
 
   // ---- Debug panel
   "debug.heading": "Sprache und Video",

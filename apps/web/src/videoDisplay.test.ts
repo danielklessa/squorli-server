@@ -1,5 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
-import { attachVideoView, toggleVideoFullscreen } from "./videoDisplay";
+import { attachVideoView, fitVideoWindow, toggleVideoFullscreen } from "./videoDisplay";
+
+describe("video window sizing", () => {
+  it("uses landscape, portrait and ultrawide video proportions", () => {
+    expect(fitVideoWindow(16 / 9, 960, 1920, 1080)).toEqual({ width: 960, height: 540 });
+    expect(fitVideoWindow(9 / 16, 960, 1920, 960)).toEqual({ width: 540, height: 960 });
+    expect(fitVideoWindow(32 / 9, 960, 1920, 1080)).toEqual({ width: 960, height: 270 });
+  });
+  it("limits both dimensions to the available screen area", () => {
+    expect(fitVideoWindow(4 / 3, 960, 640, 900)).toEqual({ width: 640, height: 480 });
+    expect(fitVideoWindow(4 / 3, 960, 1920, 600)).toEqual({ width: 800, height: 600 });
+  });
+  it("uses a fallback until video dimensions are available", () => {
+    expect(fitVideoWindow(NaN, 960, 1920, 1080)).toEqual({ width: 960, height: 540 });
+    expect(fitVideoWindow(0, 960, 1920, 1080)).toEqual({ width: 960, height: 540 });
+  });
+});
 
 describe("video fullscreen", () => {
   it("requests fullscreen on the selected video container", async () => {
