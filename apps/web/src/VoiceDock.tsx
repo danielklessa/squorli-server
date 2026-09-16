@@ -6,6 +6,7 @@ import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 import { Icon } from "./Icon";
 import { BLUR_OPTIONS } from "./CameraPicker";
 import { t, tOr } from "./i18n";
+import { SOUND_CUES, type SoundCue, type SoundSettings } from "./voice/sounds";
 
 type Props = {
   client: VoiceClient;
@@ -24,12 +25,21 @@ type Props = {
   onToggleCamera: () => Promise<void>;
 };
 
-type SettingsTab = "voice" | "devices" | "camera";
+type SettingsTab = "voice" | "devices" | "camera" | "sounds";
 const SETTINGS_TABS: { id: SettingsTab; label: string; icon: string }[] = [
   { id: "voice", label: t("settings.tab.voice"), icon: "mic" },
   { id: "devices", label: t("settings.tab.devices"), icon: "headphones" },
   { id: "camera", label: t("settings.tab.camera"), icon: "video" },
+  { id: "sounds", label: t("settings.tab.sounds"), icon: "bell" },
 ];
+
+/** Label per cue, in the order they are offered in the settings. */
+const SOUND_LABELS: Record<SoundCue, string> = {
+  selfJoin: t("settings.soundSelfJoin"),
+  selfLeave: t("settings.soundSelfLeave"),
+  peerJoin: t("settings.soundPeerJoin"),
+  peerLeave: t("settings.soundPeerLeave"),
+};
 
 const isTypingTarget = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
@@ -51,6 +61,7 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, onL
     if (patch.mode) client.setMode(patch.mode);
     if (patch.vadThreshold !== undefined) client.setThreshold(patch.vadThreshold);
     if (patch.vadHangoverMs !== undefined) client.setHangover(patch.vadHangoverMs);
+    if (patch.sounds) client.setSoundSettings(patch.sounds);
   }
 
   useEffect(() => {
@@ -210,6 +221,29 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, onL
                   <span className="muted small">{t("settings.screenAudioHint")}</span>
                 </label>
                 {!joined && <span className="muted small">{t("settings.deviceNamesHint")}</span>}
+              </>
+            )}
+
+            {tab === "sounds" && (
+              <>
+                <h3>{t("settings.soundsHead")}</h3>
+                {SOUND_CUES.map((cue) => (
+                  <div className="row" key={cue}>
+                    <label className="check">
+                      <input type="checkbox" checked={settings.sounds[cue]}
+                        onChange={(e) => update({ sounds: { ...settingsRef.current.sounds, [cue]: e.target.checked } as SoundSettings })} />
+                      {SOUND_LABELS[cue]}
+                    </label>
+                    <button className="icon" title={t("settings.soundPreview")} aria-label={`${SOUND_LABELS[cue]}: ${t("settings.soundPreview")}`}
+                      onClick={() => client.playSound(cue, true)}><Icon name="play" /></button>
+                  </div>
+                ))}
+                <label className="stack">
+                  {t("settings.soundVolume", { pct: Math.round(settings.sounds.volume * 100) })}
+                  <input type="range" min={0} max={1} step={0.05} value={settings.sounds.volume}
+                    onChange={(e) => update({ sounds: { ...settingsRef.current.sounds, volume: Number(e.target.value) } })} />
+                </label>
+                <span className="muted small">{t("settings.soundsHint")}</span>
               </>
             )}
 

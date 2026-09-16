@@ -18,6 +18,7 @@ import { BackgroundBlur, supportsBackgroundProcessors, type BackgroundProcessorW
 import { VoiceGate, rmsLevel } from "./gate";
 import { MicPipeline, type GateMode } from "./micPipeline";
 import type { VoiceSettings } from "./settings";
+import { DEFAULT_SOUND_SETTINGS, applyCueOutput, normalizeSoundSettings, playCue, shouldPlayCue, type SoundCue, type SoundSettings } from "./sounds";
 import { t } from "../i18n";
 
 /**
@@ -98,6 +99,8 @@ const SILENT_WAV = "data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAE
 const REMOTE_SPEAK_THRESHOLD = 0.015;
 const REMOTE_SPEAK_HANGOVER_MS = 250;
 const EVENTS_MAX = 40;
+/** Quiet period after connecting: participants reported within it were already in the room. */
+const PEER_CUE_GRACE_MS = 1500;
 
 /** Selected ICE path per transport direction, e.g. "udp srflx->host" or "relay (TURN)". */
 export type IcePath = { publisher: string | null; subscriber: string | null };
@@ -161,6 +164,14 @@ export class VoiceClient {
   /** Level meter per remote microphone track: speaker highlight without the delay of LiveKit's report (~0.5-1 s). */
   private readonly meters = new Map<string, { source: MediaStreamAudioSourceNode; analyser: AnalyserNode; gate: VoiceGate; samples: Float32Array<ArrayBuffer> }>();
   private meterTimer: number | null = null;
+  /** Cues for joining/leaving (per device, from the voice settings). */
+  private sounds: SoundSettings = { ...DEFAULT_SOUND_SETTINGS };
+  /** join() replaces a running room: the room change is one move, so it gets no leave cue. */
+  private switchingRoom = false;
+  /** No cues for other participants before this time: the ones already in the room are not arrivals. */
+  private peerCuesFrom = 0;
+  /** A room was fully joined (the join cue played), so leaving it earns the leave cue. */
+  private cueJoined = false;
 
   constructor(audioHost?: HTMLElement) {
     this.audioHost = audioHost ?? VoiceClient.makeHost();
@@ -224,8 +235,24 @@ export class VoiceClient {
     this.patch({ events: [...this.state.events.slice(-(EVENTS_MAX - 1)), line] });
   }
 
+  /** Take over the cue settings (settings dialog and join); also routes the cues to the chosen output device. */
+  setSoundSettings(s: SoundSettings): void {
+    this.sounds = normalizeSoundSettings(s);
+  }
+
+  /**
+   * Play one cue if the settings allow it. `force` is the preview in the settings dialog: it ignores the
+   * switch for that cue, but deafening and volume 0 still keep everything silent.
+   */
+  playSound(cue: SoundCue, force = false): void {
+    if (!shouldPlayCue(cue, this.sounds, { deafened: this.state.deafened, force })) return;
+    playCue(this.ensureCtx(), cue, this.sounds.volume);
+  }
+
   async join(channelId: string, url: string, token: string, settings: VoiceSettings, opts: JoinOptions = {}): Promise<void> {
-    if (this.room) await this.leave();
+    this.setSoundSettings(settings.sounds);
+    applyCueOutput(this.ensureCtx(), settings.outputDeviceId);
+    if (this.room) { this.switchingRoom = true; try { await this.leave(); } finally { this.switchingRoom = false; } }
     this.audioProfile = opts.audio ?? DEFAULT_AUDIO_PROFILE;
     this.micSettings = settings;
     this.patch({ status: "connecting", channelId, rtcUrl: url, error: null, audioProfile: this.audioProfile });
@@ -248,8 +275,8 @@ export class VoiceClient {
     this.room = room;
     this.log(`verbinde mit ${url}${opts.iceTransportPolicy === "relay" ? " (nur TURN/relay)" : ""}`);
     room
-      .on(RoomEvent.ParticipantConnected, (p) => { this.log(`teilnehmer da: ${p.identity.slice(0, 8)}`); this.refreshParticipants(); })
-      .on(RoomEvent.ParticipantDisconnected, (p) => { this.log(`teilnehmer weg: ${p.identity.slice(0, 8)}`); this.refreshParticipants(); })
+      .on(RoomEvent.ParticipantConnected, (p) => { this.log(`teilnehmer da: ${p.identity.slice(0, 8)}`); this.peerCue("peerJoin"); this.refreshParticipants(); })
+      .on(RoomEvent.ParticipantDisconnected, (p) => { this.log(`teilnehmer weg: ${p.identity.slice(0, 8)}`); this.peerCue("peerLeave"); this.refreshParticipants(); })
       .on(RoomEvent.Reconnecting, () => this.log("verbindung unterbrochen, versuche erneut"))
       .on(RoomEvent.Reconnected, () => this.log("wieder verbunden"))
       .on(RoomEvent.MediaDevicesError, (e) => this.log(`Gerätefehler: ${e.message}`))
@@ -301,6 +328,10 @@ export class VoiceClient {
       this.log(`audio-kontext ${mic.contextState()}, wiedergabe ${room.canPlaybackAudio ? "frei" : "blockiert (klicken)"}`);
       this.startMeters();
       this.refreshParticipants();
+      this.cueJoined = true;
+      this.playSound("selfJoin");
+      // Participants already in the room arrive as subscriptions right after connecting, not as arrivals: no cue for them.
+      this.peerCuesFrom = Date.now() + PEER_CUE_GRACE_MS;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await this.leave();
@@ -311,6 +342,11 @@ export class VoiceClient {
 
   async leave(): Promise<void> {
     const room = this.room;
+    // Only a room actually joined gets a leave cue: a failed connection attempt and a channel switch stay silent.
+    const wasJoined = this.cueJoined;
+    this.cueJoined = false;
+    this.peerCuesFrom = 0;
+    if (wasJoined && !this.switchingRoom) this.playSound("selfLeave");
     this.room = null;
     this.publication = null;
     this.stopMeters();
@@ -539,6 +575,7 @@ export class VoiceClient {
   }
 
   async setOutputDevice(deviceId: string): Promise<void> {
+    applyCueOutput(this.ensureCtx(), deviceId || null);
     await this.room?.switchActiveDevice("audiooutput", deviceId);
     // LiveKit sets the device for all tracks; put the screen audio back on its own device afterwards.
     await this.applyScreenSink();
@@ -673,6 +710,12 @@ export class VoiceClient {
     m.source.disconnect(); m.analyser.disconnect();
     this.meters.delete(identity);
   }
+  /** Cue for another participant, unless we have only just connected (then they were already there). */
+  private peerCue(cue: "peerJoin" | "peerLeave"): void {
+    if (this.peerCuesFrom === 0 || Date.now() < this.peerCuesFrom) return;
+    this.playSound(cue);
+  }
+
   private startMeters() {
     this.stopMeters();
     this.meterTimer = window.setInterval(() => {

@@ -2,6 +2,7 @@
 @font-face { font-family: "lucide"; src: url("./lucide.woff2") format("woff2"); font-weight: normal; font-style: normal; font-display: block; }
 .ic { font-family: "lucide" !important; font-style: normal; font-weight: normal; line-height: 1; display: inline-block; vertical-align: -0.125em; -webkit-font-smoothing: antialiased; }
 .ic-ban::before { content: "\e051"; }
+.ic-bell::before { content: "\e059"; }
 .ic-bug::before { content: "\e20c"; }
 .ic-check::before { content: "\e06c"; }
 .ic-chevron-down::before { content: "\e06d"; }
@@ -26,6 +27,7 @@
 .ic-pencil::before { content: "\e1f9"; }
 .ic-phone::before { content: "\e133"; }
 .ic-pin::before { content: "\e259"; }
+.ic-play::before { content: "\e13c"; }
 .ic-screen-share::before { content: "\e14f"; }
 .ic-screen-share-off::before { content: "\e150"; }
 .ic-server::before { content: "\e153"; }

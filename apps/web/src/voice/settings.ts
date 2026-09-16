@@ -1,6 +1,8 @@
 /**
  * Voice settings per device (PLAN 3.5: "the user chooses per device"). Stored in localStorage.
  */
+import { DEFAULT_SOUND_SETTINGS, normalizeSoundSettings, type SoundSettings } from "./sounds";
+
 export type VoiceMode = "vad" | "ptt";
 
 export type VoiceSettings = {
@@ -20,6 +22,8 @@ export type VoiceSettings = {
   cameraQuality: "360p" | "720p";
   /** Camera background blur: 0 = off, otherwise the radius (10 light, 20 strong). Only in browsers that support it. */
   cameraBlur: number;
+  /** Cues when you or someone else joins or leaves the voice room; each one switchable. */
+  sounds: SoundSettings;
 };
 
 const KEY = "chat.voice.v1";
@@ -35,13 +39,16 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   cameraDeviceId: null,
   cameraQuality: "720p",
   cameraBlur: 0,
+  sounds: { ...DEFAULT_SOUND_SETTINGS },
 };
 
 export function loadVoiceSettings(): VoiceSettings {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...DEFAULT_VOICE_SETTINGS };
-    return { ...DEFAULT_VOICE_SETTINGS, ...(JSON.parse(raw) as Partial<VoiceSettings>) };
+    const stored = JSON.parse(raw) as Partial<VoiceSettings>;
+    // `sounds` is nested, so it needs its own merge: settings stored before the cues existed have no such field.
+    return { ...DEFAULT_VOICE_SETTINGS, ...stored, sounds: normalizeSoundSettings(stored.sounds) };
   } catch {
     return { ...DEFAULT_VOICE_SETTINGS };
   }
