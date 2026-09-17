@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
-import { DEFAULT_AFK_MOVE_MINUTES, DirectoryLeaveRequest, DirectoryNotifyRequest, PROTOCOL_VERSION, RADIO_IDLE_STOP_MS } from "@squorli/protocol";
+import { DirectoryLeaveRequest, DirectoryNotifyRequest, PROTOCOL_VERSION, RADIO_IDLE_STOP_MS } from "@squorli/protocol";
 import { and, eq, isNotNull } from "drizzle-orm";
 import Fastify from "fastify";
 import { existsSync, readFileSync } from "node:fs";
@@ -126,15 +126,15 @@ async function main() {
   hub.onPresence(() => { void broadcastStructure(db, hub, ["members"]).catch((err) => app.log.warn({ err }, "presence broadcast")); });
   const lk = new LivekitAdmin(config, app.log);
 
-  // AFK channel: absent members of a voice channel are moved there once the admin's time is up (voice/afk.ts). Checked
-  // every few seconds, because the time runs without any event; nobody is moved out of a channel that shows a video.
+  // AFK channel: absent members of a voice channel are moved there (voice/afk.ts), right when they turn absent (below) and
+  // every few seconds, because a video that kept its channel's members from being moved ends without any event here.
   const afkMover = new AfkMover();
   const afkSweep = async () => {
     const afk = hub.afkUsers();
     const settings = afk.length ? await loadSettings(db) : null;
     const afkChannelId = settings?.afkChannelId ?? null;
     const exemptChannels = new Set(afkChannelId ? (await loadChannels(db)).filter((c) => c.radio?.twitchChannel || c.radio?.youtubeVideo).map((c) => c.id) : []);
-    const due = afkMover.due({ afkChannelId, moveAfterMs: (settings?.afkMoveMinutes ?? DEFAULT_AFK_MOVE_MINUTES) * 60_000, now: Date.now(), afk, channelOf: (userId) => presence.channelOfUser(userId), exemptChannels });
+    const due = afkMover.due({ afkChannelId, afk, channelOf: (userId) => presence.channelOfUser(userId), exemptChannels });
     for (const { userId, from } of due) {
       hub.sendToUser(userId, { type: "voice.moved", channelId: afkChannelId, by: settings!.name, reason: "afk" });
       app.log.info({ userId, from }, "Mitglied in den AFK-Kanal verschoben");
@@ -142,7 +142,7 @@ async function main() {
   };
   const afkTimer = setInterval(() => { void afkSweep().catch((err) => app.log.warn({ err }, "afk sweep")); }, 5_000);
   app.addHook("onClose", async () => clearInterval(afkTimer));
-  hub.onPresence(() => { void afkSweep().catch((err) => app.log.warn({ err }, "afk sweep")); }); // right away when the time is already up
+  hub.onPresence(() => { void afkSweep().catch((err) => app.log.warn({ err }, "afk sweep")); }); // right away when somebody turns absent
 
   // Web radio "now playing": the server reads a station's titles only while somebody sits in a voice channel playing it.
   const radioMeta = new RadioMetadata((channelId, title) => hub.broadcast({ type: "radio.meta", channelId, title }), app.log);

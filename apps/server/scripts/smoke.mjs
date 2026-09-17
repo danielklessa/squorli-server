@@ -559,11 +559,10 @@ check("move out of voice -> voice.moved null", smv2 === 200 && !!evMovedOut);
 // ---------- AFK detection: status from the connections' activity reports, AFK channel (setting, silent token, no radio, move)
 const [saf0] = await api("PATCH", "/api/settings", { afkChannelId: voiceCh2.id }, B.token);
 const [saf1] = await api("PATCH", "/api/settings", { afkChannelId: textCh.id }, owner.token);
-const [saf2] = await api("PATCH", "/api/settings", { afkMoveMinutes: 7 }, owner.token);
 const [saf3] = await api("PATCH", "/api/settings", { afkChannelId: voiceCh2.id }, owner.token);
 const [, stAfk] = await api("GET", "/api/state", undefined, owner.token);
-check("afk channel: MANAGE_SERVER, a voice channel, one of the offered times; default 5 minutes", saf0 === 403 && saf1 === 400 && saf2 === 400 && saf3 === 200
-  && stAfk.settings.afkChannelId === voiceCh2.id && stAfk.settings.afkMoveMinutes === 5 && wsA.welcome.state.settings.afkChannelId === null, `${saf0} ${saf1} ${saf2} ${saf3}`);
+check("afk channel: MANAGE_SERVER and a voice channel; no time of its own per server", saf0 === 403 && saf1 === 400 && saf3 === 200
+  && stAfk.settings.afkChannelId === voiceCh2.id && stAfk.settings.afkMoveMinutes === undefined && wsA.welcome.state.settings.afkChannelId === null, `${saf0} ${saf1} ${saf3}`);
 const [, afkTok] = await api("POST", "/api/rtc-token", { channelId: voiceCh2.id }, owner.token);
 const [srAfk, radioAfk] = await api("PUT", `/api/channels/${voiceCh2.id}/radio`, { url: streamUrl }, owner.token);
 check("afk channel: token without publish and subscribe grants, no radio", grantOf(afkTok.token).canPublish === false && grantOf(afkTok.token).canSubscribe === false && grantOf(afkTok.token).roomJoin === true

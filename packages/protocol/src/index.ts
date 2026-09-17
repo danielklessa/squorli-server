@@ -104,18 +104,14 @@ export const ServerSettings = z.object({
   radioAutoStop: z.boolean().optional(),
   /**
    * AFK channel: the voice channel absent members are moved to, null = none. Nobody can send, hear or share anything in it
-   * (the LiveKit token carries no publish or subscribe grant) and it has no radio. Optional = feature flag: a server from
-   * before the AFK detection does not send the field; clients then report no activity to it and hide the setting.
+   * (the LiveKit token carries no publish or subscribe grant) and it has no radio. Members are moved the moment they turn
+   * absent, i.e. after AFK_AFTER_MS: that time is fixed for every server, because friends see the same state through the
+   * directory (user's decision). Optional = feature flag: a server from before the AFK detection does not send the field
+   * (one that knows it sends null for "none"); clients then report no activity to it and hide the setting.
    */
   afkChannelId: Uuid.nullable().optional(),
-  /** Minutes without activity after which a member in a voice channel is moved to the AFK channel (one of AFK_MOVE_MINUTES). */
-  afkMoveMinutes: z.number().int().min(5).max(60).optional(),
 });
-export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true, requireAccount: true, listed: true, description: true, radioAutoStop: true, afkChannelId: true }).partial()
-  .extend({ afkMoveMinutes: z.union([z.literal(5), z.literal(10), z.literal(15), z.literal(30), z.literal(60)]).optional() });
-/** What the admin area offers for ServerSettings.afkMoveMinutes; the AFK status itself always comes after AFK_AFTER_MS. */
-export const AFK_MOVE_MINUTES = [5, 10, 15, 30, 60] as const;
-export const DEFAULT_AFK_MOVE_MINUTES = 5;
+export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true, requireAccount: true, listed: true, description: true, radioAutoStop: true, afkChannelId: true }).partial();
 /** How long a voice channel may stay empty before its radio is turned off (ServerSettings.radioAutoStop). */
 export const RADIO_IDLE_STOP_MS = 2 * 60_000;
 
@@ -399,7 +395,7 @@ export const ClientTyping = z.object({ type: z.literal("typing"), channelId: Uui
 /**
  * AFK detection: this connection's user has given no input (and has not spoken) for AFK_AFTER_MS (`idle: true`) or is back.
  * A connection counts as active until it says otherwise; a member is AFK once all their connections are idle. Sent only to
- * servers whose settings carry `afkMoveMinutes` (older servers would answer `bad_message`).
+ * servers whose settings carry `afkChannelId` (older servers would answer `bad_message`).
  */
 export const ClientActivity = z.object({ type: z.literal("activity"), idle: z.boolean() });
 

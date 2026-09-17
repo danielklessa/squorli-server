@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AFK_MOVE_MINUTES, ClientEvent, DirectoryClientEvent, DirectoryServerEvent, Friend, Member, ServerEvent, ServerSettings, UpdateSettingsRequest } from "./index";
+import { AFK_AFTER_MS, ClientEvent, DirectoryClientEvent, DirectoryServerEvent, Friend, Member, ServerEvent, ServerSettings, UpdateSettingsRequest } from "./index";
 
 const KEY = "a".repeat(64);
 const UUID = "6f1c2a4e-1b2c-4d3e-8f90-000000000000";
@@ -19,7 +19,6 @@ describe("AFK detection", () => {
     expect(presence.type === "friends.presence" && presence.afk).toBe(false);
     const old = ServerSettings.parse({ name: "S", openJoin: true, ownerId: null, iconUrl: null, requireAccount: false, requireAccountLocked: false, listed: false, description: null });
     expect(old.afkChannelId).toBeUndefined();
-    expect(old.afkMoveMinutes).toBeUndefined();
   });
 
   it("marks a move for inactivity, and older moves parse without a reason", () => {
@@ -28,10 +27,9 @@ describe("AFK detection", () => {
     expect(ServerEvent.safeParse({ type: "voice.moved", channelId: null, by: "Mod" }).success).toBe(true);
   });
 
-  it("accepts only the offered move times and lets the AFK channel be cleared", () => {
-    for (const n of AFK_MOVE_MINUTES) expect(UpdateSettingsRequest.safeParse({ afkMoveMinutes: n }).success).toBe(true);
-    expect(UpdateSettingsRequest.safeParse({ afkMoveMinutes: 7 }).success).toBe(false);
-    expect(UpdateSettingsRequest.parse({ afkChannelId: null })).toEqual({ afkChannelId: null });
+  it("is one fixed time for everyone; the AFK channel is the only setting and can be cleared", () => {
+    expect(AFK_AFTER_MS).toBe(10 * 60_000);
+    expect(UpdateSettingsRequest.parse({ afkChannelId: null, afkMoveMinutes: 30 })).toEqual({ afkChannelId: null });
     expect(UpdateSettingsRequest.safeParse({ afkChannelId: "lobby" }).success).toBe(false);
   });
 });

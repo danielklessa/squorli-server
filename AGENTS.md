@@ -27,7 +27,7 @@ Feature notes (dated entries: wishes, decisions, consequences, what was checked)
 |---|---|
 | Web radio in voice channels: stations, typed addresses, playlists, Twitch and YouTube players, playing in step, idle stop, now playing | `docs/features/radio.md` |
 | Voice, camera, screen share, stage: per-person volume, `VIEW_VIDEO`, cues, pop-outs and fullscreen, voice card, voice channel moderation | `docs/features/voice-video.md` |
-| AFK detection (absent after 5 minutes without input or speaking, system-wide with the Idle Detection API), AFK channel, AFK in the friends list | `docs/features/afk.md` |
+| AFK detection (absent after 10 minutes without input or speaking, one fixed time for every server, system-wide with the Idle Detection API), AFK channel, AFK in the friends list | `docs/features/afk.md` |
 | Mentions, unread marks, read states on the server, mutes, rail marks for every server | `docs/features/mentions-unread.md` |
 | Markdown in messages, growing message input, focus after sending | `docs/features/markdown-input.md` |
 | Emoji: font, conversion, picker | `docs/features/emoji.md` |

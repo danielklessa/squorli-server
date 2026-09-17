@@ -16,9 +16,10 @@ export const DIRECTORY_WS_VERSION = 1;
 
 /**
  * AFK detection: no input (and no speaking) for this long = absent. The chat client measures it and reports it to its chat
- * servers (`activity` in index.ts) and to the directory (`activity` below), so friends see it too.
+ * servers (`activity` in index.ts) and to the directory (`activity` below), so friends see it too. Fixed at ten minutes for
+ * everyone (user's decision): one state is shown on every server and to friends, so no server sets a time of its own.
  */
-export const AFK_AFTER_MS = 5 * 60_000;
+export const AFK_AFTER_MS = 10 * 60_000;
 
 /** Signature on connect: bound to the directory's host like every other signature. */
 export function directoryWsAuthMessage(directoryHost: string, nonce: string): string {

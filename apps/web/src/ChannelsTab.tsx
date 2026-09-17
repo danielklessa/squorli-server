@@ -1,4 +1,4 @@
-import { AFK_MOVE_MINUTES, AUDIO_BITRATES, DEFAULT_AFK_MOVE_MINUTES, Permission, hasPermission, type ServerState } from "@squorli/protocol";
+import { AUDIO_BITRATES, Permission, hasPermission, type ServerState } from "@squorli/protocol";
 import { useRef, useState, type DragEvent } from "react";
 import type { ServerApi } from "./api";
 import { reorderItems } from "./channelOrder";
@@ -147,7 +147,7 @@ export function ChannelsTab({ api, server, run }: { api: ServerApi; server: Serv
       </form>
 
       {/* AFK channel: a server setting (MANAGE_SERVER), kept here because it is about a channel. Hidden on servers from before it. */}
-      {server.settings.afkMoveMinutes !== undefined && hasPermission(server.myPermissions, Permission.MANAGE_SERVER) && (
+      {server.settings.afkChannelId !== undefined && hasPermission(server.myPermissions, Permission.MANAGE_SERVER) && (
         <>
           <h3>{t("admin.afk")}</h3>
           <p className="muted small">{t("admin.afkHint")}</p>
@@ -156,9 +156,6 @@ export function ChannelsTab({ api, server, run }: { api: ServerApi; server: Serv
               <label>{t("admin.afkChannel")}<select value={server.settings.afkChannelId ?? ""} disabled={saving} onChange={(e) => run(() => api.updateSettings({ afkChannelId: e.target.value || null }))}>
                 <option value="">{t("admin.afkNone")}</option>
                 {channels.filter((c) => c.kind === "voice").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select></label>
-              <label>{t("admin.afkAfter")}<select value={server.settings.afkMoveMinutes ?? DEFAULT_AFK_MOVE_MINUTES} disabled={saving || !server.settings.afkChannelId} onChange={(e) => run(() => api.updateSettings({ afkMoveMinutes: Number(e.target.value) }))}>
-                {AFK_MOVE_MINUTES.map((n) => <option key={n} value={n}>{t("admin.afkMinutes", { n })}</option>)}
               </select></label>
             </div>
           ) : <p className="muted small">{t("admin.afkNoVoice")}</p>}

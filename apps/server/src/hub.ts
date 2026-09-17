@@ -6,19 +6,20 @@ import type { WebSocket } from "ws";
  * Presence (online) = at least one connection. Single node, in memory.
  *
  * AFK detection: a client reports per connection when its user has been idle for AFK_AFTER_MS (`activity`); a user is AFK
- * once ALL of their connections are idle (a second tab or device in use keeps them present). The AFK map remembers the
- * time of the last activity as far as the server can tell, so the move to the AFK channel can wait for the admin's time.
- * Presence listeners also fire when the AFK state changes (`online` stays true).
+ * once ALL of their connections are idle (a second tab or device in use keeps them present). When the connection in use
+ * closes and only idle ones remain, the user was active a moment ago: they turn AFK AFK_AFTER_MS later, unless something
+ * happens before. Presence listeners also fire when the AFK state changes (`online` stays true).
  */
 export class Hub {
   private readonly byUser = new Map<string, Set<WebSocket>>();
   private readonly userOf = new Map<WebSocket, string>();
   /** Session per connection, so a remote sign-out (M6c) closes exactly that connection. */
   private readonly sessionOf = new Map<WebSocket, string>();
-  /** Idle connections -> when their user was last active there (the report arrives AFK_AFTER_MS later). */
-  private readonly idleSince = new Map<WebSocket, number>();
-  /** AFK users -> time of their last activity. */
-  private readonly afk = new Map<string, number>();
+  /** Connections whose client reported its user idle. */
+  private readonly idle = new Set<WebSocket>();
+  private readonly afk = new Set<string>();
+  /** Users whose active connection just closed: not AFK before this time (ms), with the timer that looks again then. */
+  private readonly grace = new Map<string, { until: number; timer: NodeJS.Timeout }>();
   private readonly listeners = new Set<(userId: string, online: boolean) => void>();
 
   onPresence(fn: (userId: string, online: boolean) => void): () => void {
@@ -38,48 +39,55 @@ export class Hub {
     if (!wasOnline || wasAfk) for (const fn of this.listeners) fn(userId, true);
   }
 
-  remove(ws: WebSocket, now = Date.now()) {
+  remove(ws: WebSocket) {
     const userId = this.userOf.get(ws);
     if (!userId) return;
     this.userOf.delete(ws);
     this.sessionOf.delete(ws);
-    const wasIdle = this.idleSince.delete(ws);
+    const wasIdle = this.idle.delete(ws);
     const set = this.byUser.get(userId);
     set?.delete(ws);
     if (set && set.size === 0) {
       this.byUser.delete(userId);
       this.afk.delete(userId);
+      this.endGrace(userId);
       for (const fn of this.listeners) fn(userId, false);
-    } else if (!wasIdle && this.refreshAfk(userId, now)) {
-      // The connection in use is gone and only idle ones remain: absent, counted from now.
-      for (const fn of this.listeners) fn(userId, true);
+    } else if (!wasIdle) {
+      // The connection in use is gone: the user was active until now, so the idle ones that remain count from here.
+      this.endGrace(userId);
+      const timer = setTimeout(() => { this.grace.delete(userId); this.refreshAfk(userId); }, AFK_AFTER_MS);
+      timer.unref();
+      this.grace.set(userId, { until: Date.now() + AFK_AFTER_MS, timer });
     }
   }
 
   /** A connection reports its user idle (no activity for AFK_AFTER_MS) or back. */
-  setIdle(ws: WebSocket, idle: boolean, now = Date.now()) {
+  setIdle(ws: WebSocket, idle: boolean) {
     const userId = this.userOf.get(ws);
-    if (!userId || idle === this.idleSince.has(ws)) return;
-    if (idle) this.idleSince.set(ws, now - AFK_AFTER_MS); else this.idleSince.delete(ws);
-    if (this.refreshAfk(userId)) for (const fn of this.listeners) fn(userId, true);
+    if (!userId || idle === this.idle.has(ws)) return;
+    if (idle) this.idle.add(ws); else this.idle.delete(ws);
+    this.refreshAfk(userId);
   }
 
-  /** Recompute a user's AFK state; true = it changed. `lastActive` overrides the connections' own times (an active connection just closed). */
-  private refreshAfk(userId: string, lastActive?: number): boolean {
+  private endGrace(userId: string) {
+    const g = this.grace.get(userId);
+    if (g) { clearTimeout(g.timer); this.grace.delete(userId); }
+  }
+
+  /** Recompute a user's AFK state and tell the listeners when it changed. */
+  private refreshAfk(userId: string) {
     const conns = [...(this.byUser.get(userId) ?? [])];
-    const all = conns.length > 0 && conns.every((ws) => this.idleSince.has(ws));
-    if (all === this.afk.has(userId)) return false;
-    if (all) this.afk.set(userId, lastActive ?? Math.max(...conns.map((ws) => this.idleSince.get(ws) ?? 0)));
-    else this.afk.delete(userId);
-    return true;
+    const all = conns.length > 0 && conns.every((ws) => this.idle.has(ws)) && (this.grace.get(userId)?.until ?? 0) <= Date.now();
+    if (all === this.afk.has(userId)) return;
+    if (all) this.afk.add(userId); else this.afk.delete(userId);
+    for (const fn of this.listeners) fn(userId, true);
   }
 
   isAfk(userId: string): boolean {
     return this.afk.has(userId);
   }
 
-  /** AFK users with the time of their last activity. */
-  afkUsers(): [userId: string, lastActive: number][] {
+  afkUsers(): string[] {
     return [...this.afk];
   }
 

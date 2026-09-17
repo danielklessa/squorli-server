@@ -91,7 +91,7 @@ export class ServerApi {
   rtcToken(channelId: string) { return this.request<RtcTokenResponse>("POST", "/api/rtc-token", { channelId }).then((r) => RtcTokenResponse.parse(r)); }
 
   // ---------- Admin
-  updateSettings(patch: { name?: string; openJoin?: boolean; requireAccount?: boolean; listed?: boolean; description?: string | null; radioAutoStop?: boolean; afkChannelId?: string | null; afkMoveMinutes?: number }) { return this.request("PATCH", "/api/settings", patch); }
+  updateSettings(patch: { name?: string; openJoin?: boolean; requireAccount?: boolean; listed?: boolean; description?: string | null; radioAutoStop?: boolean; afkChannelId?: string | null }) { return this.request("PATCH", "/api/settings", patch); }
   /** Server icon (PNG/JPEG/WebP/GIF, 2 MB); appears in the sidebar and as the favicon. */
   async uploadServerIcon(file: File): Promise<{ ok: true; iconUrl: string | null }> {
     const form = new FormData();

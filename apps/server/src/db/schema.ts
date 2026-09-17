@@ -48,8 +48,6 @@ export const serverSettings = pgTable("server_settings", {
   radioAutoStop: boolean("radio_auto_stop").notNull().default(true),
   /** AFK channel (admin area > server): absent members are moved here; no sending, no hearing, no radio in it. A deleted channel clears it. */
   afkChannelId: uuid("afk_channel_id").references((): AnyPgColumn => channels.id, { onDelete: "set null" }),
-  /** Minutes without activity before a member in a voice channel is moved to the AFK channel (5/10/15/30/60). */
-  afkMoveMinutes: integer("afk_move_minutes").notNull().default(5),
 });
 
 /** Membership. Anyone missing here sees nothing and can do nothing. */

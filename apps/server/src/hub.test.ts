@@ -1,21 +1,22 @@
 import { AFK_AFTER_MS } from "@squorli/protocol";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WebSocket } from "ws";
 import { Hub } from "./hub";
 
 const sock = () => ({ readyState: 1, OPEN: 1, send() {}, close() {} }) as unknown as WebSocket;
 
 describe("Hub AFK state", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("is AFK only while every connection of the user is idle", () => {
     const hub = new Hub();
     const a = sock(), b = sock();
     hub.add("u1", a, "s1"); hub.add("u1", b, "s2");
-    hub.setIdle(a, true, 1_000_000);
+    hub.setIdle(a, true);
     expect(hub.isAfk("u1")).toBe(false);
-    hub.setIdle(b, true, 1_060_000);
+    hub.setIdle(b, true);
     expect(hub.isAfk("u1")).toBe(true);
-    // Last activity = the connection that went idle last.
-    expect(hub.afkUsers()).toEqual([["u1", 1_060_000 - AFK_AFTER_MS]]);
+    expect(hub.afkUsers()).toEqual(["u1"]);
     hub.setIdle(a, false);
     expect(hub.isAfk("u1")).toBe(false);
   });
@@ -38,11 +39,38 @@ describe("Hub AFK state", () => {
     hub.setIdle(a, true);
     hub.add("u1", b, "s2");
     expect(hub.isAfk("u1")).toBe(false);
-    // The connection in use closes, the idle one remains: absent from that moment on.
-    hub.remove(b, 5_000_000);
-    expect(hub.afkUsers()).toEqual([["u1", 5_000_000]]);
-    hub.remove(a);
+    hub.remove(b); hub.remove(a);
     expect(hub.isAfk("u1")).toBe(false);
     expect(hub.isOnline("u1")).toBe(false);
+  });
+
+  it("waits the full time after the connection in use has closed", () => {
+    vi.useFakeTimers();
+    const hub = new Hub();
+    const events: string[] = [];
+    const a = sock(), b = sock();
+    hub.add("u1", a, "s1"); hub.add("u1", b, "s2");
+    hub.setIdle(a, true);
+    hub.onPresence((userId) => events.push(userId));
+    // The user was active in b until it closed: the idle connection that remains does not make them absent right away.
+    hub.remove(b);
+    expect(hub.isAfk("u1")).toBe(false);
+    vi.advanceTimersByTime(AFK_AFTER_MS - 1000);
+    expect(hub.isAfk("u1")).toBe(false);
+    vi.advanceTimersByTime(1000);
+    expect(hub.isAfk("u1")).toBe(true);
+    expect(events).toEqual(["u1"]);
+  });
+
+  it("activity during that time keeps the user present", () => {
+    vi.useFakeTimers();
+    const hub = new Hub();
+    const a = sock(), b = sock();
+    hub.add("u1", a, "s1"); hub.add("u1", b, "s2");
+    hub.setIdle(a, true);
+    hub.remove(b);
+    hub.setIdle(a, false);
+    vi.advanceTimersByTime(AFK_AFTER_MS);
+    expect(hub.isAfk("u1")).toBe(false);
   });
 });

@@ -234,7 +234,7 @@ export class ServerConnection {
   }
   private reportIdle() {
     // Servers from before the AFK detection do not send the setting and would answer the event with `bad_message`.
-    if (this.state.server?.settings.afkMoveMinutes !== undefined) this.send({ type: "activity", idle: this.idle });
+    if (this.state.server?.settings.afkChannelId !== undefined) this.send({ type: "activity", idle: this.idle });
   }
 
   send(e: ClientEvent) {
