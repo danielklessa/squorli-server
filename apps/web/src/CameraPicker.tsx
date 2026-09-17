@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { VoiceClient } from "./voice/voiceClient";
 import { t } from "./i18n";
+import { retryCameraBusy } from "./voice/cameraRetry";
 
 type Props = {
   cameras: MediaDeviceInfo[];
@@ -35,20 +36,27 @@ export function CameraPicker({ cameras, initial, initialBlur, onPick, onCancel }
   const processor = useRef<BackgroundProcessorWrapper | null>(null);
   const canBlur = VoiceClient.supportsBlur();
 
+  // The preview track and how to release it; `pick()` releases it BEFORE the channel opens the camera (see there).
+  const preview = useRef<{ alive: boolean; track: LocalVideoTrack | null } | null>(null);
+  const releasePreview = () => {
+    const p = preview.current;
+    if (!p) return;
+    p.alive = false;
+    processor.current = null;
+    if (p.track) { p.track.detach(); void p.track.stopProcessor().catch(() => {}); p.track.stop(); p.track = null; }
+    preview.current = null;
+  };
+
   // Preview of the highlighted camera; release the camera again when switching and when closing.
   useEffect(() => {
-    let alive = true;
-    let created: LocalVideoTrack | null = null;
+    const p = { alive: true, track: null as LocalVideoTrack | null };
+    preview.current = p;
     setErr(null);
-    createLocalVideoTrack({ deviceId: selected, resolution: VideoPresets.h360.resolution })
-      .then((t) => { if (!alive) { t.stop(); return; } created = t; setTrack(t); if (videoRef.current) t.attach(videoRef.current); })
-      .catch((e: unknown) => { if (alive) setErr(e instanceof Error ? e.message : String(e)); });
-    return () => {
-      alive = false;
-      processor.current = null;
-      if (created) { created.detach(); void created.stopProcessor().catch(() => {}); created.stop(); }
-      setTrack(null);
-    };
+    // Firefox may still be releasing the camera that was just switched off; retry once (voice/cameraRetry.ts).
+    retryCameraBusy(() => createLocalVideoTrack({ deviceId: selected, resolution: VideoPresets.h360.resolution }))
+      .then((t) => { if (!p.alive) { t.stop(); return; } p.track = t; setTrack(t); if (videoRef.current) t.attach(videoRef.current); })
+      .catch((e: unknown) => { if (p.alive) setErr(e instanceof Error ? e.message : String(e)); });
+    return () => { if (preview.current === p) releasePreview(); else p.alive = false; setTrack(null); };
   }, [selected]);
 
   // Apply the blur to the preview (the same processor as in the channel).
@@ -65,8 +73,10 @@ export function CameraPicker({ cameras, initial, initialBlur, onPick, onCancel }
     return () => { cancelled = true; };
   }, [track, blur, canBlur]);
 
-  // Release the preview first, then switch on: otherwise the camera is grabbed twice.
-  const pick = () => { if (!selected) return; setTrack(null); onPick(selected, blur); };
+  // Release the preview first, then switch on: otherwise the camera is grabbed twice. Must happen here and synchronously:
+  // the effect cleanup runs only when React unmounts the dialog, after `onPick` has already asked LiveKit for the camera,
+  // and Firefox then failed with "Starting videoinput failed" (18 September 2026).
+  const pick = () => { if (!selected) return; releasePreview(); setTrack(null); onPick(selected, blur); };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); if (e.key === "Enter" && selected) pick(); };

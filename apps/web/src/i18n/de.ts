@@ -707,6 +707,7 @@ export const de = {
   "voice.connErrGeneric": "{message} (LiveKit-Adresse: {url}). Prüfen: {check}/rtc/validate muss im Browser 401 liefern; sonst leitet der Proxy /rtc nicht weiter.",
   "voice.errMic": "Mikrofon: {err}. Prüfen, ob ein Mikrofon angeschlossen ist, der Browser darauf zugreifen darf und unter Einstellungen > Audiogeräte das richtige gewählt ist.",
   "voice.errCamera": "Kamera: {err}",
+  "voice.errCameraBusy": "Kamera: {err}. Die Kamera ließ sich nicht starten: Sie wird gerade von einem anderen Programm oder Browser benutzt, oder der Browser hat sie noch nicht wieder freigegeben. Andere Programme mit Kamerazugriff schließen und es noch einmal versuchen.",
   "voice.errBlur": "Hintergrund-Unschärfe: {err}",
   "voice.errProfile": "Sprachprofil: {err}",
   "voice.errScreen": "Bildschirmfreigabe: {err}",

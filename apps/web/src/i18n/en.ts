@@ -706,6 +706,7 @@ export const en: Messages = {
   "voice.connErrGeneric": "{message} (LiveKit address: {url}). Check: {check}/rtc/validate must return 401 in the browser; otherwise the proxy does not forward /rtc.",
   "voice.errMic": "Microphone: {err}. Check that a microphone is connected, that the browser may use it, and that the right one is chosen under Settings > Audio devices.",
   "voice.errCamera": "Camera: {err}",
+  "voice.errCameraBusy": "Camera: {err}. The camera could not be started: another program or browser is using it, or the browser has not released it yet. Close other programs with camera access and try again.",
   "voice.errBlur": "Background blur: {err}",
   "voice.errProfile": "Voice profile: {err}",
   "voice.errScreen": "Screen share: {err}",

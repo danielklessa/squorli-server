@@ -18,6 +18,7 @@ import {
 import { BackgroundBlur, supportsBackgroundProcessors, type BackgroundProcessorWrapper } from "@livekit/track-processors";
 import { VoiceGate, rmsLevel } from "./gate";
 import { MicPipeline, type GateMode } from "./micPipeline";
+import { isCameraBusy, retryCameraBusy } from "./cameraRetry";
 import type { VoiceSettings } from "./settings";
 import { DEFAULT_SOUND_SETTINGS, applyCueOutput, normalizeSoundSettings, playCue, shouldPlayCue, type SoundCue, type SoundSettings } from "./sounds";
 import { USER_VOLUME_MAX, clampUserVolume, loadUserVolumes, saveUserVolumes, withUserVolume, type UserVolumes } from "./userVolumes";
@@ -476,11 +477,15 @@ export class VoiceClient {
     try {
       const resolution = (this.camera.quality === "360p" ? VideoPresets.h360 : VideoPresets.h720).resolution;
       if (!on) this.blur = null; // the track is ended, and the processor with it
-      await room.localParticipant.setCameraEnabled(on, on ? { resolution, ...(this.camera.deviceId ? { deviceId: this.camera.deviceId } : {}) } : undefined);
+      const options = on ? { resolution, ...(this.camera.deviceId ? { deviceId: this.camera.deviceId } : {}) } : undefined;
+      // Firefox may still be releasing the camera (picker preview, or off -> on); one retry after a pause covers that.
+      await retryCameraBusy(() => room.localParticipant.setCameraEnabled(on, options));
       this.patch({ cameraOn: on, cameraBlur: 0, error: null });
       if (on && this.camera.blur > 0) await this.setCameraBlur(this.camera.blur);
     } catch (err) {
-      if (!isUserCancel(err)) this.patch({ error: t("voice.errCamera", { err: errorText(err) }) });
+      // No picker dialog for a camera: only a refused permission is the user's own doing. AbortError = the device could not start.
+      if (isCameraBusy(err)) this.patch({ error: t("voice.errCameraBusy", { err: errorText(err) }) });
+      else if (!isPermissionRefused(err)) this.patch({ error: t("voice.errCamera", { err: errorText(err) }) });
       this.patch({ cameraOn: room.localParticipant.isCameraEnabled });
     }
     this.refreshTiles();
@@ -998,8 +1003,9 @@ const errorText = (err: unknown) => {
   const { message, name } = err as { message?: unknown; name?: unknown };
   return typeof message === "string" && message ? message : typeof name === "string" && name ? name : String(err);
 };
-/** The user cancelled the browser dialog (camera/screen picker). */
+/** The user cancelled the browser's screen picker (or refused the permission). */
 const isUserCancel = (err: unknown) => err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "AbortError");
+const isPermissionRefused = (err: unknown) => err instanceof DOMException && err.name === "NotAllowedError";
 
 function mapState(s: ConnectionState): VoiceStatus {
   switch (s) {
