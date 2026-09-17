@@ -1,4 +1,4 @@
-import { displayNameOf, type Category, type Channel, type Member, type RadioStation, type Role, type ServerSettings, type ServerState, Permission } from "@squorli/protocol";
+import { displayNameOf, twitchChannelOf, youtubeVideoOf, type Category, type Channel, type Member, type RadioStation, type Role, type ServerSettings, type ServerState, Permission } from "@squorli/protocol";
 import { asc, eq, inArray } from "drizzle-orm";
 import { effectivePermissions, type Actor } from "./authz";
 import type { Db } from "./db";
@@ -17,7 +17,7 @@ export async function loadSettings(db: Db): Promise<ServerSettings> {
   return {
     name: row.name, openJoin: row.openJoin, ownerId: row.ownerId,
     requireAccount: requireAccountForced ?? row.requireAccount, requireAccountLocked: requireAccountForced !== null,
-    listed: row.listed, description: row.description,
+    listed: row.listed, description: row.description, radioAutoStop: row.radioAutoStop,
     iconUrl: row.iconMime && row.iconUpdatedAt ? `/api/server-icon?v=${row.iconUpdatedAt.getTime()}` : null,
   };
 }
@@ -32,9 +32,24 @@ export async function loadChannels(db: Db): Promise<Channel[]> {
     .orderBy(asc(channels.position), asc(channels.createdAt));
   return rows.map(({ c, stationName }) => ({
     id: c.id, kind: c.kind, name: c.name, topic: c.topic, categoryId: c.categoryId, position: c.position, audioBitrate: c.audioBitrate, audioStereo: c.audioStereo,
-    // A deleted station takes its id with it (FK set null): then the radio is off.
-    radio: c.radioStationId && c.radioStreamUrl && stationName !== null ? { stationId: c.radioStationId, name: stationName, streamUrl: c.radioStreamUrl, startedBy: c.radioStartedBy } : null,
+    // On while there is something to play. The name: the station's (current one), else the one stored for a typed address.
+    radio: c.radioStreamUrl ? { stationId: stationName !== null ? c.radioStationId : null, name: stationName ?? c.radioName ?? radioHostOf(c.radioStreamUrl), streamUrl: c.radioStreamUrl, startedBy: c.radioStartedBy, twitchChannel: twitchChannelOf(c.radioStreamUrl), ...youtubeRadio(c.radioStreamUrl, c.radioPlayback) } : null,
   }));
+}
+
+/** A YouTube source carries its video and where that stands for everyone; a source without a stored state (none is written that way) waits at the beginning. */
+function youtubeRadio(streamUrl: string, playback: { playing: boolean; position: number; rate: number; at: number } | null) {
+  const video = youtubeVideoOf(streamUrl)?.videoId ?? null;
+  return { youtubeVideo: video, playback: video ? playback ?? { playing: false, position: 0, rate: 1, at: 0 } : null };
+}
+
+/** Short name for an address without a station: its host. */
+export function radioHostOf(url: string): string {
+  const twitch = twitchChannelOf(url);
+  if (twitch) return `twitch.tv/${twitch}`;
+  const youtube = youtubeVideoOf(url);
+  if (youtube) return `youtu.be/${youtube.videoId}`;
+  try { return new URL(url).host; } catch { return url.slice(0, 64); }
 }
 
 export async function loadRadioStations(db: Db): Promise<RadioStation[]> {

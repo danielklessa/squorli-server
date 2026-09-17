@@ -2,7 +2,8 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
-import { DirectoryLeaveRequest, DirectoryNotifyRequest, PROTOCOL_VERSION } from "@squorli/protocol";
+import { DirectoryLeaveRequest, DirectoryNotifyRequest, PROTOCOL_VERSION, RADIO_IDLE_STOP_MS } from "@squorli/protocol";
+import { and, eq, isNotNull } from "drizzle-orm";
 import Fastify from "fastify";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -12,6 +13,7 @@ import { registerAuthRoutes } from "./auth/routes";
 import { bootstrap } from "./bootstrap";
 import { loadConfig } from "./config";
 import { createDb, runMigrations } from "./db";
+import { channels } from "./db/schema";
 import { Hub } from "./hub";
 import { LivekitAdmin } from "./livekit/admin";
 import { registerLivekitRoutes } from "./livekit/routes";
@@ -21,7 +23,8 @@ import { registerInviteRoutes } from "./routes/invites";
 import { registerMemberRoutes } from "./routes/members";
 import { registerMessageRoutes } from "./routes/messages";
 import { registerReadStateRoutes } from "./routes/readState";
-import { registerRadioRoutes } from "./routes/radio";
+import { RADIO_OFF, registerRadioRoutes } from "./routes/radio";
+import { RadioIdleStop } from "./radio/idle";
 import { RadioMetadata } from "./radio/metadata";
 import { registerRoleRoutes } from "./routes/roles";
 import { registerSettingsRoutes } from "./routes/settings";
@@ -123,13 +126,28 @@ async function main() {
 
   // Web radio "now playing": the server reads a station's titles only while somebody sits in a voice channel playing it.
   const radioMeta = new RadioMetadata((channelId, title) => hub.broadcast({ type: "radio.meta", channelId, title }), app.log);
+  // Nobody left in the channel: its radio goes off after two minutes (setting radioAutoStop). Checked again when the time is up.
+  const radioIdle = new RadioIdleStop((channelId) => {
+    void (async () => {
+      if (presence.members(channelId).length > 0 || !(await loadSettings(db)).radioAutoStop) return;
+      const [row] = await db.update(channels).set(RADIO_OFF).where(and(eq(channels.id, channelId), isNotNull(channels.radioStreamUrl))).returning({ id: channels.id });
+      if (!row) return;
+      app.log.info({ channelId }, "Radio beendet: Kanal leer");
+      await broadcastStructure(db, hub, ["channels"]);
+      syncRadioMeta();
+    })().catch((err) => app.log.warn({ err }, "radio idle stop"));
+  }, config.RADIO_IDLE_STOP_MS ?? RADIO_IDLE_STOP_MS);
   const syncRadioMeta = () => {
-    void loadChannels(db).then((all) => radioMeta.sync(all.flatMap((c) => (c.radio && presence.members(c.id).length > 0 ? [{ channelId: c.id, streamUrl: c.radio.streamUrl, stationName: c.radio.name }] : []))))
-      .catch((err) => app.log.warn({ err }, "radio metadata sync"));
+    void Promise.all([loadChannels(db), loadSettings(db)]).then(([all, settings]) => {
+      const playing = all.filter((c) => c.radio);
+      radioMeta.sync(playing.flatMap((c) => (!c.radio!.twitchChannel && !c.radio!.youtubeVideo && presence.members(c.id).length > 0 ? [{ channelId: c.id, streamUrl: c.radio!.streamUrl, stationName: c.radio!.name }] : [])));
+      radioIdle.sync(settings.radioAutoStop ? playing.filter((c) => presence.members(c.id).length === 0).map((c) => c.id) : []);
+    }).catch((err) => app.log.warn({ err }, "radio sync"));
   };
   const offRadioPresence = presence.onChange(syncRadioMeta);
-  const radioMetaTimer = setInterval(syncRadioMeta, 30_000); // safety net for changes that pass no hook (a deleted channel)
-  app.addHook("onClose", async () => { offRadioPresence(); clearInterval(radioMetaTimer); radioMeta.close(); });
+  const radioMetaTimer = setInterval(syncRadioMeta, 30_000); // safety net for changes that pass no hook (a deleted channel, the setting)
+  syncRadioMeta(); // a radio left running before a restart
+  app.addHook("onClose", async () => { offRadioPresence(); clearInterval(radioMetaTimer); radioMeta.close(); radioIdle.close(); });
 
   // Uploads (attachments, server icon): one file per request, size per MAX_UPLOAD_MB.
   await app.register(multipart, { limits: { fileSize: Math.round(config.MAX_UPLOAD_MB * 1024 * 1024), files: 1 } });
@@ -156,10 +174,10 @@ async function main() {
       // registered at startup; after `pnpm build` without a restart, new asset hashes would only produce 404s.
       wildcard: true,
       cacheControl: false, // we set cache-control ourselves (see setHeaders)
-      // Hashed assets may be cached for a long time, the shell (index.html) never: otherwise, after a deploy, a browser
-      // would point at asset names that no longer exist.
+      // Hashed assets may be cached for a long time, the pages (index.html, player-window.html) never: otherwise, after a
+      // deploy, a browser would point at asset names that no longer exist.
       setHeaders: (res, path) => {
-        res.setHeader("cache-control", path.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable");
+        res.setHeader("cache-control", path.endsWith(".html") ? "no-cache" : "public, max-age=31536000, immutable");
       },
     });
     app.setNotFoundHandler((req, reply) => {

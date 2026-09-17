@@ -43,6 +43,11 @@ const Env = z.object({
    * locked). Empty = the admin area decides. Only takes effect together with DIRECTORY_URL.
    */
   REQUIRE_ACCOUNT: z.enum(["true", "false", "1", "0"]).transform((v) => v === "true" || v === "1").optional(),
+  /**
+   * For tests only (the smoke test cannot wait two minutes): how long a voice channel may be empty before its radio is
+   * turned off. Not for operators: the admin area tells people "two minutes" (protocol RADIO_IDLE_STOP_MS).
+   */
+  RADIO_IDLE_STOP_MS: z.coerce.number().int().positive().optional(),
 });
 
 export type Config = z.infer<typeof Env> & { trustedProxies: string[]; livekitPublicUrl: string; directoryProofUrl: string };

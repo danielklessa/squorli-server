@@ -97,8 +97,15 @@ export const ServerSettings = z.object({
   /** M6d: list in the directory service's public server directory (with a description); no effect without DIRECTORY_URL. */
   listed: z.boolean(),
   description: z.string().trim().max(200).nullable(),
+  /**
+   * Web radio: turn a voice channel's radio off once nobody has been in the channel for RADIO_IDLE_STOP_MS (default on).
+   * Optional = feature flag: a server from before it does not send the field and the admin area hides the switch.
+   */
+  radioAutoStop: z.boolean().optional(),
 });
-export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true, requireAccount: true, listed: true, description: true }).partial();
+export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true, requireAccount: true, listed: true, description: true, radioAutoStop: true }).partial();
+/** How long a voice channel may stay empty before its radio is turned off (ServerSettings.radioAutoStop). */
+export const RADIO_IDLE_STOP_MS = 2 * 60_000;
 
 export const Category = z.object({ id: Uuid, name: z.string().min(1).max(64), position: z.number().int() });
 export const ChannelKind = z.enum(["text", "voice"]);
@@ -119,13 +126,81 @@ const AudioBitrate = z.number().int().min(8).max(320);
 export const RadioUrl = z.string().trim().max(2048).refine((u) => {
   try { const p = new URL(u).protocol; return p === "http:" || p === "https:"; } catch { return false; }
 }, "http(s) url required");
+/**
+ * Twitch as a radio source: the address of a channel page (`https://www.twitch.tv/<login>`, also without www or with m.).
+ * Twitch has no audio stream a browser may play from a foreign page, so such a source is shown with Twitch's official
+ * player, as a tile in the voice stage (user's decision). Returns the channel's login in lower case, null = not a channel page.
+ */
+const TWITCH_RESERVED = new Set(["directory", "videos", "settings", "subscriptions", "inventory", "drops", "wallet", "downloads", "jobs", "p", "search", "turbo", "store", "friends", "payments", "prime", "privacy", "legal", "login", "signup", "popout", "embed", "team", "u", "moderator", "broadcast"]);
+export function twitchChannelOf(url: string): string | null {
+  try {
+    const u = new URL(url.trim());
+    if ((u.protocol !== "https:" && u.protocol !== "http:") || !/^(www\.|m\.)?twitch\.tv$/i.test(u.hostname)) return null;
+    const parts = u.pathname.split("/").filter(Boolean);
+    const login = parts[0]?.toLowerCase() ?? "";
+    return parts.length === 1 && /^[a-z0-9_]{3,25}$/.test(login) && !TWITCH_RESERVED.has(login) ? login : null;
+  } catch { return null; }
+}
+
+const MAX_PLAYBACK_POSITION = 360_000; // 100 hours
+/**
+ * YouTube as a radio source: the address of a video or live stream (watch?v=, youtu.be/, /live/, /shorts/, /embed/). Shown
+ * with YouTube's official player like a Twitch source, and played in step for everyone: see RadioPlayback. `start` = the
+ * address's start offset in seconds (`t=90`, `t=1m30s`, `start=90`), 0 without one. null = not a YouTube video.
+ */
+export function youtubeVideoOf(url: string): { videoId: string; start: number } | null {
+  try {
+    const u = new URL(url.trim());
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    const host = u.hostname.toLowerCase().replace(/^(www\.|m\.|music\.)/, "");
+    const parts = u.pathname.split("/").filter(Boolean);
+    let id: string | null = null;
+    if (host === "youtu.be") id = parts.length === 1 ? parts[0]! : null;
+    else if (host === "youtube.com" || host === "youtube-nocookie.com") {
+      if (parts.length === 1 && parts[0] === "watch") id = u.searchParams.get("v");
+      else if (parts.length === 2 && ["live", "shorts", "embed", "v"].includes(parts[0]!)) id = parts[1]!;
+    }
+    if (!id || !/^[A-Za-z0-9_-]{11}$/.test(id)) return null;
+    const t = (u.searchParams.get("t") ?? u.searchParams.get("start") ?? "").toLowerCase();
+    const clock = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$/.exec(t);
+    const start = clock && t !== "" ? Number(clock[1] ?? 0) * 3600 + Number(clock[2] ?? 0) * 60 + Number(clock[3] ?? 0) : 0;
+    return { videoId: id, start: Number.isFinite(start) ? Math.min(start, MAX_PLAYBACK_POSITION) : 0 };
+  } catch { return null; }
+}
+
+/**
+ * Playing a video in step ("watch together"): where the video stands for everyone. `position` (seconds) was true at the
+ * server's time `at` (ms since the epoch); while `playing`, it moves on at `rate` from there (radioPositionAt). The server
+ * stamps `at`; members with CONTROL_RADIO set the rest through their player (PUT /api/channels/:id/radio/playback), and every
+ * client keeps its own player at that place. Videos only: a live stream is not steered for everyone (user's decision),
+ * every viewer's player is their own there; the state then simply goes unused.
+ */
+const PlaybackRate = z.number().min(0.25).max(2);
+export const RadioPlayback = z.object({ playing: z.boolean(), position: z.number().min(0).max(MAX_PLAYBACK_POSITION), rate: PlaybackRate, at: z.number() });
+export const SetRadioPlaybackRequest = z.object({ playing: z.boolean(), position: z.number().min(0).max(MAX_PLAYBACK_POSITION), rate: PlaybackRate.default(1) });
+/** Where the video stands at the server's time `serverNow` (ms). */
+export function radioPositionAt(p: { playing: boolean; position: number; rate: number; at: number }, serverNow: number): number {
+  return p.playing ? Math.max(0, p.position + Math.max(0, serverNow - p.at) / 1000 * p.rate) : p.position;
+}
+
 export const RadioStation = z.object({ id: Uuid, name: z.string().trim().min(1).max(64), url: RadioUrl });
 export const CreateRadioStationRequest = RadioStation.pick({ name: true, url: true });
 export const UpdateRadioStationRequest = CreateRadioStationRequest.partial();
-/** What a voice channel is tuned to. `name` is the station's current name, `streamUrl` what clients play. */
-export const ChannelRadio = z.object({ stationId: Uuid, name: z.string(), streamUrl: z.string(), startedBy: Uuid.nullable() });
-/** PUT /api/channels/:id/radio (DELETE turns the radio off). */
-export const SetChannelRadioRequest = z.object({ stationId: Uuid });
+/**
+ * What a voice channel is tuned to. `stationId` null = an address a member with CONTROL_RADIO typed in instead of choosing a
+ * station; `name` is the station's current name (for a typed address: its host), `streamUrl` what clients play.
+ */
+export const ChannelRadio = z.object({
+  stationId: Uuid.nullable(), name: z.string(), streamUrl: z.string(), startedBy: Uuid.nullable(),
+  /** Set when the source is a Twitch channel: clients show Twitch's player instead of playing `streamUrl` as audio. */
+  twitchChannel: z.string().nullable().default(null),
+  /** Set when the source is a YouTube video or live stream: clients show YouTube's player, kept in step through `playback`. */
+  youtubeVideo: z.string().nullable().default(null),
+  /** Where the video stands for everyone (YouTube sources only). */
+  playback: RadioPlayback.nullable().default(null),
+});
+/** PUT /api/channels/:id/radio: one of the server's stations, or any address (same rules as a station's). DELETE turns the radio off. */
+export const SetChannelRadioRequest = z.union([z.object({ stationId: Uuid }), z.object({ url: RadioUrl })]);
 
 export const Channel = z.object({
   id: Uuid,
@@ -349,6 +424,11 @@ export const ServerMuteUpdate = z.object({ type: z.literal("mute.update"), serve
  * PROTOCOL_VERSION bump: older clients drop the event and simply keep showing the station's name.
  */
 export const ServerRadioMeta = z.object({ type: z.literal("radio.meta"), channelId: Uuid, title: z.string().max(300).nullable() });
+/**
+ * A member with CONTROL_RADIO played, paused or moved the channel's video (RadioPlayback): everyone's player follows. The
+ * channel list carries the same state for whoever connects later. No PROTOCOL_VERSION bump: older clients drop the event.
+ */
+export const ServerRadioPlayback = z.object({ type: z.literal("radio.playback"), channelId: Uuid, playback: RadioPlayback });
 /** A moderator moves you to another voice channel (null = out of the channel); the client joins there or leaves. */
 export const ServerVoiceMoved = z.object({ type: z.literal("voice.moved"), channelId: Uuid.nullable(), by: z.string() });
 /** A moderator stops your camera and/or screen share (LiveKit has already muted the tracks). */
@@ -363,7 +443,7 @@ export const ServerError = z.object({
 
 export const ServerEvent = z.discriminatedUnion("type", [
   ServerWelcome, ServerPong, ServerVoiceState, ServerStructure, ServerMe,
-  ServerMessageCreate, ServerMessageUpdate, ServerMessageDelete, ServerTyping, ServerReadUpdate, ServerMuteUpdate, ServerRadioMeta, ServerVoiceMoved, ServerVoiceStop, ServerRemoved, ServerError,
+  ServerMessageCreate, ServerMessageUpdate, ServerMessageDelete, ServerTyping, ServerReadUpdate, ServerMuteUpdate, ServerRadioMeta, ServerRadioPlayback, ServerVoiceMoved, ServerVoiceStop, ServerRemoved, ServerError,
 ]);
 
 export type ClientEvent = z.infer<typeof ClientEvent>;
@@ -376,6 +456,7 @@ export type Category = z.infer<typeof Category>;
 export type Channel = z.infer<typeof Channel>;
 export type RadioStation = z.infer<typeof RadioStation>;
 export type ChannelRadio = z.infer<typeof ChannelRadio>;
+export type RadioPlayback = z.infer<typeof RadioPlayback>;
 export type Role = z.infer<typeof Role>;
 export type Member = z.infer<typeof Member>;
 export type Ban = z.infer<typeof Ban>;

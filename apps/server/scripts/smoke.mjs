@@ -306,6 +306,8 @@ check("presence online", stOnline.members.find((m) => m.userId === B.userId)?.on
 
 // ---------- Web radio (stations: MANAGE_SERVER; a voice channel's radio: CONTROL_RADIO; B has neither here)
 const radioOf = async () => (await api("GET", "/api/state", undefined, owner.token))[1].channels.find((c) => c.id === voiceCh.id)?.radio ?? null;
+// The voice channel is empty during these checks: keep the idle stop (checked at the end of this block) out of their way.
+await api("PATCH", "/api/settings", { radioAutoStop: false }, owner.token);
 const streamUrl = "https://streams.radiobob.de/bob-national/mp3-128/streams.radiobob.de/";
 const [srs0] = await api("POST", "/api/radio/stations", { name: "Fremd", url: streamUrl }, B.token);
 const [srsFtp] = await api("POST", "/api/radio/stations", { name: "Kaputt", url: "ftp://example.org/radio.mp3" }, owner.token);
@@ -331,6 +333,42 @@ const [sru] = await api("PATCH", `/api/radio/stations/${station.id}`, { url: `${
 const [sre] = await api("PATCH", `/api/radio/stations/${station.id}`, {}, owner.token);
 check("radio: a renamed station shows in the channel, a new address turns the radio off", srn === 200 && renamed?.name === "Rauchtest-Radio 2" && sru === 200 && sre === 400 && (await radioOf()) === null, `${srn} ${sru} ${sre}`);
 await api("PUT", `/api/channels/${voiceCh.id}/radio`, { stationId: station.id }, owner.token);
+// A typed address instead of a station: same permission, same rules for the address; shown under its host.
+const [sru0] = await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: streamUrl }, B.token);
+const [sru1] = await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: "ftp://example.org/x.mp3" }, owner.token);
+const [sru2] = await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: "http://127.0.0.1:9/intern.m3u" }, owner.token);
+const [sru3] = await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: streamUrl }, owner.token);
+const typed = await radioOf();
+check("radio: a typed address needs CONTROL_RADIO and is checked like a station's; stationId null, named by its host", sru0 === 403 && sru1 === 400 && sru2 === 502 && sru3 === 200
+  && typed?.stationId === null && typed?.streamUrl === streamUrl && typed?.name === "streams.radiobob.de", `${sru0} ${sru1} ${sru2} ${sru3} ${typed?.name}`);
+// A Twitch channel page: no audio stream, clients show Twitch's player; the server normalizes the address and asks nobody.
+const [srt0] = await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: "https://twitch.tv/Squorli_Test/" }, owner.token);
+const twitch = await radioOf();
+const [srt1] = await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: "https://www.twitch.tv/videos/12345" }, owner.token);
+const notTwitch = await radioOf();
+check("radio: a twitch channel page becomes a twitch source, other twitch pages stay plain addresses", srt0 === 200 && twitch?.twitchChannel === "squorli_test" && twitch?.streamUrl === "https://www.twitch.tv/squorli_test"
+  && twitch?.name === "twitch.tv/squorli_test" && srt1 === 200 && notTwitch?.twitchChannel === null, `${srt0} ${twitch?.twitchChannel} ${srt1}`);
+// A YouTube video: shown with YouTube's player, played in step. The title comes from YouTube (oEmbed); offline the name falls back.
+const YT_ID = "aqz-KE-bpKQ";
+const [sry0] = await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: `https://youtu.be/${YT_ID}?t=1m30s` }, owner.token);
+const youtube = await radioOf();
+check("radio: a youtube address becomes a youtube source that starts playing for everyone at the address's offset", sry0 === 200 && youtube?.youtubeVideo === YT_ID && youtube?.twitchChannel === null
+  && youtube?.streamUrl === `https://www.youtube.com/watch?v=${YT_ID}` && typeof youtube?.name === "string" && youtube.name.length > 0
+  && youtube?.playback?.playing === true && youtube.playback.position === 90 && youtube.playback.rate === 1 && Math.abs(youtube.playback.at - Date.now()) < 60_000, `${sry0} ${youtube?.name} ${JSON.stringify(youtube?.playback)}`);
+const [spb0] = await api("PUT", `/api/channels/${voiceCh.id}/radio/playback`, { playing: false, position: 10 }, B.token);
+const [spb1] = await api("PUT", `/api/channels/${voiceCh.id}/radio/playback`, { playing: false, position: -5 }, owner.token);
+const [spb2] = await api("PUT", `/api/channels/${voiceCh.id}/radio/playback`, { playing: false, position: 10, rate: 9 }, owner.token);
+const [spb3, setPlayback] = await api("PUT", `/api/channels/${voiceCh.id}/radio/playback`, { playing: false, position: 123.5 }, owner.token);
+const evPlayback = await wsB.waitFor((e) => e.type === "radio.playback" && e.channelId === voiceCh.id && e.playback.position === 123.5).catch(() => null);
+const pausedVideo = await radioOf();
+check("radio: play/pause/seek of a video needs CONTROL_RADIO, is stamped by the server, goes to everyone and stays on the channel", spb0 === 403 && spb1 === 400 && spb2 === 400 && spb3 === 200
+  && evPlayback?.playback.playing === false && evPlayback.playback.rate === 1 && evPlayback.playback.at === setPlayback.playback.at
+  && pausedVideo?.playback?.position === 123.5 && pausedVideo.playback.playing === false && pausedVideo.playback.at === setPlayback.playback.at, `${spb0} ${spb1} ${spb2} ${spb3}`);
+await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: streamUrl }, owner.token);
+const [spb4, noPlayback] = await api("PUT", `/api/channels/${voiceCh.id}/radio/playback`, { playing: true, position: 1 }, owner.token);
+const [spb5] = await api("PUT", `/api/channels/${textCh.id}/radio/playback`, { playing: true, position: 1 }, owner.token);
+check("radio: an audio source has no playback state to set", spb4 === 409 && noPlayback.error === "no_playback" && (await radioOf())?.playback === null && spb5 === 404, `${spb4} ${spb5}`);
+await api("PUT", `/api/channels/${voiceCh.id}/radio`, { stationId: station.id }, owner.token);
 const [srd0] = await api("DELETE", `/api/channels/${voiceCh.id}/radio`, undefined, B.token);
 const stillOn = await radioOf();
 const [srd1] = await api("DELETE", `/api/channels/${voiceCh.id}/radio`, undefined, owner.token);
@@ -342,6 +380,34 @@ const [srx2] = await api("DELETE", `/api/radio/stations/${internalStation.id}`, 
 const [, stRadioEnd] = await api("GET", "/api/state", undefined, owner.token);
 check("radio: deleting a station turns it off where it plays", srx0 === 403 && srx1 === 200 && srx2 === 200 && stRadioEnd.channels.find((c) => c.id === voiceCh.id)?.radio === null
   && !stRadioEnd.radioStations.some((x) => x.id === station.id || x.id === internalStation.id), `${srx0} ${srx1} ${srx2}`);
+// Idle stop: nobody in the channel -> the radio goes off (two minutes; the test server runs with RADIO_IDLE_STOP_MS, e.g. 2000).
+const [sas0] = await api("PATCH", "/api/settings", { radioAutoStop: true }, B.token);
+const [sas1] = await api("PATCH", "/api/settings", { radioAutoStop: true }, owner.token);
+const [, stAutoStop] = await api("GET", "/api/state", undefined, owner.token);
+check("radio: the idle stop is a server setting (MANAGE_SERVER), on by default", sas0 === 403 && sas1 === 200 && stAutoStop.settings.radioAutoStop === true && wsA.welcome.state.settings.radioAutoStop === true, `${sas0} ${sas1}`);
+const IDLE_MS = Number(process.env.RADIO_IDLE_STOP_MS ?? 0);
+if (IDLE_MS > 0 && IDLE_MS <= 10_000) {
+  const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+  wsB.send({ type: "voice.join", channelId: voiceCh.id });
+  await wsB.waitFor((e) => e.type === "voice.state" && e.channelId === voiceCh.id && e.members.some((m) => m.userId === B.userId));
+  await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: streamUrl }, owner.token);
+  await pause(IDLE_MS + 1500);
+  const occupied = await radioOf();
+  wsB.send({ type: "voice.leave" });
+  const leftAt = Date.now();
+  const evIdle = await wsA.waitFor((e) => e.type === "structure" && e.channels?.some((c) => c.id === voiceCh.id && c.radio === null) && Date.now() - leftAt >= IDLE_MS - 200, IDLE_MS + 4000).catch(() => null);
+  const stoppedAfter = Date.now() - leftAt;
+  // Turned off in the settings: an empty channel keeps its radio.
+  await api("PATCH", "/api/settings", { radioAutoStop: false }, owner.token);
+  await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: streamUrl }, owner.token);
+  await pause(IDLE_MS + 1500);
+  const keptOn = await radioOf();
+  check("radio: goes off once the channel has been empty for the delay, not while somebody is inside, and not with the setting off", occupied !== null && !!evIdle && stoppedAfter >= IDLE_MS - 200 && (await radioOf()) !== null && keptOn !== null, `occupied=${occupied !== null} stopped after ${stoppedAfter} ms keptOn=${keptOn !== null}`);
+  await api("DELETE", `/api/channels/${voiceCh.id}/radio`, undefined, owner.token);
+  // The voice checks further down wait for their own voice.state: forget the ones from here.
+  for (const w of [wsA, wsB]) w.events.splice(0, w.events.length, ...w.events.filter((e) => e.type !== "voice.state"));
+} else console.log("skip radio idle stop timing (start the test server and this script with RADIO_IDLE_STOP_MS=2000 to check it)");
+await api("PATCH", "/api/settings", { radioAutoStop: true }, owner.token);
 
 const [sm1, msg1] = await api("POST", `/api/channels/${textCh.id}/messages`, { content: "Hallo aus dem Rauchtest" }, B.token);
 const evCreate = await wsA.waitFor((e) => e.type === "message.create" && e.message?.id === msg1.id).catch(() => null);

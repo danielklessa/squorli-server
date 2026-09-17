@@ -478,6 +478,21 @@ button.icon.on { color: var(--brand); }
 .camera-list { list-style: none; margin: 0.6rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
 .camera-option { width: 100%; text-align: left; background: var(--bg4); color: var(--text); display: flex; align-items: center; gap: 0.6rem; }
 .camera-picker h3 { margin: 0.7rem 0 0.3rem; }
+/* Twitch as the radio's source: ONE iframe (TwitchPlayer) laid over whichever slot is on screen. Below menus and dialogs, above the page. */
+.embed-player { position: fixed; z-index: 4; overflow: hidden; border-radius: calc(var(--r-panel) - 2px); background: #000; }
+.embed-player iframe { width: 100%; height: 100%; border: 0; display: block; }
+.tile.embed { cursor: default; }
+.tile.embed:hover { border-color: transparent; }
+.tile.embed > .embed-slot, .tile.embed > .tile-popped { width: 100%; height: 100%; background: #000; }
+/* The pop-out button, as on the video tiles: shown on hover or keyboard focus. Whether hovering a cross-origin iframe counts as
+   hovering its parent is up to the browser (it did not in the headless test), so the button's own corner always works: it stays
+   clickable while invisible and shows itself as soon as the pointer is on it. It sits below Twitch's LIVE badge (top right);
+   Twitch's own controls are at the bottom and at the top left. */
+.embed-player .tile-window-actions { top: 2.75rem; opacity: 0; transition: opacity .15s; }
+.embed-player:hover .tile-window-actions, .embed-player .tile-window-actions:hover, .embed-player .tile-window-actions:focus-within { opacity: 1; }
+@media (hover: none) { .embed-player .tile-window-actions { opacity: 1; } }
+.embed-player.floating { border-radius: var(--r); box-shadow: 0 12px 40px rgba(0,0,0,.5); outline: 1px solid var(--line); }
+.tile.embed > .embed-slot { display: grid; place-items: center; padding: 0.5rem; text-align: center; color: var(--muted); font-size: 0.8rem; }
 /* Web radio: button in the stage head (station name while one plays), its menu, and the station list in the admin area. */
 .radio-toggle { position: relative; display: inline-flex; align-items: center; gap: 0.4rem; flex: 0 1 auto; min-width: 0; max-width: 26rem; padding: calc(0.25rem + 3px) 0.7rem; font-size: 0.875rem; background: var(--bg4); color: var(--muted); }   /* exactly as high as the .seg next to it: its 3px frame plus its buttons' padding */
 /* Without a station there is only the icon (line-height 1): an empty text box keeps the height of a line of text. */
@@ -496,6 +511,11 @@ button.icon.on { color: var(--brand); }
 .user-context-menu .radio-stations { display: flex; flex-direction: column; gap: 0.125rem; margin-top: 0.25rem; padding-top: 0.5rem; border-top: 1px solid var(--line); }
 .radio-stations > .muted, .radio-stations > p { margin: 0; padding: 0.125rem 0.75rem 0.25rem; }
 .radio-stations button[aria-checked="true"] { color: var(--ok); }
+.user-context-menu .radio-url { display: flex; align-items: center; gap: 0.25rem; margin: 0.25rem 0; padding: 0 0.25rem 0 0.5rem; }
+.radio-url input { flex: 1; width: 0; min-width: 0; font-size: inherit; padding: 0.4rem 0.6rem; }
+.user-context-menu .radio-url button.icon { flex: none; width: auto; min-width: 2.25rem; min-height: 2.25rem; padding: 0.25rem; justify-content: center; }
+.user-context-menu .radio-url button.icon:disabled { opacity: 0.4; background: transparent; }
+.radio-stations > .error { padding: 0 0.75rem 0.25rem; }
 .radio-stations button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user-context-menu > .error { margin: 0.25rem 0 0; padding: 0.25rem 0.75rem; }
 .radio-station-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) 12rem; gap: 0.5rem; align-items: center; }   /* fixed last column: the add row and the station rows line up */

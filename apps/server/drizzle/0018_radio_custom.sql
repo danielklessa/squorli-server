@@ -1,0 +1,1 @@
+ALTER TABLE "channels" ADD COLUMN "radio_name" text;

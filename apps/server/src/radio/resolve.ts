@@ -1,5 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
+import { twitchChannelOf, youtubeVideoOf } from "@squorli/protocol";
 import { firstPlaylistEntry, isHlsPlaylist, isPlaylistUrl } from "./playlist";
 
 export type ResolveError = "unreachable" | "empty_playlist" | "forbidden_host";
@@ -54,6 +55,12 @@ async function readCapped(res: Response): Promise<string> {
  * a playlist is fetched (public hosts only, short timeout, small body) and its first entry taken.
  */
 export async function resolveStreamUrl(stationUrl: string): Promise<ResolveResult> {
+  // A Twitch channel page is not played as audio: clients show Twitch's player for it. One spelling, no request.
+  const twitch = twitchChannelOf(stationUrl);
+  if (twitch) return { ok: true, streamUrl: `https://www.twitch.tv/${twitch}` };
+  // The same for a YouTube video (the start offset of the address becomes the playback state, routes/radio.ts).
+  const youtube = youtubeVideoOf(stationUrl);
+  if (youtube) return { ok: true, streamUrl: `https://www.youtube.com/watch?v=${youtube.videoId}` };
   let url = stationUrl;
   let playlist = isPlaylistUrl(url);
   for (let hop = 0; hop < MAX_HOPS; hop++) {

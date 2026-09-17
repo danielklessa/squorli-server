@@ -1,4 +1,4 @@
-import type { Channel, RadioStation } from "@squorli/protocol";
+import { RadioUrl, type Channel, type RadioStation } from "@squorli/protocol";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, type ServerApi } from "./api";
 import { ContextMenu, type MenuAnchor } from "./ContextMenu";
@@ -12,6 +12,8 @@ function explain(err: unknown): string {
   if (code === "radio_unreachable") return t("radio.errUnreachable");
   if (code === "radio_empty_playlist") return t("radio.errEmptyPlaylist");
   if (code === "radio_forbidden_host") return t("radio.errForbiddenHost");
+  if (code === "radio_unknown_video") return t("radio.errUnknownVideo");
+  if (code === "radio_not_embeddable") return t("radio.errNotEmbeddable");
   if (code === "forbidden") return t("radio.errForbidden");
   return err instanceof Error ? err.message : String(err);
 }
@@ -30,7 +32,11 @@ export function RadioControl({ api, player, channel, stations, nowPlaying, canCo
   const closedAt = useRef(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [url, setUrl] = useState("");
+  const urlOk = RadioUrl.safeParse(url).success;
   const playing = channel.radio;
+  // A Twitch or YouTube source: shown by the official player (EmbedPlayer.tsx), not played by the radio player.
+  const video = playing?.twitchChannel ? "twitch" : playing?.youtubeVideo ? "youtube" : null;
   const title = playing ? nowPlaying : null;
   const showTitle = useFits(title, playing?.name ?? null);
   if (!playing && !canControl) return null;
@@ -55,10 +61,11 @@ export function RadioControl({ api, player, channel, stations, nowPlaying, canCo
         <ContextMenu anchor={anchor} label={t("radio.title")} onClose={() => { closedAt.current = performance.now(); setAnchor(null); }}>
           <div className="radio-now" role="presentation">
             <Icon name="radio" />
-            <div><strong>{playing ? playing.name : t("radio.title")}</strong><span className="muted small">{playing ? statusText(radio) : t("radio.nothingPlaying")}</span></div>
+            <div><strong>{playing ? playing.name : t("radio.title")}</strong><span className="muted small">{playing ? (video && !radio.muted ? t(video === "twitch" ? "radio.statusTwitch" : "radio.statusYoutube") : statusText(radio)) : t("radio.nothingPlaying")}</span></div>
           </div>
           {title && <div className="radio-track" role="presentation"><span className="muted small">{t("radio.nowPlaying")}</span><span>{title}</span></div>}
-          {playing && (radio.status === "blocked" || radio.status === "error") && (
+          {video === "youtube" && !radio.muted && <div className="radio-track" role="presentation"><span className="muted small">{t(canControl ? "radio.syncControl" : "radio.syncFollow")}</span></div>}
+          {playing && !video && (radio.status === "blocked" || radio.status === "error") && (
             <button role="menuitem" onClick={() => player.resume()}><Icon name={radio.status === "blocked" ? "play" : "rotate-ccw"} /> {radio.status === "blocked" ? t("dock.unblockAudio") : t("radio.retry")}</button>
           )}
           {playing && (
@@ -74,7 +81,7 @@ export function RadioControl({ api, player, channel, stations, nowPlaying, canCo
                   onChange={(event) => { player.setVolume(Number(event.target.value) / 100); if (radio.muted) player.setMuted(false); }} />
                 <output>{radio.muted ? 0 : percent} %</output>
               </div>
-              <span className="muted small">{t("radio.onlyMe")}</span>
+              <span className="muted small">{video ? t("radio.onlyMeVideo") : t("radio.onlyMe")}</span>
             </div>
           )}
           {canControl && (
@@ -86,6 +93,13 @@ export function RadioControl({ api, player, channel, stations, nowPlaying, canCo
                   <Icon name={playing?.stationId === s.id ? "check" : "play"} /> <span>{s.name}</span>
                 </button>
               ))}
+              {/* Any address instead of a station. The field keeps its keys to itself: the menu would take arrows, Home and End. */}
+              <form className="radio-url" onSubmit={(event) => { event.preventDefault(); if (urlOk && !busy) void act(async () => { await api.startRadioUrl(channel.id, url.trim()); setUrl(""); }); }}>
+                <input type="url" inputMode="url" value={url} maxLength={2048} placeholder={t("radio.urlPlaceholder")} aria-label={t("radio.urlLabel")} title={t("radio.urlLabel")}
+                  onChange={(event) => setUrl(event.target.value)} onKeyDown={(event) => { if (event.key !== "Escape" && event.key !== "Tab") event.stopPropagation(); }} />
+                <button type="submit" className="icon" disabled={!urlOk || busy} title={t("radio.urlPlay")} aria-label={t("radio.urlPlay")}><Icon name="play" /></button>
+              </form>
+              {url.trim() !== "" && !urlOk && <span className="error small">{t("admin.radio.invalidUrl")}</span>}
               {playing && <button role="menuitem" className="danger" disabled={busy} onClick={() => { void act(() => api.stopRadio(channel.id)); }}><Icon name="square" /> {t("radio.stop")}</button>}
             </div>
           )}

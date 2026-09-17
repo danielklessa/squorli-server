@@ -31,6 +31,8 @@ export type ServerConnState = {
   voice: Record<string, VoiceMember[]>;
   /** Web radio: what a voice channel's station is playing right now (server event `radio.meta`); no entry = unknown. */
   radioTitles: Record<string, string>;
+  /** The server's clock minus ours in ms (from the welcome's `serverTime`): videos played in step are timed by the server's clock. */
+  clockOffset: number;
   messages: Record<string, ChannelMessages>;
   /** channelId -> userId -> timestamp of the last typing event */
   typing: Record<string, Record<string, number>>;
@@ -105,7 +107,7 @@ export class ServerConnection {
     this.api = new ServerApi(base);
     this.state = {
       host, base, me: null, userId: null, connection: "idle", error: null, removed: null, server: null,
-      voice: {}, radioTitles: {}, messages: {}, typing: {}, currentChannelId: null, unread: {}, mentions: {}, muted: {}, serverMuted: false, readSync: false, log: [],
+      voice: {}, radioTitles: {}, clockOffset: 0, messages: {}, typing: {}, currentChannelId: null, unread: {}, mentions: {}, muted: {}, serverMuted: false, readSync: false, log: [],
       serverName: null, iconUrl: null, serverDomain: null, requireAccount: false, serverVersion: null, directoryUrl: null,
     };
     // Token rejected by the server (expired, signed out from another device): do not keep running with a dead token.
@@ -239,7 +241,7 @@ export class ServerConnection {
         const current = this.state.currentChannelId && e.state.channels.some((c) => c.id === this.state.currentChannelId)
           ? this.state.currentChannelId
           : e.state.channels.find((c) => c.kind === "text")?.id ?? null;
-        this.set({ server: e.state, userId: e.userId, connection: "connected", currentChannelId: current, error: null, radioTitles: {} }); // the server sends the known titles after the welcome
+        this.set({ server: e.state, userId: e.userId, connection: "connected", currentChannelId: current, error: null, radioTitles: {}, clockOffset: Date.parse(e.serverTime) - Date.now() }); // the server sends the known titles after the welcome
         this.read = pruneReadState(loadReadState(this.state.host, e.userId), e.state.channels.map((c) => c.id));
         void this.syncReadState();
         if (!wasReconnect) this.hooks.onConnected();
@@ -273,6 +275,11 @@ export class ServerConnection {
       case "radio.meta": {
         const { [e.channelId]: _old, ...rest } = this.state.radioTitles;
         this.set({ radioTitles: e.title ? { ...rest, [e.channelId]: e.title } : rest });
+        break;
+      }
+      case "radio.playback": {
+        const server = this.state.server;
+        if (server) this.set({ server: { ...server, channels: server.channels.map((c) => (c.id === e.channelId && c.radio?.youtubeVideo ? { ...c, radio: { ...c.radio, playback: e.playback } } : c)) } });
         break;
       }
       case "voice.state":

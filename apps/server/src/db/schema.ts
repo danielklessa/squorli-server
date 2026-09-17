@@ -1,4 +1,4 @@
-import { bigint, bigserial, boolean, index, integer, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, bigserial, boolean, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 const ts = (name: string) => timestamp(name, { withTimezone: true });
 
@@ -44,6 +44,8 @@ export const serverSettings = pgTable("server_settings", {
   iconUpdatedAt: ts("icon_updated_at"),
   /** The server's Ed25519 seed (hex) for registration at the directory (M6); generated on first start, unchanged afterwards. */
   directoryPrivateKey: text("directory_private_key"),
+  /** Web radio: turn a channel's radio off once the channel has been empty for two minutes (admin area > server). */
+  radioAutoStop: boolean("radio_auto_stop").notNull().default(true),
 });
 
 /** Membership. Anyone missing here sees nothing and can do nothing. */
@@ -84,13 +86,17 @@ export const channels = pgTable("channels", {
   audioBitrate: integer("audio_bitrate").notNull().default(64),
   audioStereo: boolean("audio_stereo").notNull().default(false),
   /**
-   * Web radio playing in this voice channel (null = off). Kept in the database so it survives a restart; clients only play
+   * Web radio playing in this voice channel (`radio_stream_url` null = off; `radio_station_id` null = a typed address). Kept in the database so it survives a restart; clients only play
    * it while they are in the channel. `radio_stream_url` = what clients play (the station's address, or what its playlist named
    * when the radio was started).
    */
   radioStationId: uuid("radio_station_id").references(() => radioStations.id, { onDelete: "set null" }),
   radioStreamUrl: text("radio_stream_url"),
+  /** Shown name when the radio plays an address a member typed in (no station): the address's host. */
+  radioName: text("radio_name"),
   radioStartedBy: uuid("radio_started_by").references(() => users.id, { onDelete: "set null" }),
+  /** Where a video source stands for everyone (protocol RadioPlayback; `at` = server time in ms). null for audio and Twitch. */
+  radioPlayback: jsonb("radio_playback").$type<{ playing: boolean; position: number; rate: number; at: number }>(),
 });
 
 export const roles = pgTable("roles", {

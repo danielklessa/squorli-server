@@ -23,7 +23,8 @@ import { useVoiceSettings } from "./voice/useVoiceSettings";
 import { Permission, directoryServerIconUrl, directoryServerUrl, displayNameOf, hasPermission, type Member } from "@squorli/protocol";
 import { Store, activeState, homeState, type State } from "./store";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
-import { RadioPlayer } from "./voice/radioPlayer";
+import { RadioPlayer, type RadioState } from "./voice/radioPlayer";
+import { EmbedPlayer, embedKeyOf, usePlayerWindow, type EmbedSource } from "./EmbedPlayer";
 import { videoAccessOf } from "./voice/videoAccess";
 import { t } from "./i18n";
 
@@ -151,7 +152,22 @@ export function App() {
   }, [client, voiceChannel?.audioBitrate, voiceChannel?.audioStereo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Web radio of the voice channel: played locally, only while connected there; follows deafen.
-  const radioUrl = voice.status === "connected" || voice.status === "reconnecting" ? voiceChannel?.radio?.streamUrl ?? null : null;
+  const channelRadio = voice.status === "connected" || voice.status === "reconnecting" ? voiceChannel?.radio ?? null : null;
+  // A Twitch or YouTube source is no audio stream: the official player shows it (below), the radio player stays off.
+  const radioUrl = channelRadio && !channelRadio.twitchChannel && !channelRadio.youtubeVideo ? channelRadio.streamUrl : null;
+  const [radioState, setRadioState] = useState<RadioState>(radio.state);
+  useEffect(() => radio.subscribe(setRadioState), [radio]);
+  // Turned off for me = no player at all: no tile, no sound, no connection to Twitch or YouTube (user's requirement).
+  const embedTwitch = !radioState.muted ? channelRadio?.twitchChannel ?? null : null;
+  const embedYoutube = !radioState.muted ? channelRadio?.youtubeVideo ?? null : null;
+  const embedSource = useMemo<EmbedSource | null>(() => embedTwitch ? { kind: "twitch", channel: embedTwitch } : embedYoutube ? { kind: "youtube", videoId: embedYoutube } : null, [embedTwitch, embedYoutube]);
+  const playerWindow = usePlayerWindow(embedKeyOf(embedSource));
+  // A video plays in step for everyone; members with CONTROL_RADIO steer it through their own player (EmbedPlayer.tsx).
+  const embedSync = useMemo(() => {
+    const playback = channelRadio?.playback, channelId = voiceChannel?.id, api = voiceHost ? store.connection(voiceHost)?.api : null;
+    if (!embedYoutube || !playback || !channelId || !api) return null;
+    return { playback, clockOffset: voiceServer?.clockOffset ?? 0, canControl: hasPermission(voiceServer?.server?.myPermissions ?? 0, Permission.CONTROL_RADIO), publish: (p: { playing: boolean; position: number; rate: number }) => api.setRadioPlayback(channelId, p) };
+  }, [embedYoutube, channelRadio?.playback, voiceChannel?.id, voiceHost, store, voiceServer?.clockOffset, voiceServer?.server?.myPermissions]);
   useEffect(() => radio.setStream(radioUrl), [radio, radioUrl]);
   useEffect(() => radio.setDeafened(voice.deafened), [radio, voice.deafened]);
   // Its own output device when one is chosen (settings > audio devices), otherwise where the voices play.
@@ -247,6 +263,7 @@ export function App() {
   return (
     <div className={`app ${state.directoryUrl ? "with-rail" : ""} ${homeOpen ? "home" : ""} ${navigationOpen ? "navigation-open" : ""}`}>
       {videoWindows.windows}
+      {embedSource && channelRadio && <EmbedPlayer source={embedSource} name={channelRadio.name} volume={radioState.volume} muted={voice.deafened} popout={playerWindow} sync={embedSync} onNotice={(text) => client.setNotice(text)} />}
       <button className="mobile-navigation secondary" aria-expanded={navigationOpen} aria-controls="app-navigation" onClick={() => setNavigationOpen((open) => !open)}><Icon name={navigationOpen ? "x" : "hash"} />{t("app.navigation")}</button>
       {state.directoryUrl && <ServerRail servers={railServers} serverState={railState} activeKey={homeOpen ? null : activeHost}
         onSelect={(key, host) => { if (key === state.homeHost) { store.openServer(homeDirHost); } else store.openServer(host); setStageOpen(key === voiceHost && stageOpen); }}
@@ -275,7 +292,7 @@ export function App() {
           <ServerStatus s={active} onRetry={() => store.retryServer(activeHost)} onClose={() => store.closeServer(activeHost)} />
         ) : showStage && voiceChannel ? (
           <VoiceStage client={client} voice={voice} channel={voiceChannel} members={server.members} myPermissions={server.myPermissions}
-            api={conn.api} radio={radio} radioStations={server.radioStations} radioTitle={active.radioTitles[voiceChannel.id] ?? null}
+            api={conn.api} radio={radio} radioStations={server.radioStations} radioTitle={active.radioTitles[voiceChannel.id] ?? null} playerTile={embedKeyOf(embedSource)} playerPopped={playerWindow.win !== null} onRestorePlayer={playerWindow.restore}
             onToggleCamera={toggleCamera} onToggleBlur={toggleBlur} onLeave={leaveVoice} onPopout={videoWindows.open} poppedIds={videoWindows.poppedIds} onRestore={videoWindows.restore} />
         ) : current ? (
           <ChatView

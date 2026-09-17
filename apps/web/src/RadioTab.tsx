@@ -18,6 +18,12 @@ export function RadioTab({ api, server, run }: { api: ServerApi; server: ServerS
   return (
     <div className="stack">
       <p className="muted small">{t("admin.radio.intro")}</p>
+      {server.settings.radioAutoStop !== undefined && (
+        <label className="check">
+          <input type="checkbox" checked={server.settings.radioAutoStop} onChange={(e) => run(() => api.updateSettings({ radioAutoStop: e.target.checked }))} />
+          {t("admin.radio.autoStop")}
+        </label>
+      )}
       <form className="radio-station-row" onSubmit={(e) => { e.preventDefault(); if (name.trim() && urlOk) void add(); }}>
         <input value={name} maxLength={64} placeholder={t("admin.radio.name")} aria-label={t("admin.radio.name")} onChange={(e) => setName(e.target.value)} />
         <input value={url} maxLength={2048} type="url" inputMode="url" placeholder="https://…" aria-label={t("admin.radio.url")} onChange={(e) => setUrl(e.target.value)} />

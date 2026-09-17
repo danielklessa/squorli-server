@@ -6,6 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEv
 import { ContextMenu, type MenuAnchor } from "./ContextMenu";
 import { UserVolumeControl } from "./UserVolumeControl";
 import { RadioControl } from "./RadioControl";
+import { EmbedSlot } from "./EmbedPlayer";
 import type { ServerApi } from "./api";
 import type { RadioPlayer } from "./voice/radioPlayer";
 import { VoiceClient, explainScreenAudio, isChromium, type VideoTile, type VoiceParticipant, type VoiceState } from "./voice/voiceClient";
@@ -25,6 +26,11 @@ type Props = {
   radioStations: RadioStation[] | undefined;
   /** What the channel's station is playing right now, null = unknown. */
   radioTitle: string | null;
+  /** The channel's radio is a Twitch or YouTube source and the user has not turned the radio off: its player gets a tile (the source's key, else null). */
+  playerTile: string | null;
+  /** The player is open in a window of its own: the tile says so and offers to bring it back. */
+  playerPopped: boolean;
+  onRestorePlayer: () => void;
   /** Camera on/off; asks when there are several cameras (App.tsx). */
   onToggleCamera: () => Promise<void>;
   onToggleBlur: () => Promise<void>;
@@ -35,7 +41,7 @@ type Props = {
 };
 
 type Layout = "grid" | "focus";
-type Item = { key: string; participant: VoiceParticipant; tile: VideoTile | null; kind: "camera" | "screen" };
+type Item = { key: string; participant: VoiceParticipant; tile: VideoTile | null; kind: "camera" | "screen" } | { key: string; participant: null; tile: null; kind: "player" };
 
 /**
  * Stage of a voice channel (M3): one tile per participant (camera or avatar) plus one per screen share.
@@ -44,7 +50,7 @@ type Item = { key: string; participant: VoiceParticipant; tile: VideoTile | null
  * "Speaker" follows the active speaker or the newest screen share without pinning.
  * Receive quality follows the tile size (adaptiveStream in the voice core); here the <video> only has to have the right size.
  */
-export function VoiceStage({ client, voice, channel, members, myPermissions, api, radio, radioStations, radioTitle, onToggleCamera, onToggleBlur, onLeave, onPopout, poppedIds, onRestore }: Props) {
+export function VoiceStage({ client, voice, channel, members, myPermissions, api, radio, radioStations, radioTitle, playerTile, playerPopped, onRestorePlayer, onToggleCamera, onToggleBlur, onLeave, onPopout, poppedIds, onRestore }: Props) {
   // Names from the server's member list (arrives via WS immediately on every rename), not from the LiveKit token,
   // which is only created on joining. Unknown identities (bots, "external") keep the LiveKit name.
   const participants = voice.participants.map((p) => {
@@ -70,15 +76,17 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
     const cam = voice.tiles.find((t) => t.identity === p.identity && t.source === "camera") ?? null;
     items.push({ key: `${p.identity}:camera`, participant: p, tile: cam, kind: "camera" });
   }
+  // A Twitch or YouTube source of the radio is shown like a screen share (user's decision); real shares come after it, so the newest of them wins the focus.
+  if (playerTile) items.push({ key: `player:${playerTile}`, participant: null, tile: null, kind: "player" });
   for (const t of voice.tiles.filter((t) => t.source === "screen")) {
     const participant = participants.find((p) => p.identity === t.identity);
     if (participant) items.push({ key: t.id, participant, tile: t, kind: "screen" });
   }
   // A new screen share automatically moves into focus as long as nothing is pinned.
-  const screens = items.filter((i) => i.kind === "screen");
+  const screens = items.filter((i) => i.kind === "screen" || i.kind === "player");
   const lastScreen = screens[screens.length - 1];
   // With "feature myself" off your own camera tile only becomes the large one by pinning it, or when nobody else is there.
-  const mayFeature = (i: Item) => featureSelfInSpeakerView || !i.participant.isLocal;
+  const mayFeature = (i: Item) => featureSelfInSpeakerView || !i.participant?.isLocal;
   const focusKey = (pinned && items.some((i) => i.key === pinned) ? pinned : null)
     ?? lastScreen?.key
     ?? (lastSpeaker ? items.find((i) => i.kind === "camera" && i.participant.identity === lastSpeaker && mayFeature(i))?.key : undefined)
@@ -100,7 +108,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
   const [menu, setMenu] = useState<({ identity: string } & MenuAnchor) | null>(null);
   const menuMember = menu ? members.find((m) => m.userId === menu.identity) ?? null : null;
   const openMenu = (item: Item, event: ReactMouseEvent<HTMLElement>) => {
-    if (item.participant.isLocal || !members.some((m) => m.userId === item.participant.identity)) return;
+    if (!item.participant || item.participant.isLocal || !members.some((m) => m.userId === item.participant.identity)) return;
     if (event.currentTarget.ownerDocument.fullscreenElement) return; // the menu lives in the body, behind a fullscreen tile
     event.preventDefault();
     setMenu({ identity: item.participant.identity, trigger: event.currentTarget, x: event.clientX, y: event.clientY });
@@ -130,15 +138,18 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
       ) : layout === "grid" || !focus ? (
         <div className="stage-grid" ref={grid.ref}>
           <div className="stage-grid-inner" style={{ gridTemplateColumns: `repeat(${grid.cols}, ${grid.tileWidth}px)` }}>
-            {items.map((i) => <Tile key={i.key} item={i} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} onMenu={openMenu} pinned={false} onClick={() => focusOn(i.key)} />)}
+            {items.map((i) => i.kind === "player" ? <PlayerTile key={i.key} popped={playerPopped} onRestore={onRestorePlayer} />
+              : <Tile key={i.key} item={i} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} onMenu={openMenu} pinned={false} onClick={() => focusOn(i.key)} />)}
           </div>
         </div>
       ) : (
         <div className="stage-focus">
-          <div className="stage-main"><Tile item={focus} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} onMenu={openMenu} big pinned={pinned === focus.key} onClick={unfocus} /></div>
+          <div className="stage-main">{focus.kind === "player" ? <PlayerTile big popped={playerPopped} onRestore={onRestorePlayer} />
+            : <Tile item={focus} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} onMenu={openMenu} big pinned={pinned === focus.key} onClick={unfocus} />}</div>
           {rest.length > 0 && (
             <div className="stage-strip">
-              {rest.map((i) => <Tile key={i.key} item={i} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} onMenu={openMenu} pinned={false} onClick={() => focusOn(i.key)} />)}
+              {rest.map((i) => i.kind === "player" ? <PlayerTile key={i.key} popped={playerPopped} onRestore={onRestorePlayer} />
+                : <Tile key={i.key} item={i} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} onMenu={openMenu} pinned={false} onClick={() => focusOn(i.key)} />)}
             </div>
           )}
         </div>
@@ -199,7 +210,20 @@ function useFittedGrid(n: number) {
   return { ref, ...best };
 }
 
-function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onRestore, onMenu }: { item: Item; client: VoiceClient; big?: boolean; pinned: boolean; onClick: () => void; onPopout: (tile: VideoTile) => void; poppedIds: Set<string>; onRestore: (id: string) => void; onMenu: (item: Item, event: ReactMouseEvent<HTMLElement>) => void }) {
+/**
+ * Twitch's or YouTube's player as a tile. The tile only reserves the room: the player (EmbedPlayer, mounted in App) lays itself over it
+ * completely and brings its own controls; ours is the pop-out button it shows on hover. Enlarging works through the
+ * "Sprecher" view, where this tile counts like a screen share.
+ */
+function PlayerTile({ big, popped, onRestore }: { big?: boolean; popped: boolean; onRestore: () => void }) {
+  return (
+    <div className={`tile screen embed ${big ? "big" : ""}`}>
+      {popped ? <div className="tile-popped"><Icon name="external-link" /><span>{t("stage.poppedOut")}</span><button className="secondary small" onClick={onRestore}>{t("stage.restoreVideo")}</button></div> : <EmbedSlot />}
+    </div>
+  );
+}
+
+function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onRestore, onMenu }: { item: Extract<Item, { participant: VoiceParticipant }>; client: VoiceClient; big?: boolean; pinned: boolean; onClick: () => void; onPopout: (tile: VideoTile) => void; poppedIds: Set<string>; onRestore: (id: string) => void; onMenu: (item: Item, event: ReactMouseEvent<HTMLElement>) => void }) {
   const { participant: p, tile } = item;
   const ref = useRef<HTMLDivElement>(null);
   const target = useCallback(() => ref.current, []);

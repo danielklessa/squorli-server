@@ -91,7 +91,7 @@ export class ServerApi {
   rtcToken(channelId: string) { return this.request<RtcTokenResponse>("POST", "/api/rtc-token", { channelId }).then((r) => RtcTokenResponse.parse(r)); }
 
   // ---------- Admin
-  updateSettings(patch: { name?: string; openJoin?: boolean; requireAccount?: boolean; listed?: boolean; description?: string | null }) { return this.request("PATCH", "/api/settings", patch); }
+  updateSettings(patch: { name?: string; openJoin?: boolean; requireAccount?: boolean; listed?: boolean; description?: string | null; radioAutoStop?: boolean }) { return this.request("PATCH", "/api/settings", patch); }
   /** Server icon (PNG/JPEG/WebP/GIF, 2 MB); appears in the sidebar and as the favicon. */
   async uploadServerIcon(file: File): Promise<{ ok: true; iconUrl: string | null }> {
     const form = new FormData();
@@ -112,7 +112,11 @@ export class ServerApi {
   updateRadioStation(id: string, patch: { name?: string; url?: string }) { return this.request<RadioStation>("PATCH", `/api/radio/stations/${id}`, patch); }
   deleteRadioStation(id: string) { return this.request("DELETE", `/api/radio/stations/${id}`); }
   startRadio(channelId: string, stationId: string) { return this.request("PUT", `/api/channels/${channelId}/radio`, { stationId }); }
+  /** Any address instead of a station (also CONTROL_RADIO). */
+  startRadioUrl(channelId: string, url: string) { return this.request("PUT", `/api/channels/${channelId}/radio`, { url }); }
   stopRadio(channelId: string) { return this.request("DELETE", `/api/channels/${channelId}/radio`); }
+  /** Play, pause, move a video for everyone (CONTROL_RADIO); the result arrives as `radio.playback`. */
+  setRadioPlayback(channelId: string, playback: { playing: boolean; position: number; rate: number }) { return this.request("PUT", `/api/channels/${channelId}/radio/playback`, playback); }
   createRole(data: { name: string; color?: string | null; permissions?: number }) { return this.request<Role>("POST", "/api/roles", data); }
   updateRole(id: string, patch: { name?: string; color?: string | null; permissions?: number; position?: number }) { return this.request("PATCH", `/api/roles/${id}`, patch); }
   deleteRole(id: string) { return this.request("DELETE", `/api/roles/${id}`); }
