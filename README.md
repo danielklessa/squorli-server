@@ -11,11 +11,14 @@ This README explains how to run your own Squorli server. Working on the code: [d
 ## What you get
 
 - Text channels with history, editing, deleting and attachments; voice channels with voice activation or push-to-talk.
+- Markdown in messages (formatting, lists and task lists, tables, code blocks with a copy button) and emoji: an emoji picker, `:shortcodes:` and emoticons such as `:)`, shown in an emoji font that your own server delivers, so they look the same on every system and no font service is involved.
 - Camera and screen share (screen audio in Chromium browsers), tile and speaker view.
 - Categories, roles with permissions and hierarchy, invite links, kick and ban, admin panel in the browser.
 - Optional connection to a Squorli Directory for global handles, friends and end-to-end encrypted direct messages.
 
 Not yet: desktop client, reactions, audit log. Current status of the implementation: [AGENTS.md](AGENTS.md).
+
+Third-party software, fonts and data inside the client are listed with their licenses in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) and in the client under Settings > Licenses; see also [NOTICE](NOTICE).
 
 ## Requirements
 

@@ -21,6 +21,8 @@ COPY --from=build /out/drizzle ./drizzle
 COPY --from=build /out/node_modules ./node_modules
 COPY --from=build /out/package.json ./package.json
 COPY --from=build /repo/apps/web/dist ./public
+# License, notice and the third-party notices travel with the image (Apache License 2.0, section 4).
+COPY LICENSE NOTICE THIRD-PARTY-NOTICES.md ./
 RUN mkdir -p /app/data && chown node:node /app/data
 VOLUME /app/data
 EXPOSE 3000

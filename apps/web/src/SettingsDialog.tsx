@@ -5,13 +5,14 @@ import type { ServerApi } from "./api";
 import { BLUR_OPTIONS } from "./CameraPicker";
 import { askConfirm } from "./dialogs";
 import { Icon } from "./Icon";
+import { LicensesTab } from "./LicensesTab";
 import { LOCALES, fmtDateTime, localePreference, t, type LocalePreference } from "./i18n";
 import { saveVoiceSettings, type VoiceSettings } from "./voice/settings";
 import { SOUND_CUES, type SoundCue, type SoundSettings } from "./voice/sounds";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 
-export type SettingsTab = "profile" | "view" | "voice" | "audio" | "camera" | "sounds" | "sessions" | "account";
+export type SettingsTab = "profile" | "view" | "voice" | "audio" | "camera" | "sounds" | "sessions" | "account" | "licenses";
 const TABS: { id: SettingsTab; label: string; icon: string }[] = [
   { id: "profile", label: t("settings.tab.profile"), icon: "user" },
   { id: "view", label: t("settings.tab.view"), icon: "languages" },
@@ -21,6 +22,7 @@ const TABS: { id: SettingsTab; label: string; icon: string }[] = [
   { id: "sounds", label: t("settings.tab.sounds"), icon: "bell" },
   { id: "sessions", label: t("settings.tab.sessions"), icon: "monitor-smartphone" },
   { id: "account", label: t("settings.tab.account"), icon: "key-round" },
+  { id: "licenses", label: t("settings.tab.licenses"), icon: "scale" },
 ];
 /** Categories whose content follows the directory account (everything except the device selection, sessions and the account itself). */
 const SYNCED: readonly SettingsTab[] = ["view", "voice", "camera", "sounds"];
@@ -38,15 +40,17 @@ const fmt = fmtDateTime;
 /**
  * All user and profile settings in one categorized modal (categories on the left), opened by the gear next to your name:
  * profile (display name on this server; with a directory account also the global name), view (language, speaker view),
- * speaking, audio devices, camera, sounds, sessions (devices signed in on this server, M6c) and account (handle, key, link to
- * the directory's account page, sign out, discard identity). With a directory account everything except the device selection
+ * speaking, audio devices, camera, sounds, sessions (devices signed in on this server, M6c), account (handle, key, link to
+ * the directory's account page, sign out, discard identity) and licenses (our own and the third-party notices, LicensesTab.tsx). With a directory account everything except the device selection
  * is stored there (store.ts pushes every change); sessions and the name on this server belong to the server shown.
  */
-export function SettingsDialog({ api, me, displayName, directoryUrl, directoryAccount, serverDomain, syncError, client, voice, initialTab, onSaveServerName, onSaveGlobalName, onSetLocale, onCapturingKey, onClose, onLogout, onForget }: {
+export function SettingsDialog({ api, me, displayName, directoryUrl, directoryAccount, serverDomain, clientVersion, syncError, client, voice, initialTab, onSaveServerName, onSaveGlobalName, onSetLocale, onCapturingKey, onClose, onLogout, onForget }: {
   api: ServerApi; me: Me;
   /** Your name as the server shows it right now (member list); the preview falls back to it. */
   displayName: string;
   directoryUrl: string | null; directoryAccount: DirectoryAccount | null | undefined; serverDomain: string | null;
+  /** Version of the server that serves this client (from its /api/health), shown with the licenses. */
+  clientVersion: string | null;
   /** Last failure while saving the settings in the account; null = none. */
   syncError: string | null;
   client: VoiceClient; voice: VoiceState; initialTab?: SettingsTab;
@@ -361,6 +365,8 @@ export function SettingsDialog({ api, me, displayName, directoryUrl, directoryAc
                 </div>
               </>
             )}
+
+            {tab === "licenses" && <LicensesTab version={clientVersion} />}
 
             {SYNCED.includes(tab) && (
               <>

@@ -1,8 +1,11 @@
+import { AutoGrowTextarea } from "./AutoGrowTextarea";
 import { Avatar } from "./Avatar";
 import { Permission, hasPermission, type Channel, type Member, type Message } from "@squorli/protocol";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { askConfirm } from "./dialogs";
+import { EmojiButton } from "./EmojiPicker";
 import { Icon } from "./Icon";
+import { MessageText } from "./MessageText";
 import type { ChannelMessages } from "./store";
 import type { ServerConnection } from "./serverConnection";
 import { fmtDay, fmtTime, t } from "./i18n";
@@ -18,18 +21,6 @@ type Props = {
 };
 
 const GROUP_MS = 5 * 60_000;
-const linkRe = /(https?:\/\/[^\s<]+)/g;
-
-function renderText(text: string) {
-  return text.split("\n").map((line, i) => (
-    <span key={i}>
-      {i > 0 && <br />}
-      {line.split(linkRe).map((part, j) => (linkRe.test(part) && part.startsWith("http")
-        ? <a key={j} href={part} target="_blank" rel="noreferrer noopener">{part}</a>
-        : <span key={j}>{part}</span>))}
-    </span>
-  ));
-}
 
 const fmtSize = (n: number) => (n > 1_048_576 ? `${(n / 1_048_576).toFixed(1)} MB` : n > 1024 ? `${Math.round(n / 1024)} kB` : `${n} B`);
 
@@ -40,6 +31,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const stickToBottom = useRef(true);
   const lastTyping = useRef(0);
   const nameOf = useMemo(() => new Map(members.map((m) => [m.userId, m.displayName])), [members]);
@@ -53,6 +45,14 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
     const el = listRef.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [messages.list, channel.id]);
+  // The input grows and shrinks (AutoGrowTextarea): the newest message stays in view.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => { if (stickToBottom.current) el.scrollTop = el.scrollHeight; });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   function onScroll() {
     const el = listRef.current;
@@ -74,7 +74,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
       stickToBottom.current = true;
     } catch (e) {
       setErr(String(e));
-    } finally { setSending(false); }
+    } finally { setSending(false); inputRef.current?.focus(); }   // keep writing right away, also after a click on "Senden"
   }
 
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -120,13 +120,13 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
                 <div className="msg-body">
                   {editing?.id === m.id ? (
                     <div className="edit-box">
-                      <textarea value={editing.text} autoFocus rows={2} onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
+                      <AutoGrowTextarea value={editing.text} autoFocus rows={2} onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
                         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void saveEdit(); } if (e.key === "Escape") setEditing(null); }} />
                       <span className="muted">{t("chat.editHint")}</span>
                     </div>
                   ) : (
                     <>
-                      {m.content && <p>{renderText(m.content)}{m.editedAt && <span className="muted"> {t("chat.edited")}</span>}</p>}
+                      {m.content && <MessageText text={m.content} edited={m.editedAt !== null} />}
                       {m.attachments.map((a) => (
                         a.mimeType.startsWith("image/")
                           ? <a key={a.id} href={conn.api.abs(a.url)} target="_blank" rel="noreferrer"><img className="attachment-img" src={conn.api.abs(a.url)} alt={a.name} loading="lazy" /></a>
@@ -160,14 +160,17 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
               <Icon name="paperclip" title={t("chat.attach")} /><input type="file" multiple hidden onChange={(e) => { setFiles([...files, ...Array.from(e.target.files ?? [])]); e.target.value = ""; }} />
             </label>
           )}
-          <textarea
+          <AutoGrowTextarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKey}
             rows={1}
             placeholder={canSend ? t("chat.placeholder", { name: channel.name }) : t("chat.noPermission")}
-            disabled={!canSend || sending}
+            disabled={!canSend}
+            readOnly={sending}
+            inputRef={inputRef}
           />
+          <EmojiButton inputRef={inputRef} value={draft} onChange={setDraft} disabled={!canSend || sending} />
           <button onClick={submit} disabled={!canSend || sending || (!draft.trim() && files.length === 0)}>{t("chat.send")}</button>
         </div>
         <div className="typing">{typers.length > 0 && t(typers.length === 1 ? "chat.typingOne" : "chat.typingMany", { names: typers.join(", ") })}</div>

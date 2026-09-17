@@ -1,9 +1,12 @@
+import { AutoGrowTextarea } from "./AutoGrowTextarea";
 import { Avatar } from "./Avatar";
 import { DM_DELETE_BOTH_MS, type Friend } from "@squorli/protocol";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { askConfirm } from "./dialogs";
+import { EmojiButton } from "./EmojiPicker";
 import { friendName } from "./Home";
 import { Icon } from "./Icon";
+import { MessageText } from "./MessageText";
 import type { DmThread, Store } from "./store";
 import { fmtDay, fmtTime, t } from "./i18n";
 
@@ -12,24 +15,13 @@ import { fmtDay, fmtTime, t } from "./i18n";
  * attachments. Deleting: your own messages within 5 minutes for both sides, otherwise only for me (user decision).
  */
 const GROUP_MS = 5 * 60_000;
-const linkRe = /(https?:\/\/[^\s<]+)/g;
-
-function renderText(text: string) {
-  return text.split("\n").map((line, i) => (
-    <span key={i}>
-      {i > 0 && <br />}
-      {line.split(linkRe).map((part, j) => (linkRe.test(part) && part.startsWith("http")
-        ? <a key={j} href={part} target="_blank" rel="noreferrer noopener">{part}</a>
-        : <span key={j}>{part}</span>))}
-    </span>
-  ));
-}
 
 export function DmView({ friend, thread, myKey, store }: { friend: Friend; thread: DmThread; myKey: string; store: Store }) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const stickToBottom = useRef(true);
   const name = friendName(friend);
 
@@ -37,6 +29,14 @@ export function DmView({ friend, thread, myKey, store }: { friend: Friend; threa
     const el = listRef.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [thread.list]);
+  // The input grows and shrinks (AutoGrowTextarea): the newest message stays in view.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => { if (stickToBottom.current) el.scrollTop = el.scrollHeight; });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   function onScroll() {
     const el = listRef.current;
@@ -54,7 +54,7 @@ export function DmView({ friend, thread, myKey, store }: { friend: Friend; threa
     setSending(true); setErr(null);
     try { await store.sendDm(friend.publicKey, text); setDraft(""); stickToBottom.current = true; }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
-    finally { setSending(false); }
+    finally { setSending(false); inputRef.current?.focus(); }   // keep writing right away, also after a click on "Senden"
   }
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); }
@@ -92,7 +92,7 @@ export function DmView({ friend, thread, myKey, store }: { friend: Friend; threa
                 <div className="msg-body">
                   {m.text === null
                     ? <p className="muted"><Icon name="lock" /> {t("dm.undecryptable")}</p>
-                    : <p>{renderText(m.text)}</p>}
+                    : <MessageText text={m.text} />}
                 </div>
                 <div className="msg-actions">
                   <button className="icon" title={both ? t("dm.deleteBoth") : t("dm.deleteMine")} onClick={() => {
@@ -109,7 +109,8 @@ export function DmView({ friend, thread, myKey, store }: { friend: Friend; threa
       <footer className="composer">
         {err && <p className="error">{err}</p>}
         <div className="composer-row">
-          <textarea value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} rows={1} placeholder={t("dm.placeholder", { name })} disabled={sending} />
+          <AutoGrowTextarea value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} rows={1} placeholder={t("dm.placeholder", { name })} readOnly={sending} inputRef={inputRef} />
+          <EmojiButton inputRef={inputRef} value={draft} onChange={setDraft} disabled={sending} />
           <button onClick={submit} disabled={sending || !draft.trim()}>{t("chat.send")}</button>
         </div>
         <div className="typing" />

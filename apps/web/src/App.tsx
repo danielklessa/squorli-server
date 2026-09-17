@@ -197,11 +197,11 @@ export function App() {
   const current = server?.channels.find((c) => c.id === active.currentChannelId && c.kind === "text") ?? null;
   const me = server?.members.find((m) => m.userId === active.userId);
   const canStream = !!server && hasPermission(server.myPermissions, Permission.STREAM_VIDEO);
-  // The stage belongs to the voice connection's server; on another server the dock shows "view" and switches there.
-  const showStage = stageOpen && voiceChannel !== null && voiceHost === activeHost;
   // M7: home view with friends and direct messages as soon as the directory socket exists (an account at the directory).
   const homeAvailable = state.friends !== null || state.directoryLink !== "idle";
   const homeOpen = homeAvailable && state.homeOpen;
+  // The stage belongs to the voice connection's server; on another server or in the home view the dock shows "view" and switches there.
+  const showStage = stageOpen && voiceChannel !== null && voiceHost === activeHost && !homeOpen;
   const homeBadge = (state.friends ?? []).filter((f) => f.state === "pending_in").length + Object.values(state.conversations).reduce((n, c) => n + c.unread, 0);
   const friendsMenu = homeAvailable ? {
     stateOf: (pk: string) => store.friendState(pk) ?? null,
@@ -288,7 +288,7 @@ export function App() {
       )}
       {settingsTab && active.me && (
         <SettingsDialog api={conn.api} me={active.me} displayName={me?.displayName ?? active.me.displayName ?? "…"} directoryUrl={state.directoryUrl} directoryAccount={state.directoryAccount}
-          serverDomain={active.serverDomain} syncError={state.settingsSyncError} client={client} voice={voice} initialTab={settingsTab}
+          serverDomain={active.serverDomain} clientVersion={home.serverVersion} syncError={state.settingsSyncError} client={client} voice={voice} initialTab={settingsTab}
           onSaveServerName={(n) => store.setServerDisplayName(n)} onSaveGlobalName={(n) => store.setDirectoryName(null, n)} onSetLocale={(pref) => store.setLocale(pref)}
           onCapturingKey={setCapturingPttKey} onClose={() => setSettingsTab(null)}
           onLogout={() => { setSettingsTab(null); void client.leave(); store.logout(); }}

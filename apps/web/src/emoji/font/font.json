@@ -1,0 +1,7 @@
+{
+  "name": "Noto Color Emoji",
+  "version": "v47",
+  "license": "OFL-1.1",
+  "source": "https://github.com/googlefonts/noto-emoji",
+  "from": "https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap"
+}

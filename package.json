@@ -9,8 +9,10 @@
   "scripts": {
     "dev": "node tools/dev.mjs",
     "dev:apps": "pnpm -r --parallel --filter ./apps/* dev",
-    "build": "node tools/icons.mjs && pnpm -r build && node tools/copy-web.mjs",
+    "build": "node tools/icons.mjs && node tools/licenses.mjs && pnpm -r build && node tools/copy-web.mjs",
     "icons": "node tools/icons.mjs",
+    "emoji": "node tools/emoji.mjs",
+    "licenses": "node tools/licenses.mjs",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "db:generate": "pnpm --filter @squorli/server db:generate",
