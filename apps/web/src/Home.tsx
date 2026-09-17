@@ -86,6 +86,7 @@ export function HomeSidebar({ state, store, members }: { state: State; store: St
                 <button className="channel-btn" onClick={() => store.selectPeer(f.publicKey)} title={`@${f.handle}`}>
                   <Avatar name={friendName(f)} online={f.online} afk={f.afk} />
                   <span className="channel-name">{friendName(f)}</span>
+                  {f.online && f.afk && <Icon name="moon" className="afk" title={t("members.afk")} />}
                   {unread > 0 && <span className="count">{unread}</span>}
                 </button>
               </li>

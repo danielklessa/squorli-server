@@ -548,7 +548,9 @@ button.icon.on { color: var(--brand); }
 .avatar-presence { position: absolute; right: -1px; bottom: -1px; width: 0.75rem; height: 0.75rem; border: 3px solid var(--bg2); border-radius: 50%; background: var(--muted); }
 .avatar-presence.on { background: var(--ok); }
 /* Absent (AFK): amber crescent, the shape carries the state as well as the color. */
-.avatar-presence.afk { background: var(--warn); }
+.avatar-presence.afk { background: var(--warn); width: 1.125rem; height: 1.125rem; border-width: 2px; right: -4px; bottom: -4px; }
+.user-avatar--small .avatar-presence.afk { width: 0.875rem; height: 0.875rem; right: -3px; bottom: -3px; }
+.member-btn .ic.afk, .friend .ic.afk { color: var(--warn); font-size: 1.125rem; }
 .avatar-presence.afk::after { content: ""; position: absolute; top: -30%; left: -30%; width: 85%; height: 85%; border-radius: 50%; background: var(--bg2); }
 .voice-members .afk { color: var(--warn); }
 .dock-afk { display: flex; flex-direction: column; align-items: flex-start; gap: 0.375rem; }

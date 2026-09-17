@@ -72,6 +72,7 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
                   <button className="member-btn" aria-haspopup="menu" aria-expanded={open?.userId === m.userId} onContextMenu={(e) => openMenu(e, m.userId)} onClick={(e) => openMenu(e, m.userId)}>
                     <Avatar name={m.displayName} online={m.online} afk={m.afk} />
                     <span className="member-identity"><span style={r?.color ? { color: r.color } : undefined}>{m.displayName}</span>{(m.handle || isMe) && <small>{m.handle && `@${m.handle}`}{m.handle && isMe && " "}{isMe && t("members.you")}</small>}</span>
+                    {m.online && m.afk && <Icon name="moon" className="afk" title={t("members.afk")} />}
                     {m.isOwner && <Icon name="crown" className="owner" title={t("members.owner")} />}
                     {m.streamBlocked && <Icon name="video-off" className="muted" title={t("members.streamBlocked")} />}
                   </button>
