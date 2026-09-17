@@ -4,17 +4,20 @@ import type { ServerApi } from "./api";
 import { askConfirm } from "./dialogs";
 import { roleOrder } from "./roleOrder";
 import { ChannelsTab } from "./ChannelsTab";
+import { RadioTab } from "./RadioTab";
 import { Icon } from "./Icon";
 import { fmtDateTime, t } from "./i18n";
 
-type Tab = "server" | "channels" | "roles" | "invites" | "bans";
+type Tab = "server" | "channels" | "radio" | "roles" | "invites" | "bans";
 
-/** Admin area: server, categories/channels, roles, invites, bans. Changes come back via the structure event. */
+/** Admin area: server, categories/channels, radio stations, roles, invites, bans. Changes come back via the structure event. */
 export function AdminPanel({ api, server, myUserId, directoryUrl, onClose }: { api: ServerApi; server: ServerState; myUserId: string; directoryUrl: string | null; onClose: () => void }) {
   const p = server.myPermissions;
   const allTabs: { id: Tab; label: string; icon: string; ok: boolean }[] = [
     { id: "server", label: t("admin.tab.server"), icon: "server", ok: hasPermission(p, Permission.MANAGE_SERVER) },
     { id: "channels", label: t("admin.tab.channels"), icon: "hash", ok: hasPermission(p, Permission.MANAGE_CHANNELS) },
+    // Only against a server that knows the radio (older servers send no station list).
+    { id: "radio", label: t("admin.tab.radio"), icon: "radio", ok: hasPermission(p, Permission.MANAGE_SERVER) && server.radioStations !== undefined },
     { id: "roles", label: t("admin.tab.roles"), icon: "shield", ok: hasPermission(p, Permission.MANAGE_ROLES) },
     { id: "invites", label: t("admin.tab.invites"), icon: "link", ok: hasPermission(p, Permission.CREATE_INVITES) },
     { id: "bans", label: t("admin.tab.bans"), icon: "ban", ok: hasPermission(p, Permission.BAN_MEMBERS) },
@@ -40,6 +43,7 @@ export function AdminPanel({ api, server, myUserId, directoryUrl, onClose }: { a
             {err && <p className="error">{err}</p>}
             {tab === "server" && <ServerTab api={api} server={server} directoryUrl={directoryUrl} run={run} />}
             {tab === "channels" && <ChannelsTab api={api} server={server} run={run} />}
+            {tab === "radio" && <RadioTab api={api} server={server} run={run} />}
             {tab === "roles" && <RolesTab api={api} server={server} myUserId={myUserId} run={run} />}
             {tab === "invites" && <InvitesTab api={api} run={run} canManage={hasPermission(p, Permission.MANAGE_SERVER)} />}
             {tab === "bans" && <BansTab api={api} run={run} />}

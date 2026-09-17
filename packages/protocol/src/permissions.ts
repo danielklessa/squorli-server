@@ -18,6 +18,7 @@ export const Permission = {
   STREAM_VIDEO: 1 << 12,
   MODERATE_VOICE: 1 << 13,
   VIEW_VIDEO: 1 << 14,
+  CONTROL_RADIO: 1 << 15,
 } as const;
 
 export type PermissionName = keyof typeof Permission;
@@ -38,6 +39,7 @@ export const PERMISSION_LABELS: Record<PermissionName, string> = {
   STREAM_VIDEO: "Kamera und Bildschirm teilen",
   MODERATE_VOICE: "Sprachkanäle moderieren (verschieben, Kamera/Bildschirm beenden, Streamen sperren)",
   VIEW_VIDEO: "Kamera- und Bildschirmübertragungen sehen",
+  CONTROL_RADIO: "Webradio in Sprachkanälen starten und stoppen",
 };
 
 /**
@@ -50,7 +52,7 @@ export const PERMISSION_LABELS: Record<PermissionName, string> = {
 export const PERMISSION_GROUPS = [
   { id: "admin", permissions: ["ADMINISTRATOR", "MANAGE_CHANNELS", "MANAGE_ROLES", "MANAGE_SERVER"] },
   { id: "text", permissions: ["VIEW_CHANNELS", "SEND_MESSAGES", "ATTACH_FILES", "MANAGE_MESSAGES"] },
-  { id: "voice", permissions: ["CONNECT_VOICE", "VIEW_VIDEO", "STREAM_VIDEO", "MODERATE_VOICE"] },
+  { id: "voice", permissions: ["CONNECT_VOICE", "VIEW_VIDEO", "STREAM_VIDEO", "CONTROL_RADIO", "MODERATE_VOICE"] },
   { id: "members", permissions: ["CREATE_INVITES", "KICK_MEMBERS", "BAN_MEMBERS"] },
 ] as const satisfies readonly { id: string; permissions: readonly PermissionName[] }[];
 

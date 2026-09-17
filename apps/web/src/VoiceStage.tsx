@@ -1,10 +1,13 @@
 import { FullscreenButton, TrackVideo } from "./VideoWindows";
 import { VideoAudioControls } from "./VideoAudioControls";
 import { Avatar } from "./Avatar";
-import { Permission, displayNameOf, hasPermission, type Channel, type Member } from "@squorli/protocol";
+import { Permission, displayNameOf, hasPermission, type Channel, type Member, type RadioStation } from "@squorli/protocol";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { ContextMenu, type MenuAnchor } from "./ContextMenu";
 import { UserVolumeControl } from "./UserVolumeControl";
+import { RadioControl } from "./RadioControl";
+import type { ServerApi } from "./api";
+import type { RadioPlayer } from "./voice/radioPlayer";
 import { VoiceClient, explainScreenAudio, isChromium, type VideoTile, type VoiceParticipant, type VoiceState } from "./voice/voiceClient";
 import { Icon } from "./Icon";
 import { t } from "./i18n";
@@ -16,6 +19,12 @@ type Props = {
   channel: Channel;
   members: Member[];
   myPermissions: number;
+  /** Web radio: the voice server's API, the local player and the server's stations (undefined = a server without radio). */
+  api: ServerApi;
+  radio: RadioPlayer;
+  radioStations: RadioStation[] | undefined;
+  /** What the channel's station is playing right now, null = unknown. */
+  radioTitle: string | null;
   /** Camera on/off; asks when there are several cameras (App.tsx). */
   onToggleCamera: () => Promise<void>;
   onToggleBlur: () => Promise<void>;
@@ -35,7 +44,7 @@ type Item = { key: string; participant: VoiceParticipant; tile: VideoTile | null
  * "Speaker" follows the active speaker or the newest screen share without pinning.
  * Receive quality follows the tile size (adaptiveStream in the voice core); here the <video> only has to have the right size.
  */
-export function VoiceStage({ client, voice, channel, members, myPermissions, onToggleCamera, onToggleBlur, onLeave, onPopout, poppedIds, onRestore }: Props) {
+export function VoiceStage({ client, voice, channel, members, myPermissions, api, radio, radioStations, radioTitle, onToggleCamera, onToggleBlur, onLeave, onPopout, poppedIds, onRestore }: Props) {
   // Names from the server's member list (arrives via WS immediately on every rename), not from the LiveKit token,
   // which is only created on joining. Unknown identities (bots, "external") keep the LiveKit name.
   const participants = voice.participants.map((p) => {
@@ -103,6 +112,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, onT
         <span className="channel-icon"><Icon name="volume-2" /></span><strong>{channel.name}</strong>
         <span className="muted small">· {t("stage.participants", { n: voice.participants.length })}{voice.audioProfile && ` · Opus ${voice.audioProfile.bitrate} kbit/s ${voice.audioProfile.stereo ? t("stage.stereo") : t("stage.mono")}`}</span>
         <span className="spacer" />
+        {radioStations && <RadioControl api={api} player={radio} channel={channel} stations={radioStations} nowPlaying={radioTitle} canControl={hasPermission(myPermissions, Permission.CONTROL_RADIO)} />}
         <div className="seg">
           <button className={layout === "focus" ? "active" : ""} title={t("stage.speakerHint")} onClick={() => setLayout("focus")}>{t("stage.speaker")}</button>
           <button className={layout === "grid" ? "active" : ""} title={t("stage.gridHint")} onClick={() => setLayout("grid")}>{t("stage.grid")}</button>

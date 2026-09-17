@@ -64,6 +64,14 @@ export const categories = pgTable("categories", {
   position: integer("position").notNull().default(0),
 });
 
+/** Web radio stations an admin offers (admin area > Radio). `url` = a direct audio stream or a playlist (.m3u, .m3u8, .pls). */
+export const radioStations = pgTable("radio_stations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  url: text("url").notNull(),
+  createdAt: ts("created_at").notNull().defaultNow(),
+});
+
 export const channels = pgTable("channels", {
   id: uuid("id").primaryKey().defaultRandom(),
   kind: text("kind", { enum: ["text", "voice"] }).notNull(),
@@ -75,6 +83,14 @@ export const channels = pgTable("channels", {
   /** Voice quality (M3): Opus bitrate in kbit/s and stereo. */
   audioBitrate: integer("audio_bitrate").notNull().default(64),
   audioStereo: boolean("audio_stereo").notNull().default(false),
+  /**
+   * Web radio playing in this voice channel (null = off). Kept in the database so it survives a restart; clients only play
+   * it while they are in the channel. `radio_stream_url` = what clients play (the station's address, or what its playlist named
+   * when the radio was started).
+   */
+  radioStationId: uuid("radio_station_id").references(() => radioStations.id, { onDelete: "set null" }),
+  radioStreamUrl: text("radio_stream_url"),
+  radioStartedBy: uuid("radio_started_by").references(() => users.id, { onDelete: "set null" }),
 });
 
 export const roles = pgTable("roles", {

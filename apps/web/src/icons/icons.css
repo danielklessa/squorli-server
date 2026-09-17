@@ -40,6 +40,7 @@
 .ic-pin::before { content: "\e259"; }
 .ic-plane::before { content: "\e1de"; }
 .ic-play::before { content: "\e13c"; }
+.ic-radio::before { content: "\e142"; }
 .ic-rotate-ccw::before { content: "\e148"; }
 .ic-scale::before { content: "\e212"; }
 .ic-screen-share::before { content: "\e14f"; }
@@ -49,6 +50,7 @@
 .ic-settings::before { content: "\e154"; }
 .ic-shield::before { content: "\e158"; }
 .ic-smile::before { content: "\e164"; }
+.ic-square::before { content: "\e167"; }
 .ic-trash-2::before { content: "\e18e"; }
 .ic-trophy::before { content: "\e377"; }
 .ic-user::before { content: "\e19f"; }

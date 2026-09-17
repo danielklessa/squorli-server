@@ -23,6 +23,8 @@ type Props = {
   mentions: Record<string, number>;
   /** Channels I have muted; `canMute` = the server keeps mutes (offers the context menu). */
   muted: Record<string, boolean>;
+  /** Web radio: what a channel's station is playing right now (tooltip of the radio mark). */
+  radioTitles: Record<string, string>;
   canMute: boolean;
   onMuteChannel: (channelId: string, muted: boolean) => void;
   connection: string;
@@ -32,7 +34,7 @@ type Props = {
   myUserId: string;
 };
 
-export function Sidebar({ server, api, currentChannelId, voice, voiceState, client, unread, mentions, muted, canMute, onMuteChannel, connection, onSelect, onJoinVoice, onOpenAdmin, myUserId }: Props) {
+export function Sidebar({ server, api, currentChannelId, voice, voiceState, client, unread, mentions, muted, radioTitles, canMute, onMuteChannel, connection, onSelect, onJoinVoice, onOpenAdmin, myUserId }: Props) {
   // Right-click on a voice member: how loud to play them back (not for yourself).
   const [menu, setMenu] = useState<({ userId: string } & MenuAnchor) | null>(null);
   // Right-click on a text channel: mute it for myself.
@@ -76,6 +78,7 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, clie
           onContextMenu={(e) => { if (c.kind !== "text" || !canMute) return; e.preventDefault(); setChannelMenu({ channelId: c.id, trigger: e.currentTarget, x: e.clientX, y: e.clientY }); }}>
           <span className="channel-icon"><Icon name={c.kind === "text" ? "hash" : "volume-2"} /></span>
           <span className="channel-name">{c.name}</span>
+          {c.radio && <span className="channel-radio" title={radioTitles[c.id] ? t("radio.inChannelPlaying", { name: c.radio.name, title: radioTitles[c.id] ?? "" }) : t("radio.inChannel", { name: c.radio.name })}><Icon name="radio" /></span>}
           {c.kind === "voice" && members.length > 0 && <span className="count">{members.length}</span>}
           {muted[c.id] && <span className="channel-muted" title={t("sidebar.muted")}><Icon name="bell-off" /></span>}
           {(mentions[c.id] ?? 0) > 0 && <span className="mention-badge" title={t("sidebar.mentions", { n: mentions[c.id] ?? 0 })}>{mentions[c.id]}</span>}

@@ -304,6 +304,45 @@ const wsB = await connectWs(B.token);
 const [, stOnline] = await api("GET", "/api/state", undefined, owner.token);
 check("presence online", stOnline.members.find((m) => m.userId === B.userId)?.online === true);
 
+// ---------- Web radio (stations: MANAGE_SERVER; a voice channel's radio: CONTROL_RADIO; B has neither here)
+const radioOf = async () => (await api("GET", "/api/state", undefined, owner.token))[1].channels.find((c) => c.id === voiceCh.id)?.radio ?? null;
+const streamUrl = "https://streams.radiobob.de/bob-national/mp3-128/streams.radiobob.de/";
+const [srs0] = await api("POST", "/api/radio/stations", { name: "Fremd", url: streamUrl }, B.token);
+const [srsFtp] = await api("POST", "/api/radio/stations", { name: "Kaputt", url: "ftp://example.org/radio.mp3" }, owner.token);
+const [srs2] = await api("POST", "/api/radio/stations", { name: "", url: streamUrl }, owner.token);
+const [srs3, station] = await api("POST", "/api/radio/stations", { name: "Rauchtest-Radio", url: streamUrl }, owner.token);
+const evStations = await wsB.waitFor((e) => e.type === "structure" && e.radioStations?.some((x) => x.id === station.id)).catch(() => null);
+check("radio: stations need MANAGE_SERVER and an http(s) address; list in state and broadcast", srs0 === 403 && srsFtp === 400 && srs2 === 400 && srs3 === 200 && !!evStations
+  && Array.isArray(stOnline.radioStations) && Array.isArray(wsA.welcome.state.radioStations), `${srs0} ${srsFtp} ${srs2} ${srs3}`);
+const [srp0] = await api("PUT", `/api/channels/${voiceCh.id}/radio`, { stationId: station.id }, B.token);
+const [srp1] = await api("PUT", `/api/channels/${textCh.id}/radio`, { stationId: station.id }, owner.token);
+const [srp2, unknownStation] = await api("PUT", `/api/channels/${voiceCh.id}/radio`, { stationId: "00000000-0000-4000-8000-000000000000" }, owner.token);
+const [srp3] = await api("PUT", `/api/channels/${voiceCh.id}/radio`, { stationId: station.id }, owner.token);
+const evRadio = await wsB.waitFor((e) => e.type === "structure" && e.channels?.find((c) => c.id === voiceCh.id)?.radio?.stationId === station.id).catch(() => null);
+const radioOn = evRadio?.channels.find((c) => c.id === voiceCh.id)?.radio;
+check("radio: start needs CONTROL_RADIO, a voice channel and a known station; everyone gets the stream address", srp0 === 403 && srp1 === 404 && srp2 === 404 && unknownStation.error === "unknown_station" && srp3 === 200
+  && radioOn?.streamUrl === streamUrl && radioOn?.name === "Rauchtest-Radio" && radioOn?.startedBy === owner.userId, `${srp0} ${srp1} ${srp2} ${srp3}`);
+const [, internalStation] = await api("POST", "/api/radio/stations", { name: "Intern", url: "http://127.0.0.1:9/intern.m3u" }, owner.token);
+const [srp4, internalErr] = await api("PUT", `/api/channels/${voiceCh.id}/radio`, { stationId: internalStation.id }, owner.token);
+check("radio: a playlist on an internal address is never fetched, the running station stays", srp4 === 502 && internalErr.error === "radio_forbidden_host" && (await radioOf())?.stationId === station.id, `${srp4} ${internalErr.error ?? ""}`);
+const [srn] = await api("PATCH", `/api/radio/stations/${station.id}`, { name: "Rauchtest-Radio 2" }, owner.token);
+const renamed = await radioOf();
+const [sru] = await api("PATCH", `/api/radio/stations/${station.id}`, { url: `${streamUrl}?neu=1` }, owner.token);
+const [sre] = await api("PATCH", `/api/radio/stations/${station.id}`, {}, owner.token);
+check("radio: a renamed station shows in the channel, a new address turns the radio off", srn === 200 && renamed?.name === "Rauchtest-Radio 2" && sru === 200 && sre === 400 && (await radioOf()) === null, `${srn} ${sru} ${sre}`);
+await api("PUT", `/api/channels/${voiceCh.id}/radio`, { stationId: station.id }, owner.token);
+const [srd0] = await api("DELETE", `/api/channels/${voiceCh.id}/radio`, undefined, B.token);
+const stillOn = await radioOf();
+const [srd1] = await api("DELETE", `/api/channels/${voiceCh.id}/radio`, undefined, owner.token);
+check("radio: stop needs CONTROL_RADIO", srd0 === 403 && stillOn?.stationId === station.id && srd1 === 200 && (await radioOf()) === null, `${srd0} ${srd1}`);
+await api("PUT", `/api/channels/${voiceCh.id}/radio`, { stationId: station.id }, owner.token);
+const [srx0] = await api("DELETE", `/api/radio/stations/${station.id}`, undefined, B.token);
+const [srx1] = await api("DELETE", `/api/radio/stations/${station.id}`, undefined, owner.token);
+const [srx2] = await api("DELETE", `/api/radio/stations/${internalStation.id}`, undefined, owner.token);
+const [, stRadioEnd] = await api("GET", "/api/state", undefined, owner.token);
+check("radio: deleting a station turns it off where it plays", srx0 === 403 && srx1 === 200 && srx2 === 200 && stRadioEnd.channels.find((c) => c.id === voiceCh.id)?.radio === null
+  && !stRadioEnd.radioStations.some((x) => x.id === station.id || x.id === internalStation.id), `${srx0} ${srx1} ${srx2}`);
+
 const [sm1, msg1] = await api("POST", `/api/channels/${textCh.id}/messages`, { content: "Hallo aus dem Rauchtest" }, B.token);
 const evCreate = await wsA.waitFor((e) => e.type === "message.create" && e.message?.id === msg1.id).catch(() => null);
 check("message create + broadcast", sm1 === 200 && !!evCreate && evCreate.message.authorId === B.userId);

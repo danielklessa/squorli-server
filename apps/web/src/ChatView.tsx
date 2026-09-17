@@ -7,7 +7,7 @@ import { EmojiButton } from "./EmojiPicker";
 import { Icon } from "./Icon";
 import { MentionContext, MessageText } from "./MessageText";
 import { useMentionSuggest } from "./MentionSuggest";
-import { decodeMentions, encodeMentions, mentionsUser, type Picked } from "./mentions";
+import { decodeMentions, encodeMentions, mentionsUser } from "./mentions";
 import type { ChannelMessages } from "./store";
 import type { ServerConnection } from "./serverConnection";
 import { fmtDay, fmtTime, t } from "./i18n";
@@ -30,22 +30,24 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
   const [draft, setDraft] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
-  /** `picked`: who the "@names" in the text stand for (from the tokens of the message being edited). */
-  const [editing, setEditing] = useState<{ id: string; text: string; picked: Picked } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const editRef = useRef<HTMLTextAreaElement | null>(null);
   const stickToBottom = useRef(true);
   const lastTyping = useRef(0);
   const nameOf = useMemo(() => new Map(members.map((m) => [m.userId, m.displayName])), [members]);
   const mentionCtx = useMemo(() => ({ names: nameOf, me: myUserId }), [nameOf, myUserId]);
   const mention = useMentionSuggest({ inputRef, value: draft, onChange: setDraft, members });
+  // The edit field has its own list; its `picked` starts with the people the message already mentions (startEdit).
+  const editMention = useMentionSuggest({ inputRef: editRef, value: editing?.text ?? "", onChange: (text) => setEditing((cur) => cur && { ...cur, text }), members, below: true });
   const canSend = hasPermission(myPermissions, Permission.SEND_MESSAGES);
   const canAttach = hasPermission(myPermissions, Permission.ATTACH_FILES);
   const canManage = hasPermission(myPermissions, Permission.MANAGE_MESSAGES);
 
   // Stay at the bottom when switching channels and on new messages, unless the user has scrolled up.
-  useEffect(() => { stickToBottom.current = true; setDraft(""); setFiles([]); setEditing(null); mention.picked.clear(); mention.close(); }, [channel.id]);
+  useEffect(() => { stickToBottom.current = true; setDraft(""); setFiles([]); setEditing(null); mention.picked.clear(); mention.close(); editMention.close(); }, [channel.id]);
   useEffect(() => {
     const el = listRef.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
@@ -88,11 +90,19 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
     else if (Date.now() - lastTyping.current > 2500) { lastTyping.current = Date.now(); conn.typing(channel.id); }
   }
 
+  function startEdit(m: { id: string; content: string }) {
+    const { text, picked } = decodeMentions(m.content, members);
+    editMention.picked.clear();
+    for (const [label, userId] of picked) editMention.picked.set(label, userId);
+    editMention.close();
+    setEditing({ id: m.id, text });
+  }
+
   async function saveEdit() {
     if (!editing) return;
     const text = editing.text.trim();
     if (!text) return;
-    try { await conn.api.editMessage(editing.id, encodeMentions(text, members, editing.picked)); setEditing(null); } catch (e) { setErr(String(e)); }
+    try { await conn.api.editMessage(editing.id, encodeMentions(text, members, editMention.picked)); setEditing(null); editMention.close(); } catch (e) { setErr(String(e)); }
   }
 
   const typers = Object.entries(typing).filter(([uid, t]) => uid !== myUserId && Date.now() - t < 4000).map(([uid]) => nameOf.get(uid) ?? t("chat.someone"));
@@ -128,8 +138,14 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
                 <div className="msg-body">
                   {editing?.id === m.id ? (
                     <div className="edit-box">
-                      <AutoGrowTextarea value={editing.text} autoFocus rows={2} onChange={(e) => setEditing((cur) => cur && { ...cur, text: e.target.value })}
-                        onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void saveEdit(); } if (e.key === "Escape") setEditing(null); }} />
+                      <AutoGrowTextarea value={editing.text} autoFocus rows={2} inputRef={editRef} onChange={(e) => { setEditing((cur) => cur && { ...cur, text: e.target.value }); editMention.sync(); }}
+                        onKeyUp={editMention.sync} onClick={editMention.sync} onBlur={editMention.close}
+                        onKeyDown={(e) => {
+                          if (editMention.onKeyDown(e)) return;   // the open list takes Enter, Tab, arrows and Escape first
+                          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void saveEdit(); }
+                          if (e.key === "Escape") setEditing(null);
+                        }} />
+                      {editMention.popup}
                       <span className="muted">{t("chat.editHint")}</span>
                     </div>
                   ) : (
@@ -145,7 +161,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
                 </div>
                 {(mine || canManage) && editing?.id !== m.id && (
                   <div className="msg-actions">
-                    {mine && m.content && <button className="icon" title={t("chat.edit")} onClick={() => setEditing({ id: m.id, ...decodeMentions(m.content, members) })}><Icon name="pencil" /></button>}
+                    {mine && m.content && <button className="icon" title={t("chat.edit")} onClick={() => startEdit(m)}><Icon name="pencil" /></button>}
                     <button className="icon" title={t("common.delete")} onClick={() => { void askConfirm({ title: t("chat.deleteTitle"), text: m.content ? ((c) => c.slice(0, 160) + (c.length > 160 ? "…" : ""))(decodeMentions(m.content, members).text) : t("chat.attachments", { n: m.attachments.length }), confirmLabel: t("common.delete"), danger: true }).then((ok) => { if (ok) return conn.api.deleteMessage(m.id); }).catch((e) => setErr(String(e))); }}><Icon name="trash-2" /></button>
                   </div>
                 )}

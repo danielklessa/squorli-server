@@ -2,7 +2,7 @@ import {
   AccountStatus, Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, EmailCodeResponse, FriendSearchResponse, ServerLeaveResponse, ServerListResponse, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
   BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryActionMessage, directoryBackupMessage, directoryProfilePayload,
   directoryRegisterMessage, directorySoundSettingsPayload, openBackup, type AccountSettings, type SoundSettings,
-  MuteState, ReadStateResponse, type Attachment, type Category, type Channel, type Role,
+  MuteState, ReadStateResponse, type Attachment, type Category, type Channel, type RadioStation, type Role,
 } from "@squorli/protocol";
 import { z } from "zod";
 import { type Identity, identityFromPrivateKey, sign } from "./identity";
@@ -107,6 +107,12 @@ export class ServerApi {
   createChannel(data: { kind: "text" | "voice"; name: string; topic?: string | null; categoryId?: string | null }) { return this.request<Channel>("POST", "/api/channels", data); }
   updateChannel(id: string, patch: { name?: string; topic?: string | null; categoryId?: string | null; position?: number; audioBitrate?: number; audioStereo?: boolean }) { return this.request("PATCH", `/api/channels/${id}`, patch); }
   deleteChannel(id: string) { return this.request("DELETE", `/api/channels/${id}`); }
+  // ---------- Web radio (stations: MANAGE_SERVER; a channel's radio: CONTROL_RADIO). The result arrives via the structure event.
+  createRadioStation(data: { name: string; url: string }) { return this.request<RadioStation>("POST", "/api/radio/stations", data); }
+  updateRadioStation(id: string, patch: { name?: string; url?: string }) { return this.request<RadioStation>("PATCH", `/api/radio/stations/${id}`, patch); }
+  deleteRadioStation(id: string) { return this.request("DELETE", `/api/radio/stations/${id}`); }
+  startRadio(channelId: string, stationId: string) { return this.request("PUT", `/api/channels/${channelId}/radio`, { stationId }); }
+  stopRadio(channelId: string) { return this.request("DELETE", `/api/channels/${channelId}/radio`); }
   createRole(data: { name: string; color?: string | null; permissions?: number }) { return this.request<Role>("POST", "/api/roles", data); }
   updateRole(id: string, patch: { name?: string; color?: string | null; permissions?: number; position?: number }) { return this.request("PATCH", `/api/roles/${id}`, patch); }
   deleteRole(id: string) { return this.request("DELETE", `/api/roles/${id}`); }

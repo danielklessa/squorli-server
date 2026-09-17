@@ -92,6 +92,9 @@ describe("permissions", () => {
     expect(hasPermission(DEFAULT_MEMBER_PERMISSIONS, Permission.VIEW_VIDEO)).toBe(true);
     // The bit values are part of the migrations (0003/0004, VIEW_VIDEO 16384 in 0013); never renumber them.
     expect(Permission.VIEW_VIDEO).toBe(16384);
+    // Starting the radio plays it for everyone in the channel: neither guests nor members may by default (admins always).
+    expect(Permission.CONTROL_RADIO).toBe(32768);
+    expect(hasPermission(DEFAULT_MEMBER_PERMISSIONS, Permission.CONTROL_RADIO)).toBe(false);
     expect(DEFAULT_EVERYONE_PERMISSIONS).toBe(1152);
     expect(DEFAULT_MEMBER_PERMISSIONS).toBe(7616 | 16384);
     expect(permissionNames(Permission.KICK_MEMBERS | Permission.BAN_MEMBERS)).toEqual(["KICK_MEMBERS", "BAN_MEMBERS"]);

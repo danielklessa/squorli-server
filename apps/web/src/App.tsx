@@ -23,6 +23,7 @@ import { useVoiceSettings } from "./voice/useVoiceSettings";
 import { Permission, directoryServerIconUrl, directoryServerUrl, displayNameOf, hasPermission, type Member } from "@squorli/protocol";
 import { Store, activeState, homeState, type State } from "./store";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
+import { RadioPlayer } from "./voice/radioPlayer";
 import { videoAccessOf } from "./voice/videoAccess";
 import { t } from "./i18n";
 
@@ -31,6 +32,7 @@ const peerKeysOf = (members: Member[]): Record<string, string> => Object.fromEnt
 export function App() {
   const store = useMemo(() => new Store(), []);
   const client = useMemo(() => new VoiceClient(), []);
+  const radio = useMemo(() => new RadioPlayer(), []);
   const [state, setState] = useState<State>(store.state);
   const [voice, setVoice] = useState<VoiceState>(client.state);
   const [showAdmin, setShowAdmin] = useState(false);
@@ -148,6 +150,12 @@ export function App() {
     if (voiceChannel) void client.setAudioProfile({ bitrate: voiceChannel.audioBitrate, stereo: voiceChannel.audioStereo });
   }, [client, voiceChannel?.audioBitrate, voiceChannel?.audioStereo]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Web radio of the voice channel: played locally, only while connected there; follows deafen and the voice output device.
+  const radioUrl = voice.status === "connected" || voice.status === "reconnecting" ? voiceChannel?.radio?.streamUrl ?? null : null;
+  useEffect(() => radio.setStream(radioUrl), [radio, radioUrl]);
+  useEffect(() => radio.setDeafened(voice.deafened), [radio, voice.deafened]);
+  useEffect(() => radio.setOutputDevice(voiceSettings.outputDeviceId), [radio, voiceSettings.outputDeviceId]);
+
   // Permission VIEW_VIDEO: roles or members changed -> the running connection restricts its camera/screen to the members
   // who may watch (enforced by LiveKit), and stops receiving others' feeds when we lost the permission ourselves.
   const voiceState = voiceServer?.server ?? null;
@@ -247,7 +255,7 @@ export function App() {
       <div className="left" id="app-navigation">
         {homeOpen ? <HomeSidebar state={state} store={store} members={server?.members ?? []} /> : server ? <Sidebar
           server={server} api={conn.api} currentChannelId={showStage && voiceChannel ? voiceChannel.id : active.currentChannelId} voice={active.voice}
-          voiceState={voiceHost === activeHost ? voice : null} client={client} unread={active.unread} mentions={active.mentions} muted={active.muted} canMute={active.readSync}
+          voiceState={voiceHost === activeHost ? voice : null} client={client} radioTitles={active.radioTitles} unread={active.unread} mentions={active.mentions} muted={active.muted} canMute={active.readSync}
           onMuteChannel={(id, muted) => { void conn.setChannelMuted(id, muted).catch(() => {}); }}
           connection={active.connection} onSelect={(id) => { conn.selectChannel(id); setStageOpen(false); setNavigationOpen(false); }}
           onJoinVoice={(id) => { void joinVoice(activeHost, id).catch(() => {}); }} onOpenAdmin={() => setShowAdmin(true)} myUserId={active.userId ?? ""}
@@ -265,6 +273,7 @@ export function App() {
           <ServerStatus s={active} onRetry={() => store.retryServer(activeHost)} onClose={() => store.closeServer(activeHost)} />
         ) : showStage && voiceChannel ? (
           <VoiceStage client={client} voice={voice} channel={voiceChannel} members={server.members} myPermissions={server.myPermissions}
+            api={conn.api} radio={radio} radioStations={server.radioStations} radioTitle={active.radioTitles[voiceChannel.id] ?? null}
             onToggleCamera={toggleCamera} onToggleBlur={toggleBlur} onLeave={leaveVoice} onPopout={videoWindows.open} poppedIds={videoWindows.poppedIds} onRestore={videoWindows.restore} />
         ) : current ? (
           <ChatView

@@ -110,6 +110,23 @@ export const AUDIO_BITRATES = [24, 32, 48, 64, 96, 128, 192, 256] as const;
 export const DEFAULT_AUDIO_BITRATE = 64;
 const AudioBitrate = z.number().int().min(8).max(320);
 
+/**
+ * Web radio: the server keeps a list of stations (admin area); a member with CONTROL_RADIO tunes a voice channel to one of
+ * them. The audio never passes through the chat server or LiveKit: every client in the channel plays `streamUrl` itself,
+ * at its own volume. A station's address is a direct audio stream or a playlist (.m3u, .m3u8, .pls) naming one; the
+ * server resolves a playlist when the radio is started, because browsers cannot.
+ */
+export const RadioUrl = z.string().trim().max(2048).refine((u) => {
+  try { const p = new URL(u).protocol; return p === "http:" || p === "https:"; } catch { return false; }
+}, "http(s) url required");
+export const RadioStation = z.object({ id: Uuid, name: z.string().trim().min(1).max(64), url: RadioUrl });
+export const CreateRadioStationRequest = RadioStation.pick({ name: true, url: true });
+export const UpdateRadioStationRequest = CreateRadioStationRequest.partial();
+/** What a voice channel is tuned to. `name` is the station's current name, `streamUrl` what clients play. */
+export const ChannelRadio = z.object({ stationId: Uuid, name: z.string(), streamUrl: z.string(), startedBy: Uuid.nullable() });
+/** PUT /api/channels/:id/radio (DELETE turns the radio off). */
+export const SetChannelRadioRequest = z.object({ stationId: Uuid });
+
 export const Channel = z.object({
   id: Uuid,
   kind: ChannelKind,
@@ -121,6 +138,8 @@ export const Channel = z.object({
   audioBitrate: AudioBitrate,
   /** Send in stereo (music); turns off echo/noise suppression on the sender. */
   audioStereo: z.boolean(),
+  /** Web radio playing in this voice channel, null = none. Default for servers from before the radio. */
+  radio: ChannelRadio.nullable().default(null),
 });
 export const CreateCategoryRequest = z.object({ name: Category.shape.name });
 export const UpdateCategoryRequest = z.object({ name: Category.shape.name.optional(), position: z.number().int().optional() });
@@ -262,6 +281,8 @@ export const ServerState = z.object({
   channels: z.array(Channel),
   roles: z.array(Role),
   members: z.array(Member),
+  /** The server's web radio stations. Missing = a server from before the radio: clients then offer no radio at all. */
+  radioStations: z.array(RadioStation).optional(),
   /** Effective permissions of the signed-in user. */
   myPermissions: z.number().int(),
 });
@@ -307,6 +328,7 @@ export const ServerStructure = z.object({
   channels: z.array(Channel).optional(),
   roles: z.array(Role).optional(),
   members: z.array(Member).optional(),
+  radioStations: z.array(RadioStation).optional(),
 });
 /** Your own permissions changed (role assigned/revoked, role edited). */
 export const ServerMe = z.object({ type: z.literal("me"), myPermissions: z.number().int() });
@@ -321,6 +343,12 @@ export const ServerTyping = z.object({ type: z.literal("typing"), channelId: Uui
 export const ServerReadUpdate = z.object({ type: z.literal("read.update"), channelId: Uuid, lastReadSeq: z.number().int() });
 /** Your mutes changed on one of your devices: the complete state (sent only to your own connections; no version bump, as above). */
 export const ServerMuteUpdate = z.object({ type: z.literal("mute.update"), serverMuted: z.boolean(), channelIds: z.array(Uuid) });
+/**
+ * What the radio of a voice channel is playing right now (the station's ICY "StreamTitle", usually "Artist - Title"); null = unknown
+ * or nothing beyond the station's name. Sent to everyone on a change and after the welcome for channels with a title. No
+ * PROTOCOL_VERSION bump: older clients drop the event and simply keep showing the station's name.
+ */
+export const ServerRadioMeta = z.object({ type: z.literal("radio.meta"), channelId: Uuid, title: z.string().max(300).nullable() });
 /** A moderator moves you to another voice channel (null = out of the channel); the client joins there or leaves. */
 export const ServerVoiceMoved = z.object({ type: z.literal("voice.moved"), channelId: Uuid.nullable(), by: z.string() });
 /** A moderator stops your camera and/or screen share (LiveKit has already muted the tracks). */
@@ -335,7 +363,7 @@ export const ServerError = z.object({
 
 export const ServerEvent = z.discriminatedUnion("type", [
   ServerWelcome, ServerPong, ServerVoiceState, ServerStructure, ServerMe,
-  ServerMessageCreate, ServerMessageUpdate, ServerMessageDelete, ServerTyping, ServerReadUpdate, ServerMuteUpdate, ServerVoiceMoved, ServerVoiceStop, ServerRemoved, ServerError,
+  ServerMessageCreate, ServerMessageUpdate, ServerMessageDelete, ServerTyping, ServerReadUpdate, ServerMuteUpdate, ServerRadioMeta, ServerVoiceMoved, ServerVoiceStop, ServerRemoved, ServerError,
 ]);
 
 export type ClientEvent = z.infer<typeof ClientEvent>;
@@ -346,6 +374,8 @@ export type Me = z.infer<typeof Me>;
 export type ServerSettings = z.infer<typeof ServerSettings>;
 export type Category = z.infer<typeof Category>;
 export type Channel = z.infer<typeof Channel>;
+export type RadioStation = z.infer<typeof RadioStation>;
+export type ChannelRadio = z.infer<typeof ChannelRadio>;
 export type Role = z.infer<typeof Role>;
 export type Member = z.infer<typeof Member>;
 export type Ban = z.infer<typeof Ban>;

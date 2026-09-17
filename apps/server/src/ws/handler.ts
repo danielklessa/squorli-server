@@ -9,12 +9,13 @@ import { channels, users } from "../db/schema";
 import type { Hub } from "../hub";
 import { actorOf, loadChannels, loadState } from "../state";
 import type { VoicePresence } from "../voice/presence";
+import type { RadioMetadata } from "../radio/metadata";
 
 /**
  * Real-time channel for everything except media: state after the handshake, presence, channel state, messages, typing.
  * State reconciliation by sequence number after a reconnect: the client reloads /api/state and the history (M2).
  */
-export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presence: VoicePresence<WebSocket>) {
+export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presence: VoicePresence<WebSocket>, radioMeta: RadioMetadata) {
   const unsubscribe = presence.onChange((channelId, members) => {
     hub.broadcast({ type: "voice.state", channelId, members });
   });
@@ -50,6 +51,8 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
         send({ type: "welcome", userId, serverTime: new Date().toISOString(), protocolVersion: PROTOCOL_VERSION, state: await loadState(db, hub, userId) });
         for (const ch of await loadChannels(db)) {
           if (ch.kind === "voice") send({ type: "voice.state", channelId: ch.id, members: presence.members(ch.id) });
+          const title = radioMeta.titleOf(ch.id);
+          if (title) send({ type: "radio.meta", channelId: ch.id, title });
         }
         return;
       }

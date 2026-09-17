@@ -1,8 +1,8 @@
-import { displayNameOf, type Category, type Channel, type Member, type Role, type ServerSettings, type ServerState, Permission } from "@squorli/protocol";
+import { displayNameOf, type Category, type Channel, type Member, type RadioStation, type Role, type ServerSettings, type ServerState, Permission } from "@squorli/protocol";
 import { asc, eq, inArray } from "drizzle-orm";
 import { effectivePermissions, type Actor } from "./authz";
 import type { Db } from "./db";
-import { categories, channels, memberRoles, members, roles, serverSettings, users } from "./db/schema";
+import { categories, channels, memberRoles, members, radioStations, roles, serverSettings, users } from "./db/schema";
 import type { Hub } from "./hub";
 
 export const SETTINGS_ID = "server";
@@ -27,8 +27,18 @@ export async function loadCategories(db: Db): Promise<Category[]> {
 }
 
 export async function loadChannels(db: Db): Promise<Channel[]> {
-  const rows = await db.select().from(channels).orderBy(asc(channels.position), asc(channels.createdAt));
-  return rows.map((c) => ({ id: c.id, kind: c.kind, name: c.name, topic: c.topic, categoryId: c.categoryId, position: c.position, audioBitrate: c.audioBitrate, audioStereo: c.audioStereo }));
+  const rows = await db.select({ c: channels, stationName: radioStations.name }).from(channels)
+    .leftJoin(radioStations, eq(radioStations.id, channels.radioStationId))
+    .orderBy(asc(channels.position), asc(channels.createdAt));
+  return rows.map(({ c, stationName }) => ({
+    id: c.id, kind: c.kind, name: c.name, topic: c.topic, categoryId: c.categoryId, position: c.position, audioBitrate: c.audioBitrate, audioStereo: c.audioStereo,
+    // A deleted station takes its id with it (FK set null): then the radio is off.
+    radio: c.radioStationId && c.radioStreamUrl && stationName !== null ? { stationId: c.radioStationId, name: stationName, streamUrl: c.radioStreamUrl, startedBy: c.radioStartedBy } : null,
+  }));
+}
+
+export async function loadRadioStations(db: Db): Promise<RadioStation[]> {
+  return db.select({ id: radioStations.id, name: radioStations.name, url: radioStations.url }).from(radioStations).orderBy(asc(radioStations.name), asc(radioStations.createdAt));
 }
 
 export async function loadRoles(db: Db): Promise<Role[]> {
@@ -84,13 +94,13 @@ export async function actorOf(db: Db, userId: string): Promise<Actor | null> {
 }
 
 export async function loadState(db: Db, hub: Hub, userId: string): Promise<ServerState> {
-  const [settings, cats, chans, rs, mems, actor] = await Promise.all([
-    loadSettings(db), loadCategories(db), loadChannels(db), loadRoles(db), loadMembers(db, hub), actorOf(db, userId),
+  const [settings, cats, chans, rs, mems, stations, actor] = await Promise.all([
+    loadSettings(db), loadCategories(db), loadChannels(db), loadRoles(db), loadMembers(db, hub), loadRadioStations(db), actorOf(db, userId),
   ]);
-  return { settings, categories: cats, channels: chans, roles: rs, members: mems, myPermissions: actor?.permissions ?? 0 };
+  return { settings, categories: cats, channels: chans, roles: rs, members: mems, radioStations: stations, myPermissions: actor?.permissions ?? 0 };
 }
 
-export type StructurePart = "settings" | "categories" | "channels" | "roles" | "members";
+export type StructurePart = "settings" | "categories" | "channels" | "roles" | "members" | "radioStations";
 
 /** After a change, send the affected part to everyone. For roles/members, additionally send each online user their permissions. */
 export async function broadcastStructure(db: Db, hub: Hub, parts: StructurePart[]) {
@@ -101,6 +111,7 @@ export async function broadcastStructure(db: Db, hub: Hub, parts: StructurePart[
     if (p === "channels") e.channels = await loadChannels(db);
     if (p === "roles") e.roles = await loadRoles(db);
     if (p === "members") e.members = await loadMembers(db, hub);
+    if (p === "radioStations") e.radioStations = await loadRadioStations(db);
   }
   hub.broadcast(e);
   if (parts.includes("roles") || parts.includes("members") || parts.includes("settings")) {

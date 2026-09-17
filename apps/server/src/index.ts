@@ -21,12 +21,14 @@ import { registerInviteRoutes } from "./routes/invites";
 import { registerMemberRoutes } from "./routes/members";
 import { registerMessageRoutes } from "./routes/messages";
 import { registerReadStateRoutes } from "./routes/readState";
+import { registerRadioRoutes } from "./routes/radio";
+import { RadioMetadata } from "./radio/metadata";
 import { registerRoleRoutes } from "./routes/roles";
 import { registerSettingsRoutes } from "./routes/settings";
 import { deleteUserAccount, type DeleteUserResult } from "./users/deleteUser";
 import { registerUserRoutes } from "./users/routes";
 import { DirectoryClient, SYNC_INTERVAL_MS } from "./directory";
-import { broadcastStructure, loadSettings, setRequireAccountForced } from "./state";
+import { broadcastStructure, loadChannels, loadSettings, setRequireAccountForced } from "./state";
 import { VoicePresence } from "./voice/presence";
 import { registerWs } from "./ws/handler";
 
@@ -119,6 +121,16 @@ async function main() {
   // Online status changes everyone's member list.
   hub.onPresence(() => { void broadcastStructure(db, hub, ["members"]).catch((err) => app.log.warn({ err }, "presence broadcast")); });
 
+  // Web radio "now playing": the server reads a station's titles only while somebody sits in a voice channel playing it.
+  const radioMeta = new RadioMetadata((channelId, title) => hub.broadcast({ type: "radio.meta", channelId, title }), app.log);
+  const syncRadioMeta = () => {
+    void loadChannels(db).then((all) => radioMeta.sync(all.flatMap((c) => (c.radio && presence.members(c.id).length > 0 ? [{ channelId: c.id, streamUrl: c.radio.streamUrl, stationName: c.radio.name }] : []))))
+      .catch((err) => app.log.warn({ err }, "radio metadata sync"));
+  };
+  const offRadioPresence = presence.onChange(syncRadioMeta);
+  const radioMetaTimer = setInterval(syncRadioMeta, 30_000); // safety net for changes that pass no hook (a deleted channel)
+  app.addHook("onClose", async () => { offRadioPresence(); clearInterval(radioMetaTimer); radioMeta.close(); });
+
   // Uploads (attachments, server icon): one file per request, size per MAX_UPLOAD_MB.
   await app.register(multipart, { limits: { fileSize: Math.round(config.MAX_UPLOAD_MB * 1024 * 1024), files: 1 } });
   await registerAuthRoutes(app, db, config, hub, directory);
@@ -130,9 +142,10 @@ async function main() {
   await registerInviteRoutes(app, db);
   await registerMessageRoutes(app, db, hub);
   await registerReadStateRoutes(app, db, hub);
+  await registerRadioRoutes(app, db, hub, syncRadioMeta);
   await registerAttachmentRoutes(app, db, config);
   await registerLivekitRoutes(app, db, config);
-  await registerWs(app, db, hub, presence);
+  await registerWs(app, db, hub, presence, radioMeta);
 
   // The built web client is served by the same process (one container less).
   const staticDir = config.STATIC_DIR ?? join(here, "..", "public");

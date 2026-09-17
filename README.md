@@ -14,6 +14,7 @@ This README explains how to run your own Squorli server. Working on the code: [d
 - Mentions with `@name` suggestions, a highlight for messages that mention you and counters per channel and server.
 - Markdown in messages (formatting, lists and task lists, tables, code blocks with a copy button) and emoji: an emoji picker, `:shortcodes:` and emoticons such as `:)`, shown in an emoji font that your own server delivers, so they look the same on every system and no font service is involved.
 - Camera and screen share (screen audio in Chromium browsers), tile and speaker view.
+- Web radio in voice channels: admins keep a list of stations (direct streams or `.m3u`/`.pls` playlists), members with the permission turn one on for everyone, and every listener sets their own volume or turns it off.
 - Categories, roles with permissions and hierarchy, invite links, kick and ban, admin panel in the browser.
 - Optional connection to a Squorli Directory for global handles, friends and end-to-end encrypted direct messages.
 
@@ -69,6 +70,8 @@ The first user who logs in becomes the owner (or the key given in `OWNER_PUBLIC_
 New members are guests (view and voice only). Admins grant the member role via the member list, which unlocks writing, files, camera and screen share.
 
 Guests hear a voice channel but do not see what others share there: without the permission "Watch camera and screen shares" a member receives no camera, screen share or screen audio. The member role has it; to let guests watch too, tick it on the guest role (admin panel, Roles). When updating an existing server, every role except the guest role receives the permission automatically. The restriction works once everybody in the channel runs a client that knows the permission (reload the page after updating the server).
+
+Web radio: under Administration > Radio you keep a list of stations (name plus the address of an audio stream, or of a `.m3u`/`.pls` playlist, which the server reads when the radio is started; prefer `https://` addresses). A member whose role has the permission "Start and stop web radio in voice channels" (no role has it by default, administrators always do) picks a station with the radio button at the top of a voice channel, and everybody in the channel hears it until someone turns it off. The sound does not pass through your server: every listener's browser fetches the stream from the station itself, so the station sees the listener's IP address, as with any radio player. Only to show what is playing right now ("Artist - Title" in place of the station's name), the server itself reads the stream of a station while somebody is listening to it and throws the audio away; that costs about the stream's bitrate per station, not per listener. Each listener sets their own radio volume in the same menu or turns the radio off for themselves, which also ends their connection to the station.
 
 ## Configuration
 

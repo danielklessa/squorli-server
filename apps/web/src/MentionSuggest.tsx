@@ -1,5 +1,5 @@
 import type { Member } from "@squorli/protocol";
-import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject, type ReactNode } from "react";
 import { Avatar } from "./Avatar";
 import { mentionLabel, mentionQueryAt, suggestMembers, type Picked } from "./mentions";
 import { t } from "./i18n";
@@ -8,10 +8,12 @@ import { t } from "./i18n";
  * Member suggestions while an "@name" is being typed in a message input. The owner calls `sync()` whenever text or
  * caret may have changed, lets `onKeyDown` see the keys first (arrows choose, Enter or Tab accept, Escape dismisses;
  * true = handled, so Enter does not send), and renders `popup` inside a positioned parent above the input.
- * `picked` remembers who was chosen for a name, for `encodeMentions` when sending.
+ * `picked` remembers who was chosen for a name, for `encodeMentions` when sending; the edit field fills it first with the
+ * people the message already mentions (`decodeMentions`). `below` opens the list under the input (edit field inside the
+ * scrolling message list, where a list above the first message would be cut off) and scrolls it into view.
  */
-export function useMentionSuggest({ inputRef, value, onChange, members }: {
-  inputRef: MutableRefObject<HTMLTextAreaElement | null>; value: string; onChange: (value: string) => void; members: readonly Member[];
+export function useMentionSuggest({ inputRef, value, onChange, members, below = false }: {
+  inputRef: MutableRefObject<HTMLTextAreaElement | null>; value: string; onChange: (value: string) => void; members: readonly Member[]; below?: boolean;
 }): { popup: ReactNode; picked: Picked; sync: () => void; close: () => void; onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean } {
   const [query, setQuery] = useState<{ start: number; query: string } | null>(null);
   const [index, setIndex] = useState(0);
@@ -41,6 +43,8 @@ export function useMentionSuggest({ inputRef, value, onChange, members }: {
 
   const hits = useMemo(() => (query ? suggestMembers(members, query.query) : []), [members, query]);
   const open = query !== null && hits.length > 0;
+  const listEl = useRef<HTMLUListElement | null>(null);
+  useEffect(() => { if (open && below) listEl.current?.scrollIntoView({ block: "nearest" }); }, [open, below, hits.length]);
 
   const accept = useCallback((member: Member) => {
     const el = inputRef.current;
@@ -63,7 +67,7 @@ export function useMentionSuggest({ inputRef, value, onChange, members }: {
   };
 
   const popup = open ? (
-    <ul className="mention-suggest" role="listbox" aria-label={t("chat.mentionSuggest")}>
+    <ul ref={listEl} className={below ? "mention-suggest below" : "mention-suggest"} role="listbox" aria-label={t("chat.mentionSuggest")}>
       {hits.map((m, i) => (
         // mousedown, not click: the input must keep the focus (and its caret).
         <li key={m.userId} role="option" aria-selected={i === index} className={i === index ? "active" : ""} onMouseDown={(e) => { e.preventDefault(); accept(m); }} onMouseEnter={() => setIndex(i)}>
