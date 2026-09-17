@@ -12,6 +12,7 @@ export * from "./backup";
 export * from "./useragent";
 export * from "./friends";
 export * from "./dm";
+export * from "./mentions";
 export { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { DisplayName } from "./directory";
@@ -231,7 +232,7 @@ export const MessagePage = z.object({ messages: z.array(Message), hasMore: z.boo
  * Read state of one text channel for the signed-in member, kept by the server so it holds on every device
  * (GET /api/read-state). `lastReadSeq` null = never opened: then everything since joining counts. `unread` and `mentions`
  * are computed by the server over messages of other people newer than the read state; `mentions` counts messages whose
- * text contains the member's token `<@userId>`.
+ * text mentions the member (`<@userId>` outside code, `mentionedUserIds` in mentions.ts).
  */
 export const ChannelReadState = z.object({
   channelId: Uuid,

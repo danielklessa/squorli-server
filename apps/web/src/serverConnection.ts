@@ -75,6 +75,8 @@ const LOG_MAX = 80;
 const CATCH_UP_CHANNELS = 50;
 const READ_SYNC_MIN_MS = 15_000;
 const READ_ACK_DELAY_MS = 800;
+/** Edits and deletions in marked channels are counted again after this pause (one request for a burst). */
+const RECOUNT_DELAY_MS = 500;
 const EMPTY: ChannelMessages = { list: [], hasMore: true, loaded: false, loading: false };
 
 export class ServerConnection {
@@ -95,6 +97,7 @@ export class ServerConnection {
   /** Newest live message of other people per channel that is not on screen: an older answer of the server must not clear its mark. */
   private liveLatest: ReadState = {};
   private lastReadSync = 0;
+  private recountTimer: number | null = null;
 
   constructor(host: string, base: string, private readonly identity: () => Identity | null, private readonly hooks: ConnectionHooks) {
     this.api = new ServerApi(base);
@@ -176,6 +179,7 @@ export class ServerConnection {
     this.hooks.onToken(null);
     for (const timer of this.ackTimers.values()) clearTimeout(timer);
     this.ackTimers.clear(); this.acked = {}; this.liveLatest = {}; this.serverRead = false;
+    if (this.recountTimer !== null) { clearTimeout(this.recountTimer); this.recountTimer = null; }
     this.set({ me: null, userId: null, connection: "idle", server: null, messages: {}, voice: {}, currentChannelId: null, unread: {}, mentions: {}, muted: {}, serverMuted: false, readSync: false, removed: null, error });
   }
 
@@ -293,11 +297,13 @@ export class ServerConnection {
       case "message.update": {
         const ch = this.state.messages[e.message.channelId];
         if (ch) this.set({ messages: { ...this.state.messages, [e.message.channelId]: { ...ch, list: ch.list.map((m) => (m.id === e.message.id ? e.message : m)) } } });
+        this.recountMarks(e.message.channelId, false);
         break;
       }
       case "message.delete": {
         const ch = this.state.messages[e.channelId];
         if (ch) this.set({ messages: { ...this.state.messages, [e.channelId]: { ...ch, list: ch.list.filter((m) => m.id !== e.id) } } });
+        this.recountMarks(e.channelId, true);
         break;
       }
       case "read.update": {
@@ -364,6 +370,26 @@ export class ServerConnection {
     const next = markRead(this.read, channelId, shown);
     if (next !== this.read) { this.read = next; saveReadState(this.state.host, userId, next); }
     this.acknowledge(channelId);
+  }
+
+  /**
+   * A message in a marked channel that is not on screen was edited or deleted: the mention (or the only unread message)
+   * may be gone, and a mark must not outlive its reason. The server counts again; without read states the cached page does.
+   */
+  private recountMarks(channelId: string, deleted: boolean) {
+    const userId = this.state.userId;
+    if (!userId || channelId === this.state.currentChannelId) return;
+    if (!this.state.unread[channelId] && !this.state.mentions[channelId]) return;
+    if (this.serverRead) {
+      // The deleted message may have been the newest one: `liveLatest` would then keep the server's answer out for ever.
+      if (deleted) this.liveLatest = Object.fromEntries(Object.entries(this.liveLatest).filter(([id]) => id !== channelId));
+      this.recountTimer ??= window.setTimeout(() => { this.recountTimer = null; void this.syncReadState(); }, RECOUNT_DELAY_MS);
+      return;
+    }
+    const ch = this.state.messages[channelId];
+    if (!ch?.loaded) return;
+    const result = catchUp(ch.list, this.read[channelId], userId);
+    this.set({ unread: { ...this.state.unread, [channelId]: result.unread }, mentions: { ...this.state.mentions, [channelId]: result.mentions } });
   }
 
   /** Coalesced: a busy open channel sends one acknowledgement per pause, not one per message. */

@@ -1,11 +1,14 @@
+import { mentionToken, mentionedUserIds } from "@squorli/protocol";
 import { parseMarkdown, type Block, type Inline } from "./markdown";
 
 /**
  * Mentions in the channel chat, pure logic. A message stores a mention as `<@userId>` (the id never changes, names do;
  * the server treats it as plain text, there is no protocol change). The composer shows and takes `@Name`:
  * `encodeMentions` turns names into tokens when sending, `decodeMentions` back when a message is edited. The Markdown
- * parser makes a `mention` node of every token outside code, so "am I mentioned" asks the parser and a token quoted in a
- * code block does not count.
+ * parser makes a `mention` node of every token outside code. "Am I mentioned" must hold for the parser (what the view
+ * shows) and for the protocol's `mentionedUserIds` (what the server counts), so a mark never appears without a visible
+ * mention and the live counter agrees with the server's. No false alarms when writing either: a typed name only becomes
+ * a mention when exactly one member carries it; with equal names only the one chosen in the suggestion list.
  */
 export type Mentionable = { userId: string; displayName: string; handle: string | null };
 
@@ -15,7 +18,7 @@ const tokenRe = new RegExp(`<@(${UUID})>`, "g");
 const codeRe = /(```[\s\S]*?```|`[^`\n]+`)/;
 const wordRe = /[\p{L}\p{N}_]/u;
 
-export const mentionToken = (userId: string) => `<@${userId}>`;
+export { mentionToken };
 
 /** How a member is written after the "@": the display name; a name that is itself "@handle" does not get a second "@". */
 export const mentionLabel = (m: Mentionable) => m.displayName.replace(/^@+/, "");
@@ -23,15 +26,19 @@ export const mentionLabel = (m: Mentionable) => m.displayName.replace(/^@+/, "")
 /** Chosen in the suggestion list: label -> userId, decides when two members carry the same name. */
 export type Picked = Map<string, string>;
 
-/** `@Name` and `@handle` -> `<@userId>`, longest name first so "@Max Mustermann" does not end at "@Max". */
+/**
+ * `@Name` and `@handle` -> `<@userId>`, longest name first so "@Max Mustermann" does not end at "@Max". A name or handle
+ * that belongs to several members stays text (userId null) unless one of them was chosen; it still takes its place in the
+ * text, so the ambiguous "@Max Mustermann" does not fall back to "@Max".
+ */
 export function encodeMentions(text: string, members: readonly Mentionable[], picked: Picked = new Map()): string {
   if (!text.includes("@")) return text;
-  const names: { key: string; userId: string }[] = [];
-  const seen = new Set<string>();
-  const add = (label: string, userId: string) => { const key = label.toLowerCase(); if (key && !seen.has(key)) { seen.add(key); names.push({ key, userId }); } };
-  for (const [label, userId] of picked) if (members.some((m) => m.userId === userId)) add(label, userId);
-  for (const m of members) add(mentionLabel(m), m.userId);
-  for (const m of members) if (m.handle) add(m.handle, m.userId);
+  const chosen = new Map<string, string>(), owners = new Map<string, Set<string>>();
+  for (const [label, userId] of picked) if (label && members.some((m) => m.userId === userId)) chosen.set(label.toLowerCase(), userId);
+  const own = (label: string, userId: string) => { const key = label.toLowerCase(); if (key) owners.set(key, (owners.get(key) ?? new Set()).add(userId)); };
+  for (const m of members) { own(mentionLabel(m), m.userId); if (m.handle) own(m.handle, m.userId); }
+  const names: { key: string; userId: string | null }[] = [...new Set([...chosen.keys(), ...owners.keys()])]
+    .map((key) => ({ key, userId: chosen.get(key) ?? (owners.get(key)!.size === 1 ? [...owners.get(key)!][0]! : null) }));
   names.sort((a, b) => b.key.length - a.key.length);
 
   return text.split(codeRe).map((part, i) => {
@@ -42,7 +49,7 @@ export function encodeMentions(text: string, members: readonly Mentionable[], pi
       if (c === "@" && !(at > 0 && wordRe.test(part[at - 1]!))) {
         const rest = part.slice(at + 1).toLowerCase();
         const hit = names.find((n) => rest.startsWith(n.key) && !wordRe.test(part[at + 1 + n.key.length] ?? " "));
-        if (hit) { out += mentionToken(hit.userId); at += 1 + hit.key.length; continue; }
+        if (hit) { out += hit.userId ? mentionToken(hit.userId) : part.slice(at, at + 1 + hit.key.length); at += 1 + hit.key.length; continue; }
       }
       out += c; at++;
     }
@@ -57,6 +64,8 @@ export function decodeMentions(content: string, members: readonly Mentionable[])
     const member = members.find((m) => m.userId === userId);
     if (!member) return token;
     const label = mentionLabel(member);
+    // Two mentioned members with the same name: the text could not tell them apart, the second one stays a token.
+    if ((picked.get(label) ?? userId) !== userId) return token;
     picked.set(label, userId);
     return `@${label}`;
   }))).join("");
@@ -87,7 +96,8 @@ export function mentionedIds(content: string): Set<string> {
   if (content.includes("<@")) walkBlocks(parseMarkdown(content), found);
   return found;
 }
-export const mentionsUser = (content: string, userId: string): boolean => content.includes(mentionToken(userId)) && mentionedIds(content).has(userId);
+export const mentionsUser = (content: string, userId: string): boolean =>
+  content.includes(mentionToken(userId)) && mentionedUserIds(content).includes(userId) && mentionedIds(content).has(userId);
 
 /** The "@query" being typed right before the caret; `start` is the position of the "@". */
 export function mentionQueryAt(text: string, caret: number): { start: number; query: string } | null {

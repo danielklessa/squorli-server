@@ -1,3 +1,4 @@
+import { mentionedUserIds } from "@squorli/protocol";
 import { describe, expect, it } from "vitest";
 import { decodeMentions, encodeMentions, mentionQueryAt, mentionedIds, mentionsUser, suggestMembers, type Mentionable } from "./mentions";
 
@@ -16,8 +17,13 @@ describe("mentions in message text", () => {
   it("leaves mail addresses, unknown names, longer words and code alone", () => {
     for (const s of ["mail@max.de", "@Maximilian", "@niemand", "`@Max` und ```\n@Max\n```"]) expect(encodeMentions(s, members)).toBe(s);
   });
+  it("mentions nobody when a typed name fits several members", () => {
+    expect(encodeMentions("@Max und @maxi", [max, twin])).toBe(`@Max und <@${id(1)}>`);
+    // The handle of one is the name of another; and an ambiguous long name must not fall back to the short one.
+    expect(encodeMentions("@anna", [anna, { userId: id(7), displayName: "Anna", handle: null }])).toBe("@anna");
+    expect(encodeMentions("@Max Mustermann", [max, maxM, { ...maxM, userId: id(8) }])).toBe("@Max Mustermann");
+  });
   it("lets the chosen member decide between equal names", () => {
-    expect(encodeMentions("@Max", [max, twin])).toBe(`<@${id(1)}>`);
     expect(encodeMentions("@Max", [max, twin], new Map([["Max", id(4)]]))).toBe(`<@${id(4)}>`);
     expect(encodeMentions("@Max", [max], new Map([["Max", id(4)]]))).toBe(`<@${id(1)}>`);   // the chosen one has left
   });
@@ -26,6 +32,24 @@ describe("mentions in message text", () => {
     const { text, picked } = decodeMentions(content, members);
     expect(text).toBe(`Hallo @Max Mustermann und @anna, nicht <@${id(9)}> und nicht \`<@${id(1)}>\``);
     expect(encodeMentions(text, members, picked)).toBe(content);
+  });
+  it("keeps two mentioned members with the same name apart when editing", () => {
+    const content = `<@${id(1)}> und <@${id(4)}>`;
+    const { text, picked } = decodeMentions(content, [max, twin]);
+    expect(text).toBe(`@Max und <@${id(4)}>`);
+    expect(encodeMentions(text, [max, twin], picked)).toBe(content);
+  });
+  it("never counts a mention the view does not show (server scanner against the parser)", () => {
+    const me = id(1), tok = `<@${id(1)}>`;
+    const shown = (c: string) => mentionedIds(c).has(me), counted = (c: string) => mentionedUserIds(c).includes(me);
+    const yes = [`hi ${tok}`, `**${tok}**`, `> ${tok}`, `- [x] ${tok}`, `# ${tok}`, `| a |\n|---|\n| ${tok} |`, `FENCE\noffen ${tok}`, `FENCE ${tok}`, `BT offen ${tok}`, `BTBT a BT ${tok}`, `\\\\${tok}`, `a\n${tok}\nb`];
+    const no = [`BT${tok}BT`, `BTBT a BT ${tok} BTBT`, `BTa\n${tok}BT`, `FENCE\n${tok}\nFENCE`, `FENCEjs\n${tok}\nFENCE`, `FENCE${tok}FENCE`, `> FENCE\n> ${tok}\n> FENCE`, `\\${tok}`, `text\nFENCE\n${tok}\nFENCE\ntext`];
+    const real = (c: string) => c.replaceAll("FENCE", "BTBTBT").replaceAll("BT", String.fromCharCode(96));
+    for (const c of yes.map(real)) expect([c, shown(c), counted(c)]).toEqual([c, true, true]);
+    for (const c of no.map(real)) expect([c, shown(c), counted(c)]).toEqual([c, false, false]);
+    // Where a code span could be read both ways (list items are parsed line by line), the scanner stays silent.
+    const torn = real(`- BTx\n- yBT ${tok} BTzBT`);
+    expect([shown(torn), counted(torn), mentionsUser(torn, me)]).toEqual([false, false, false]);
   });
   it("knows who a message mentions, as the view shows it", () => {
     expect([...mentionedIds(`<@${id(1)}> **<@${id(2)}>**\n- > nein\n- [x] <@${id(3)}>\n\n| a |\n|---|\n| <@${id(4)}> |`)]).toEqual([id(1), id(2), id(3), id(4)]);

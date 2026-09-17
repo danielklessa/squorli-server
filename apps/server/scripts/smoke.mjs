@@ -81,6 +81,12 @@ if (existsSync(OWNER_FILE)) {
 // Directory service (M6): if the server names one, give the owner key a handle there (201, or 409 if it already exists).
 {
   const [, h] = await api("GET", "/api/health");
+  // This test registers accounts at the server's directory. Never at a real one: a test server started next to a `.env`
+  // with a production DIRECTORY_URL inherits it (happened on 17 September 2026). Start it with `DIRECTORY_URL=` instead.
+  if (h.directoryUrl && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/.test(h.directoryUrl) && process.env.SMOKE_ALLOW_REMOTE_DIRECTORY !== "1") {
+    console.error(`FAIL Der Server nennt das Verzeichnis ${h.directoryUrl}: der Rauchtest legt dort Konten an und laeuft deshalb nur gegen ein lokales Verzeichnis. Server mit DIRECTORY_URL= (leer) oder einem lokalen Verzeichnis starten; bewusst trotzdem: SMOKE_ALLOW_REMOTE_DIRECTORY=1.`);
+    process.exit(1);
+  }
   if (h.directoryUrl) {
     const dir = h.directoryUrl;
     const dj = async (method, path, body) => { const r = await fetch(dir + path, { method, headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined }); return [r.status, await r.json().catch(() => ({}))]; };
@@ -352,6 +358,15 @@ check("mark read: text channels only, valid input, signed in", sackVoice === 404
 await api("POST", `/api/channels/${textCh.id}/messages`, { content: "danach" }, owner.token);
 const [, rs4] = await readOf(B.token);
 check("read state: a newer message marks the channel again", rs4?.unread === true && rs4.mentions === 0);
+// No false alarms: a token inside code or behind a backslash is no mention, and an edited-away mention stops counting
+const fence = "```";
+await api("POST", `/api/channels/${textCh.id}/messages`, { content: `so sieht das aus: \`<@${B.userId}>\` und \\<@${B.userId}>\n${fence}\n<@${B.userId}>\n${fence}` }, owner.token);
+const [, rs5] = await readOf(B.token);
+const [, realMention] = await api("POST", `/api/channels/${textCh.id}/messages`, { content: `<@${B.userId}> doch` }, owner.token);
+const [, rs6] = await readOf(B.token);
+await api("PATCH", `/api/messages/${realMention.id}`, { content: "doch nicht" }, owner.token);
+const [, rs7] = await readOf(B.token);
+check("read state: tokens in code or escaped do not count, an edited-away mention neither", rs5?.mentions === 0 && rs6?.mentions === 1 && rs7?.mentions === 0 && rs7.unread === true, `${rs5?.mentions} ${rs6?.mentions} ${rs7?.mentions}`);
 
 // Mutes (per member, all their devices): a channel and the whole server
 const [smu1, mu1] = await api("PUT", `/api/channels/${textCh.id}/mute`, { muted: true }, B.token);

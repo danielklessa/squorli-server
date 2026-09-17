@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ClientEvent, CreateMessageRequest, MarkReadRequest, MuteRequest, ReadStateResponse, DEFAULT_EVERYONE_PERMISSIONS, DEFAULT_MEMBER_PERMISSIONS, PERMISSION_GROUPS, Permission, RtcTokenRequest, ServerEvent,
-  UpdateMeRequest, VerifyRequest, challengeMessage, displayNameOf, hasPermission, permissionNames,
+  UpdateMeRequest, VerifyRequest, challengeMessage, displayNameOf, hasPermission, mentionedUserIds, permissionNames,
 } from "./index";
 
 const U1 = "6f1c2a4e-1b2c-4d3e-8f90-123456789abc";
@@ -20,6 +20,13 @@ describe("protocol", () => {
     expect(old.channels[0]?.muted).toBe(false);
     expect(ServerEvent.safeParse({ type: "mute.update", serverMuted: true, channelIds: [U1] }).success).toBe(true);
     expect(MuteRequest.safeParse({ muted: "ja" }).success).toBe(false);
+  });
+  it("finds mentions outside code only", () => {
+    const tok = `<@${U1}>`, tick = String.fromCharCode(96), fence = tick.repeat(3);
+    expect(mentionedUserIds(`hi ${tok} und ${tok}`)).toEqual([U1]);
+    expect(mentionedUserIds(`> ${tok}`)).toEqual([U1]);
+    expect(mentionedUserIds(`${fence}\nnie geschlossen ${tok}`)).toEqual([U1]);
+    for (const c of [`${tick}${tok}${tick}`, `${fence}\n${tok}\n${fence}`, `> ${fence}\n> ${tok}\n> ${fence}`, `\\${tok}`, "<@nobody>", `- ${tick}x\n- y${tick} ${tok} ${tick}z${tick}`]) expect(mentionedUserIds(c)).toEqual([]);
   });
   it("parses a hello", () => {
     expect(ClientEvent.safeParse({ type: "hello", protocolVersion: 1, sessionToken: "x" }).success).toBe(true);

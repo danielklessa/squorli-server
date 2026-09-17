@@ -1,4 +1,4 @@
-import { MarkReadRequest, MuteRequest, Permission, type MuteState, type ReadStateResponse } from "@squorli/protocol";
+import { MarkReadRequest, MuteRequest, Permission, mentionToken, mentionedUserIds, type MuteState, type ReadStateResponse } from "@squorli/protocol";
 import { and, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { requireMember } from "../auth/session";
@@ -11,6 +11,8 @@ const Params = { type: "object", properties: { id: { type: "string", format: "uu
 
 type Row = { muted: boolean; channel_id: string; last_read_seq: string | number | null; latest_seq: string | number | null; unread: string | number; mentions: string | number };
 const num = (v: string | number | null) => (v === null ? null : Number(v));
+/** Unread messages with my token that are looked at per request; beyond that the counter stops growing (nobody reads "500+"). */
+const MAX_MENTION_CANDIDATES = 500;
 
 /**
  * Read states: how far a member has read each text channel, kept here so unread marks and mention counters are the same
@@ -22,9 +24,9 @@ export async function registerReadStateRoutes(app: FastifyInstance, db: Db, hub:
     const m = await requireMember(db, req, reply);
     if (!m) return;
     if (!can(m.actor, Permission.VIEW_CHANNELS)) return reply.code(403).send({ error: "forbidden" });
-    // The token as the client stores a mention (apps/web/src/mentions.ts). A plain substring test: a token quoted inside
-    // a code block counts here although the client does not render it as a mention; rare, and cheap to live with.
-    const token = `%<@${m.userId}>%`;
+    // The token as the client stores a mention. The substring test only finds candidates: a token quoted inside code is
+    // no mention for the client, so the candidates are checked below with the rules of the client (mentionedUserIds).
+    const token = `%${mentionToken(m.userId)}%`;
     const rows = await db.execute(sql`
       SELECT c.id AS channel_id, rs.last_read_seq,
         EXISTS (SELECT 1 FROM channel_mutes cm WHERE cm.channel_id = c.id AND cm.user_id = ${m.userId}) AS muted,
@@ -40,9 +42,22 @@ export async function registerReadStateRoutes(app: FastifyInstance, db: Db, hub:
                    ELSE msg.created_at > (SELECT joined_at FROM members WHERE user_id = ${m.userId}) END
       ) agg ON true
       WHERE c.kind = 'text'`) as unknown as Row[];
+    const mentions = new Map<string, number>();
+    if (rows.some((r) => Number(r.mentions) > 0)) {
+      const candidates = await db.execute(sql`
+        SELECT msg.channel_id, msg.content
+        FROM messages msg
+        JOIN channels c ON c.id = msg.channel_id AND c.kind = 'text'
+        LEFT JOIN read_states rs ON rs.channel_id = msg.channel_id AND rs.user_id = ${m.userId}
+        WHERE msg.author_id <> ${m.userId} AND msg.content LIKE ${token}
+          AND CASE WHEN rs.last_read_seq IS NOT NULL THEN msg.seq > rs.last_read_seq
+                   ELSE msg.created_at > (SELECT joined_at FROM members WHERE user_id = ${m.userId}) END
+        ORDER BY msg.seq DESC LIMIT ${MAX_MENTION_CANDIDATES}`) as unknown as { channel_id: string; content: string }[];
+      for (const c of candidates) if (mentionedUserIds(c.content).includes(m.userId)) mentions.set(c.channel_id, (mentions.get(c.channel_id) ?? 0) + 1);
+    }
     const [me] = await db.select({ muted: members.muted }).from(members).where(eq(members.userId, m.userId)).limit(1);
     const out: ReadStateResponse = {
-      channels: rows.map((r) => ({ channelId: r.channel_id, lastReadSeq: num(r.last_read_seq), latestSeq: num(r.latest_seq), unread: Number(r.unread) > 0, mentions: Number(r.mentions), muted: r.muted === true })),
+      channels: rows.map((r) => ({ channelId: r.channel_id, lastReadSeq: num(r.last_read_seq), latestSeq: num(r.latest_seq), unread: Number(r.unread) > 0, mentions: mentions.get(r.channel_id) ?? 0, muted: r.muted === true })),
       serverMuted: me?.muted ?? false,
     };
     return out;
