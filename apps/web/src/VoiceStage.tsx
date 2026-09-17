@@ -2,10 +2,13 @@ import { FullscreenButton, TrackVideo } from "./VideoWindows";
 import { VideoAudioControls } from "./VideoAudioControls";
 import { Avatar } from "./Avatar";
 import { Permission, displayNameOf, hasPermission, type Channel, type Member } from "@squorli/protocol";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { ContextMenu, type MenuAnchor } from "./ContextMenu";
+import { UserVolumeControl } from "./UserVolumeControl";
 import { VoiceClient, explainScreenAudio, isChromium, type VideoTile, type VoiceParticipant, type VoiceState } from "./voice/voiceClient";
 import { Icon } from "./Icon";
 import { t } from "./i18n";
+import { useVoiceSettings } from "./voice/useVoiceSettings";
 
 type Props = {
   client: VoiceClient;
@@ -43,11 +46,15 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, onT
   const [pinned, setPinned] = useState<string | null>(null);
   const [lastSpeaker, setLastSpeaker] = useState<string | null>(null);
   const canStream = hasPermission(myPermissions, Permission.STREAM_VIDEO);
+  // Without VIEW_VIDEO others' camera and screen never arrive; say so while somebody is sharing, instead of just showing avatars.
+  const hiddenStreams = !hasPermission(myPermissions, Permission.VIEW_VIDEO) && participants.some((p) => !p.isLocal && (p.cameraOn || p.screenOn));
 
+  // Others win over yourself; whether you are featured at all while only you speak is the user's choice (settings > view).
+  const { featureSelfInSpeakerView } = useVoiceSettings();
   useEffect(() => {
-    const s = participants.find((p) => p.speaking && !p.isLocal) ?? participants.find((p) => p.speaking);
+    const s = participants.find((p) => p.speaking && !p.isLocal) ?? (featureSelfInSpeakerView ? participants.find((p) => p.speaking) : undefined);
     if (s) setLastSpeaker(s.identity);
-  }, [voice.participants]);
+  }, [voice.participants, featureSelfInSpeakerView]);
 
   const items: Item[] = [];
   for (const p of participants) {
@@ -61,9 +68,13 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, onT
   // A new screen share automatically moves into focus as long as nothing is pinned.
   const screens = items.filter((i) => i.kind === "screen");
   const lastScreen = screens[screens.length - 1];
+  // With "feature myself" off your own camera tile only becomes the large one by pinning it, or when nobody else is there.
+  const mayFeature = (i: Item) => featureSelfInSpeakerView || !i.participant.isLocal;
   const focusKey = (pinned && items.some((i) => i.key === pinned) ? pinned : null)
     ?? lastScreen?.key
-    ?? (lastSpeaker ? items.find((i) => i.kind === "camera" && i.participant.identity === lastSpeaker)?.key : undefined)
+    ?? (lastSpeaker ? items.find((i) => i.kind === "camera" && i.participant.identity === lastSpeaker && mayFeature(i))?.key : undefined)
+    ?? items.find((i) => i.tile && mayFeature(i))?.key
+    ?? items.find(mayFeature)?.key
     ?? items.find((i) => i.tile)?.key
     ?? items[0]?.key
     ?? null;
@@ -75,6 +86,16 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, onT
   // Click a tile: show it large. Click the large tile: back to the tiles.
   const focusOn = (key: string) => { setPinned(key); setLayout("focus"); };
   const unfocus = () => { setPinned(null); setLayout("grid"); };
+
+  // Right-click a tile of another member: how loud to play them back. Bots have no member entry and get no menu.
+  const [menu, setMenu] = useState<({ identity: string } & MenuAnchor) | null>(null);
+  const menuMember = menu ? members.find((m) => m.userId === menu.identity) ?? null : null;
+  const openMenu = (item: Item, event: ReactMouseEvent<HTMLElement>) => {
+    if (item.participant.isLocal || !members.some((m) => m.userId === item.participant.identity)) return;
+    if (event.currentTarget.ownerDocument.fullscreenElement) return; // the menu lives in the body, behind a fullscreen tile
+    event.preventDefault();
+    setMenu({ identity: item.participant.identity, trigger: event.currentTarget, x: event.clientX, y: event.clientY });
+  };
 
   return (
     <section className="stage">
@@ -91,6 +112,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, onT
       {voice.error && <p className="error small stage-hint">{voice.error}</p>}
       {voice.notice && <p className="warn-box small stage-hint">{voice.notice} <button className="icon" title={t("common.dismiss")} onClick={() => client.setNotice(null)}><Icon name="x" /></button></p>}
       {screenHint && <p className="warn-box small stage-hint">{screenHint}</p>}
+      {hiddenStreams && <p className="warn-box small stage-hint">{t("stage.noViewPermission")}</p>}
       {!voice.canPlayback && <p className="warn-box small stage-hint">{t("stage.audioBlocked")} <button className="small" onClick={() => client.startAudio()}>{t("dock.unblockAudio")}</button></p>}
 
       {items.length === 0 ? (
@@ -98,18 +120,25 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, onT
       ) : layout === "grid" || !focus ? (
         <div className="stage-grid" ref={grid.ref}>
           <div className="stage-grid-inner" style={{ gridTemplateColumns: `repeat(${grid.cols}, ${grid.tileWidth}px)` }}>
-            {items.map((i) => <Tile key={i.key} item={i} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} pinned={false} onClick={() => focusOn(i.key)} />)}
+            {items.map((i) => <Tile key={i.key} item={i} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} onMenu={openMenu} pinned={false} onClick={() => focusOn(i.key)} />)}
           </div>
         </div>
       ) : (
         <div className="stage-focus">
-          <div className="stage-main"><Tile item={focus} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} big pinned={pinned === focus.key} onClick={unfocus} /></div>
+          <div className="stage-main"><Tile item={focus} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} onMenu={openMenu} big pinned={pinned === focus.key} onClick={unfocus} /></div>
           {rest.length > 0 && (
             <div className="stage-strip">
-              {rest.map((i) => <Tile key={i.key} item={i} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} pinned={false} onClick={() => focusOn(i.key)} />)}
+              {rest.map((i) => <Tile key={i.key} item={i} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} onMenu={openMenu} pinned={false} onClick={() => focusOn(i.key)} />)}
             </div>
           )}
         </div>
+      )}
+
+      {menu && menuMember && (
+        <ContextMenu anchor={menu} label={displayNameOf(menuMember)} onClose={() => setMenu(null)}>
+          <div className="context-identity" role="presentation"><Avatar name={displayNameOf(menuMember)} /><strong>{displayNameOf(menuMember)}</strong></div>
+          <UserVolumeControl client={client} publicKey={menuMember.publicKey} />
+        </ContextMenu>
       )}
 
       <footer className="stage-bar">
@@ -160,7 +189,7 @@ function useFittedGrid(n: number) {
   return { ref, ...best };
 }
 
-function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onRestore }: { item: Item; client: VoiceClient; big?: boolean; pinned: boolean; onClick: () => void; onPopout: (tile: VideoTile) => void; poppedIds: Set<string>; onRestore: (id: string) => void }) {
+function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onRestore, onMenu }: { item: Item; client: VoiceClient; big?: boolean; pinned: boolean; onClick: () => void; onPopout: (tile: VideoTile) => void; poppedIds: Set<string>; onRestore: (id: string) => void; onMenu: (item: Item, event: ReactMouseEvent<HTMLElement>) => void }) {
   const { participant: p, tile } = item;
   const ref = useRef<HTMLDivElement>(null);
   const target = useCallback(() => ref.current, []);
@@ -169,7 +198,7 @@ function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onResto
   const popped = !!tile && poppedIds.has(tile.id);
   const cls = ["tile", item.kind, hasAudioControls ? "has-volume" : "", p.speaking && item.kind === "camera" ? "speaking" : "", big ? "big" : "", tile && !popped ? "" : "avatar"].join(" ");
   return (
-    <div ref={ref} className={cls} onClick={() => { if (!ref.current?.ownerDocument.fullscreenElement) onClick(); }} title={big ? t("stage.backToGrid") : t("stage.enlarge")}>
+    <div ref={ref} className={cls} onClick={() => { if (!ref.current?.ownerDocument.fullscreenElement) onClick(); }} onContextMenu={(event) => onMenu(item, event)} title={big ? t("stage.backToGrid") : t("stage.enlarge")}>
       {popped ? <div className="tile-popped"><Icon name="external-link" /><span>{t("stage.poppedOut")}</span><button className="secondary small" onClick={(event) => { event.stopPropagation(); onRestore(tile!.id); }}>{t("stage.restoreVideo")}</button></div> : tile ? <TrackVideo tile={tile} /> : <Avatar name={p.name} size="large" />}
       {tile && !popped && <div className="tile-window-actions" onClick={(event) => event.stopPropagation()}>
         <button className="icon" title={t("stage.popout")} aria-label={t("stage.popout")} onClick={() => { setError(""); try { onPopout(tile); } catch (error) { setError(error instanceof Error ? error.message : t("stage.popupFailed")); } }}><Icon name="external-link" /></button>

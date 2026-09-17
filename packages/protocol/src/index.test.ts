@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  ClientEvent, CreateMessageRequest, DEFAULT_EVERYONE_PERMISSIONS, DEFAULT_MEMBER_PERMISSIONS, Permission, RtcTokenRequest, ServerEvent,
+  ClientEvent, CreateMessageRequest, DEFAULT_EVERYONE_PERMISSIONS, DEFAULT_MEMBER_PERMISSIONS, PERMISSION_GROUPS, Permission, RtcTokenRequest, ServerEvent,
   UpdateMeRequest, VerifyRequest, challengeMessage, displayNameOf, hasPermission, permissionNames,
 } from "./index";
 
@@ -48,6 +48,12 @@ describe("protocol", () => {
 });
 
 describe("permissions", () => {
+  it("shows every permission in exactly one group", () => {
+    // A new permission must be sorted into PERMISSION_GROUPS by meaning (role editor); forgetting it fails here.
+    const grouped = PERMISSION_GROUPS.flatMap((g) => [...g.permissions]);
+    expect([...grouped].sort()).toEqual(Object.keys(Permission).sort());
+    expect(new Set(PERMISSION_GROUPS.map((g) => g.id)).size).toBe(PERMISSION_GROUPS.length);
+  });
   it("administrator implies everything", () => {
     expect(hasPermission(Permission.ADMINISTRATOR, Permission.BAN_MEMBERS)).toBe(true);
   });
@@ -60,9 +66,13 @@ describe("permissions", () => {
     expect(hasPermission(DEFAULT_MEMBER_PERMISSIONS, Permission.SEND_MESSAGES)).toBe(true);
     expect(hasPermission(DEFAULT_MEMBER_PERMISSIONS, Permission.STREAM_VIDEO)).toBe(true);
     expect(hasPermission(DEFAULT_MEMBER_PERMISSIONS, Permission.KICK_MEMBERS)).toBe(false);
-    // The bit values are part of the migrations (0003/0004); never renumber them.
+    // Guests hear the voice channel but do not watch camera/screen; members do.
+    expect(hasPermission(DEFAULT_EVERYONE_PERMISSIONS, Permission.VIEW_VIDEO)).toBe(false);
+    expect(hasPermission(DEFAULT_MEMBER_PERMISSIONS, Permission.VIEW_VIDEO)).toBe(true);
+    // The bit values are part of the migrations (0003/0004, VIEW_VIDEO 16384 in 0013); never renumber them.
+    expect(Permission.VIEW_VIDEO).toBe(16384);
     expect(DEFAULT_EVERYONE_PERMISSIONS).toBe(1152);
-    expect(DEFAULT_MEMBER_PERMISSIONS).toBe(7616);
+    expect(DEFAULT_MEMBER_PERMISSIONS).toBe(7616 | 16384);
     expect(permissionNames(Permission.KICK_MEMBERS | Permission.BAN_MEMBERS)).toEqual(["KICK_MEMBERS", "BAN_MEMBERS"]);
   });
 });

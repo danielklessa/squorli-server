@@ -1,14 +1,15 @@
 import {
   deriveDmKey, directoryServerUrl, openDm, sealDm,
-  type AccountServer, type DirectoryAccount, type DirectoryServerEvent, type DmConversation, type DmMessage, type Friend, type ServerLeaveResponse,
+  type AccountServer, type AccountSettings, type AccountStatus, type DirectoryAccount, type DirectoryServerEvent, type DmConversation, type DmMessage, type Friend, type ServerLeaveResponse,
 } from "@squorli/protocol";
 import * as api from "./api";
 import { DirectoryLink, type LinkStatus } from "./directoryLink";
 import { loadOrCreateIdentity, storeIdentity, type Identity } from "./identity";
 import { ServerConnection, type ServerConnState } from "./serverConnection";
-import { t } from "./i18n";
+import { applyAccountSettings, sameAccountSettings, toAccountSettings } from "./accountSettings";
+import { accountLocalePreference, detectLocale, locale, localePreference, markAccountLocalePreference, storeLocalePreference, t, type LocalePreference } from "./i18n";
 import { loadVoiceSettings, sameSoundSettings, saveVoiceSettings, subscribeVoiceSettings } from "./voice/settings";
-import { normalizeSoundSettings, type SoundSettings } from "./voice/sounds";
+import { normalizeSoundSettings } from "./voice/sounds";
 
 export type { ChannelMessages, Connection, RawLogEntry, ServerConnState } from "./serverConnection";
 
@@ -38,8 +39,8 @@ export type State = {
   directoryError: string | null;
   /** Servers the handle has signed in on (directory, AccountStatus.servers): the server rail. null = unknown/no account. */
   accountServers: AccountServer[] | null;
-  /** Last failure while saving the voice cue settings in the account (settings tab "Sounds"); null = fine. */
-  soundSyncError: string | null;
+  /** Last failure while saving the settings in the directory account (shown in the settings dialog); null = fine. */
+  settingsSyncError: string | null;
   // ---- M7: friends and direct messages over the directory socket
   /** Connection to the directory socket; "idle" also when there is no directory or no account. */
   directoryLink: LinkStatus;
@@ -77,18 +78,20 @@ export class Store {
   /** Moderation (M3) on `host`: moving to another voice channel (null = out) and stopping camera/screen. */
   onVoiceMoved: ((host: string, channelId: string | null, by: string) => void) | null = null;
   onVoiceStop: ((host: string, what: { camera: boolean; screen: boolean }, by: string) => void) | null = null;
-  /** Cue settings as the directory account holds them (null = none there or no account); user changes are pushed when they differ. */
-  private accountSounds: SoundSettings | null = null;
-  private soundPushTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Settings as the directory account holds them (null = none there or no account); user changes are pushed when they differ. */
+  private accountSettings: AccountSettings | null = null;
+  /** The directory stores all settings (features.settings); false = one that predates them, then only the cue settings follow the account. */
+  private settingsSupported = false;
+  private settingsPushTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     const home = this.createConnection(this.homeHost, "");
     this.state = {
       identity: null, homeHost: this.homeHost, activeHost: this.homeHost, servers: { [this.homeHost]: home.state },
-      directoryUrl: null, directoryAccount: undefined, directoryError: null, accountServers: null, soundSyncError: null,
+      directoryUrl: null, directoryAccount: undefined, directoryError: null, accountServers: null, settingsSyncError: null,
       directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null, friendsError: null,
     };
-    subscribeVoiceSettings((s, source) => { if (source === "user") this.scheduleSoundPush(s.sounds); });
+    subscribeVoiceSettings((_s, source) => { if (source === "user") this.scheduleSettingsPush(); });
   }
 
   subscribe(fn: (s: State) => void) { this.listeners.add(fn); fn(this.state); return () => { this.listeners.delete(fn); }; }
@@ -360,41 +363,81 @@ export class Store {
   /** Server rail: fetch the account's server list from the directory (signed). Only with a handle; errors are not a sign-in problem. */
   async refreshAccountServers(): Promise<void> {
     const id = this.state.identity; const url = this.state.directoryUrl;
-    if (!id || !url || !this.state.directoryAccount) { this.accountSounds = null; this.set({ accountServers: null }); return; }
+    if (!id || !url || !this.state.directoryAccount) {
+      this.accountSettings = null;
+      if (this.settingsPushTimer) { clearTimeout(this.settingsPushTimer); this.settingsPushTimer = null; }
+      this.set({ accountServers: null });
+      return;
+    }
     try {
-      const status = await api.directoryAccountStatus(url, id);
-      this.set({ accountServers: status.servers });
-      this.adoptAccountSounds(status.soundSettings);
+      const [status, health] = await Promise.all([api.directoryAccountStatus(url, id), api.directoryHealth(url)]);
+      this.settingsSupported = health.features.settings;
+      // The public key lookup (refreshDirectory) never carries names; the signed status does: the global display name for the settings.
+      const acc = this.state.directoryAccount;
+      this.set({ accountServers: status.servers, ...(acc ? { directoryAccount: { ...acc, displayName: status.displayName } } : {}) });
+      this.adoptAccountSettings(status);
     } catch (err) { console.warn("Serverliste vom Verzeichnis nicht verfuegbar", err); }
   }
 
-  // ---------- Voice cue settings in the account: the per-device copy in localStorage (voice/settings.ts) stays the working
-  // copy, so servers without a directory keep working; with an account the account's copy wins on load and every user
-  // change is pushed there (signed, coalesced for slider drags).
-  /** Account status arrived: take the account's cue settings over on this device, or seed the account with the local ones if it has none yet. */
-  private adoptAccountSounds(remote: SoundSettings | null): void {
+  // ---------- Settings in the account (everything except the device selection, accountSettings.ts): the per-device copy in
+  // localStorage (voice/settings.ts, the locale in i18n) stays the working copy, so servers without a directory keep working;
+  // with an account the account's copy wins on load and every user change is pushed there (signed, coalesced for slider drags).
+  // A directory that predates the full settings only gets the cue settings, as before.
+  /** Account status arrived: take the account's settings over on this device, or seed the account with the local ones if it has none yet. */
+  private adoptAccountSettings(status: AccountStatus): void {
+    // A change the user just made here is newer than what the status says; the pending push brings the account in step.
+    if (this.settingsPushTimer) return;
     const local = loadVoiceSettings();
-    if (!remote) { this.accountSounds = null; this.scheduleSoundPush(local.sounds, 0); return; }
-    const sounds = normalizeSoundSettings(remote);
-    this.accountSounds = sounds;
-    if (!sameSoundSettings(local.sounds, sounds)) saveVoiceSettings({ ...local, sounds }, "directory");
+    const remote = this.settingsSupported ? status.settings : null;
+    if (!remote) {
+      // Nothing stored yet (or an older directory): cue settings stored by an older client still win, the rest is seeded from this device.
+      const sounds = status.soundSettings ? normalizeSoundSettings(status.soundSettings) : null;
+      if (sounds && !sameSoundSettings(local.sounds, sounds)) saveVoiceSettings({ ...local, sounds }, "directory");
+      this.accountSettings = sounds && !this.settingsSupported ? this.localAccountSettings() : null;
+      this.scheduleSettingsPush(0);
+      return;
+    }
+    this.accountSettings = remote;
+    if (!sameAccountSettings(toAccountSettings(local, remote.locale), remote)) saveVoiceSettings(applyAccountSettings(local, remote), "directory");
+    // Language: a choice made on this device since it was last in step with the account (login footer) wins and is pushed;
+    // otherwise the account's applies, with a reload only when the texts actually change.
+    const pref = localePreference(); const synced = accountLocalePreference();
+    if (remote.locale === pref) { markAccountLocalePreference(pref); return; }
+    if (synced !== null && pref !== synced) { this.scheduleSettingsPush(0); return; }
+    storeLocalePreference(remote.locale);
+    markAccountLocalePreference(remote.locale);
+    if (detectLocale() !== locale) window.location.reload();
   }
-  private scheduleSoundPush(sounds: SoundSettings, delayMs = 800): void {
+  private localAccountSettings(): AccountSettings { return toAccountSettings(loadVoiceSettings(), localePreference()); }
+  private scheduleSettingsPush(delayMs = 800): void {
     if (!this.state.identity || !this.state.directoryUrl || !this.state.directoryAccount) return;
-    if (this.accountSounds && sameSoundSettings(this.accountSounds, sounds)) return;
-    if (this.soundPushTimer) clearTimeout(this.soundPushTimer);
-    this.soundPushTimer = setTimeout(() => { this.soundPushTimer = null; void this.pushSounds(); }, delayMs);
+    if (this.settingsPushTimer) clearTimeout(this.settingsPushTimer);
+    this.settingsPushTimer = setTimeout(() => { this.settingsPushTimer = null; void this.pushSettings(); }, delayMs);
   }
-  private async pushSounds(): Promise<void> {
+  private async pushSettings(): Promise<void> {
     const id = this.state.identity; const url = this.state.directoryUrl;
     if (!id || !url || !this.state.directoryAccount) return;
-    const sounds = loadVoiceSettings().sounds;
-    if (this.accountSounds && sameSoundSettings(this.accountSounds, sounds)) return;
+    const next = this.localAccountSettings(); const known = this.accountSettings;
     try {
-      await api.directorySetSoundSettings(url, id, sounds);
-      this.accountSounds = sounds;
-      if (this.state.soundSyncError) this.set({ soundSyncError: null });
-    } catch (err) { this.set({ soundSyncError: api.explainDirectoryError(err) }); }
+      if (this.settingsSupported) {
+        if (known && sameAccountSettings(known, next)) return;
+        await api.directorySetSettings(url, id, next);
+        markAccountLocalePreference(next.locale);
+      } else {
+        if (known && sameSoundSettings(known.sounds, next.sounds)) return;
+        await api.directorySetSoundSettings(url, id, next.sounds);
+      }
+      this.accountSettings = next;
+      if (this.state.settingsSyncError) this.set({ settingsSyncError: null });
+    } catch (err) { this.set({ settingsSyncError: api.explainDirectoryError(err) }); }
+  }
+
+  /** Change the UI language: stored on this device, saved in the account first (the reload would cut a pending push off), then reload. */
+  async setLocale(pref: LocalePreference): Promise<void> {
+    storeLocalePreference(pref);
+    if (this.settingsPushTimer) { clearTimeout(this.settingsPushTimer); this.settingsPushTimer = null; }
+    await this.pushSettings();
+    window.location.reload();
   }
 
   /** Register a handle at the directory (M6a). */
@@ -439,6 +482,18 @@ export class Store {
     this.set({ identity: id, directoryAccount: undefined });
     void this.refreshDirectory();
     await this.login(invite);
+  }
+
+  /**
+   * Your display name on the server shown (mini profile and settings). With a directory account the directory holds it (as this
+   * server's entry, cleared when it equals the global name) and the server adopts it; without one only the server stores it.
+   * null = fall back to the global name. Throws on errors (message translated where it comes from the directory).
+   */
+  async setServerDisplayName(displayName: string | null): Promise<void> {
+    const conn = this.active; const domain = conn.state.serverDomain; const acc = this.state.directoryAccount;
+    const global = acc?.displayName ?? null;
+    if (acc && domain) await this.setDirectoryName(domain, displayName === global ? null : displayName);
+    await conn.updateDisplayName(displayName ?? global);
   }
 
   /** Set the display name in the directory (server = null: global, otherwise this server); throws on errors (message translated). */

@@ -13,12 +13,15 @@ import {
   type LocalTrackPublication,
   type Participant as LkParticipant,
   type RemoteTrack,
+  type TrackPublishOptions,
 } from "livekit-client";
 import { BackgroundBlur, supportsBackgroundProcessors, type BackgroundProcessorWrapper } from "@livekit/track-processors";
 import { VoiceGate, rmsLevel } from "./gate";
 import { MicPipeline, type GateMode } from "./micPipeline";
 import type { VoiceSettings } from "./settings";
 import { DEFAULT_SOUND_SETTINGS, applyCueOutput, normalizeSoundSettings, playCue, shouldPlayCue, type SoundCue, type SoundSettings } from "./sounds";
+import { USER_VOLUME_MAX, clampUserVolume, loadUserVolumes, saveUserVolumes, withUserVolume, type UserVolumes } from "./userVolumes";
+import { subscriptionPermissions, type VideoAccess } from "./videoAccess";
 import { t } from "../i18n";
 
 /**
@@ -113,6 +116,10 @@ export type JoinOptions = {
   /** "relay" forces the browser onto TURN (a test for blocked UDP/TCP). */
   iceTransportPolicy?: "all" | "relay";
   audio?: AudioProfile;
+  /** Permission VIEW_VIDEO: who may receive our camera/screen, and whether we may receive others' (see setVideoAccess). */
+  video?: { access: VideoAccess; mayView: boolean };
+  /** LiveKit identity (user id on this server) -> public key, for the per-person playback volume (see setPeerKeys). */
+  peerKeys?: Record<string, string>;
 };
 
 export type VideoSendStat = { source: "camera" | "screen"; rid: string; width: number; height: number; fps: number; bytesSent: number; limitation?: string | undefined };
@@ -162,7 +169,7 @@ export class VoiceClient {
   private audioCtx: AudioContext | null = null;
   private unlocked = false;
   /** Level meter per remote microphone track: speaker highlight without the delay of LiveKit's report (~0.5-1 s). */
-  private readonly meters = new Map<string, { source: MediaStreamAudioSourceNode; analyser: AnalyserNode; gate: VoiceGate; samples: Float32Array<ArrayBuffer> }>();
+  private readonly meters = new Map<string, { source: MediaStreamAudioSourceNode; analyser: AnalyserNode; gate: VoiceGate; samples: Float32Array<ArrayBuffer>; boost: GainNode | null }>();
   private meterTimer: number | null = null;
   /** Cues for joining/leaving (per device, from the voice settings). */
   private sounds: SoundSettings = { ...DEFAULT_SOUND_SETTINGS };
@@ -172,6 +179,16 @@ export class VoiceClient {
   private peerCuesFrom = 0;
   /** A room was fully joined (the join cue played), so leaving it earns the leave cue. */
   private cueJoined = false;
+  /** Permission VIEW_VIDEO: who may receive our camera/screen (null = not told yet, LiveKit's default "everyone" stays). */
+  private videoAccess: VideoAccess | null = null;
+  /** Whether we may receive others' camera/screen ourselves. */
+  private mayViewVideo = true;
+  /** Last subscription permissions sent to LiveKit, to skip identical updates. */
+  private sentVideoAccess = "";
+  /** Playback volume per person (0..2), keyed by public key and stored per device (userVolumes.ts). */
+  private userVolumes: UserVolumes = loadUserVolumes();
+  /** LiveKit identity -> public key for the members of the voice connection's server. */
+  private peerKeys: Record<string, string> = {};
 
   constructor(audioHost?: HTMLElement) {
     this.audioHost = audioHost ?? VoiceClient.makeHost();
@@ -200,7 +217,8 @@ export class VoiceClient {
   private ensureCtx(): AudioContext {
     if (!this.audioCtx || this.audioCtx.state === "closed") {
       this.audioCtx = new AudioContext();
-      this.audioCtx.onstatechange = () => this.patch({ audioContext: this.audioCtx?.state ?? "none" });
+      // Volumes above 100 % run through this context; while it is not running they fall back to 100 % (applyUserVolumes).
+      this.audioCtx.onstatechange = () => { this.applyUserVolumes(); this.patch({ audioContext: this.audioCtx?.state ?? "none" }); };
     }
     return this.audioCtx;
   }
@@ -255,6 +273,10 @@ export class VoiceClient {
     if (this.room) { this.switchingRoom = true; try { await this.leave(); } finally { this.switchingRoom = false; } }
     this.audioProfile = opts.audio ?? DEFAULT_AUDIO_PROFILE;
     this.micSettings = settings;
+    this.videoAccess = opts.video?.access ?? null;
+    this.mayViewVideo = opts.video?.mayView ?? true;
+    this.sentVideoAccess = "";
+    this.peerKeys = opts.peerKeys ?? {};
     this.patch({ status: "connecting", channelId, rtcUrl: url, error: null, audioProfile: this.audioProfile });
 
     // adaptiveStream: receive quality depending on the size of the <video> element (simulcast layer), pauses invisible tracks.
@@ -275,7 +297,8 @@ export class VoiceClient {
     this.room = room;
     this.log(`verbinde mit ${url}${opts.iceTransportPolicy === "relay" ? " (nur TURN/relay)" : ""}`);
     room
-      .on(RoomEvent.ParticipantConnected, (p) => { this.log(`teilnehmer da: ${p.identity.slice(0, 8)}`); this.peerCue("peerJoin"); this.refreshParticipants(); })
+      .on(RoomEvent.ParticipantConnected, (p) => { this.log(`teilnehmer da: ${p.identity.slice(0, 8)}`); this.peerCue("peerJoin"); this.applyVideoAccess(); this.refreshParticipants(); })
+      .on(RoomEvent.TrackPublished, () => this.applyVideoSubscriptions())
       .on(RoomEvent.ParticipantDisconnected, (p) => { this.log(`teilnehmer weg: ${p.identity.slice(0, 8)}`); this.peerCue("peerLeave"); this.refreshParticipants(); })
       .on(RoomEvent.Reconnecting, () => this.log("verbindung unterbrochen, versuche erneut"))
       .on(RoomEvent.Reconnected, () => this.log("wieder verbunden"))
@@ -290,9 +313,11 @@ export class VoiceClient {
       // otherwise the tile survives with a stopped track and the viewers keep a black frame.
       .on(RoomEvent.TrackUnsubscribed, (track, _pub, p) => { if (track.kind === Track.Kind.Audio) { track.detach().forEach((el) => el.remove()); this.remoteAudio.delete(track); this.dropMeter(p.identity); } this.refreshTiles(track); })
       .on(RoomEvent.TrackUnpublished, (pub, p) => { this.log(`${p.identity.slice(0, 8)} beendet ${pub.source}`); this.refreshTiles(); })
-      .on(RoomEvent.LocalTrackPublished, (pub) => { this.log(`sende ${pub.source}`); this.refreshTiles(); })
+      // The microphone's track id is part of the subscription permissions (republishing changes it).
+      .on(RoomEvent.LocalTrackPublished, (pub) => { this.log(`sende ${pub.source}`); this.applyVideoAccess(); this.refreshTiles(); })
       .on(RoomEvent.LocalTrackUnpublished, (pub) => {
         this.log(`beendet ${pub.source}`);
+        this.applyVideoAccess();
         // Also end up here when the browser itself stops the share (the "stop sharing" bar).
         if (pub.source === Track.Source.ScreenShare) this.patch({ screenOn: false, screenAudio: null });
         if (pub.source === Track.Source.Camera) this.patch({ cameraOn: false });
@@ -312,6 +337,9 @@ export class VoiceClient {
 
     try {
       await room.connect(url, token, opts.iceTransportPolicy ? { rtcConfig: { iceTransportPolicy: opts.iceTransportPolicy } } : {});
+      // VIEW_VIDEO before anything is published: restricted members start with nothing and get the microphone once it has a track id.
+      this.applyVideoAccess();
+      this.applyVideoSubscriptions();
       // Microphone only after connecting, so a connection error does not also cost a permission prompt.
       const mic = new MicPipeline(settings.vadThreshold, settings.vadHangoverMs, this.ensureCtx());
       this.mic = mic;
@@ -367,6 +395,52 @@ export class VoiceClient {
     this.patch({ status: "disconnected", channelId: null, participants: [], gateOpen: false, level: 0, micMuted: false, deafened: false, inputDeviceId: null, cameraOn: false, screenOn: false, screenAudio: null, tiles: [] });
   }
 
+  // ---------- Permission VIEW_VIDEO: who receives camera and screen
+
+  /**
+   * Take over who may receive camera/screen (from the server state; App.tsx calls this on every role or member change)
+   * and whether we may ourselves. Takes effect on a running connection.
+   */
+  setVideoAccess(access: VideoAccess, mayView: boolean): void {
+    this.videoAccess = access;
+    this.mayViewVideo = mayView;
+    this.applyVideoAccess();
+    this.applyVideoSubscriptions();
+    this.refreshTiles();
+  }
+
+  /**
+   * Sender side, enforced by LiveKit: members without VIEW_VIDEO may only subscribe to our microphone (videoAccess.ts).
+   * LiveKit keeps the list per sender and the SDK sends it again after a reconnect.
+   */
+  private applyVideoAccess(): void {
+    const room = this.room;
+    const access = this.videoAccess;
+    if (!room || !access || room.state === ConnectionState.Disconnected || room.state === ConnectionState.Connecting) return;
+    const micSids = [...room.localParticipant.audioTrackPublications.values()].filter((p) => p.source !== Track.Source.ScreenShareAudio).map((p) => p.trackSid);
+    const { allAllowed, list } = subscriptionPermissions(access, micSids, [...room.remoteParticipants.values()].map((p) => p.identity));
+    const key = JSON.stringify([allAllowed, list]);
+    if (key === this.sentVideoAccess) return;
+    this.sentVideoAccess = key;
+    room.localParticipant.setTrackSubscriptionPermissions(allAllowed, list);
+    this.log(allAllowed ? "video fuer alle freigegeben" : `video nur fuer ${access.viewers.length} mitglieder, ${list.length - access.viewers.length} nur mikrofon`);
+  }
+
+  /**
+   * Receiver side: without VIEW_VIDEO we do not ask for camera, screen or screen audio at all. LiveKit refuses them anyway
+   * when the sender runs this client; this keeps the interface and the bandwidth in step and covers older senders.
+   */
+  private applyVideoSubscriptions(): void {
+    const room = this.room;
+    if (!room) return;
+    for (const p of room.remoteParticipants.values()) {
+      for (const pub of p.trackPublications.values()) {
+        const stream = pub.kind === Track.Kind.Video || pub.source === Track.Source.ScreenShareAudio;
+        if (stream && pub.isDesired !== this.mayViewVideo) pub.setSubscribed(this.mayViewVideo);
+      }
+    }
+  }
+
   // ---------- Camera and screen (M3)
 
   async setCameraEnabled(on: boolean, deviceId?: string | null, quality?: "360p" | "720p", blur?: number): Promise<void> {
@@ -415,12 +489,14 @@ export class VoiceClient {
   }
 
   /** Opus settings from the channel profile: bitrate; mono with DTX (silence costs nothing) and RED (redundancy against loss). */
-  private micPublishOptions() {
+  private micPublishOptions(): TrackPublishOptions {
     const p = this.audioProfile;
+    // The return type matters: livekit-client takes the bitrate as `audioPreset.maxBitrate`. An unknown key (it was
+    // `audioBitrate` until 17 September 2026) is ignored silently and every channel ran at the SDK default of 48 kbit/s.
     return {
       source: Track.Source.Microphone,
       name: "microphone",
-      audioBitrate: p.bitrate * 1000,
+      audioPreset: { maxBitrate: p.bitrate * 1000 },
       dtx: !p.stereo,
       red: !p.stereo,
       forceStereo: p.stereo,
@@ -493,16 +569,22 @@ export class VoiceClient {
     return undefined;
   }
 
+  /**
+   * Volume of the audio that belongs to a tile. Screen audio has its own volume (0..1); a camera tile's audio is the
+   * person's microphone, so it is the per-person volume (0..2, stored) and the same value as in the context menus.
+   */
   getVideoAudioVolume(tileId: string): number | null {
-    return this.videoAudioTrack(tileId)?.getVolume() ?? null;
+    const track = this.videoAudioTrack(tileId);
+    if (!track) return null;
+    return tileId.endsWith(":screen") ? track.getVolume() : this.userVolumes[this.volumeKey(tileId.slice(0, -":camera".length))] ?? 1;
   }
 
   private readonly videoAudioPreviousVolume = new WeakMap<RemoteAudioTrack, number>();
 
   toggleVideoAudioMuted(tileId: string): void {
     const track = this.videoAudioTrack(tileId);
-    if (!track) return;
-    const volume = track.getVolume();
+    const volume = this.getVideoAudioVolume(tileId);
+    if (!track || volume === null) return;
     if (volume > 0) this.videoAudioPreviousVolume.set(track, volume);
     this.setVideoAudioVolume(tileId, volume > 0 ? 0 : this.videoAudioPreviousVolume.get(track) ?? 1);
   }
@@ -510,12 +592,66 @@ export class VoiceClient {
   setVideoAudioVolume(tileId: string, volume: number): void {
     if (!Number.isFinite(volume)) return;
     const track = this.videoAudioTrack(tileId);
-    const next = Math.max(0, Math.min(1, volume));
-    if (track) {
-      if (track.getVolume() > 0) this.videoAudioPreviousVolume.set(track, track.getVolume());
-      track.setVolume(next);
-    }
+    const before = this.getVideoAudioVolume(tileId);
+    if (track && before !== null && before > 0) this.videoAudioPreviousVolume.set(track, before);
+    if (!tileId.endsWith(":screen")) { this.setUserVolume(this.volumeKey(tileId.slice(0, -":camera".length)), volume); return; }
+    track?.setVolume(Math.max(0, Math.min(1, volume)));
     this.patch({});
+  }
+
+  // ---------- Playback volume per person (0..200 %)
+
+  /** Members of the voice connection's server (identity -> public key); App.tsx keeps this current. */
+  setPeerKeys(keys: Record<string, string>): void {
+    this.peerKeys = keys;
+    this.applyUserVolumes();
+  }
+
+  /** Participants who are no members (bots) have no public key; their identity stands in. */
+  private volumeKey(identity: string): string {
+    return this.peerKeys[identity] ?? `id:${identity}`;
+  }
+
+  getUserVolume(publicKey: string): number {
+    return this.userVolumes[publicKey] ?? 1;
+  }
+
+  /** Set and store how loud this person is played back here (0..2). Works without a connection too; it applies on the next join. */
+  setUserVolume(publicKey: string, volume: number): void {
+    this.userVolumes = withUserVolume(this.userVolumes, publicKey, volume);
+    saveUserVolumes(this.userVolumes);
+    this.applyUserVolumes();
+    this.patch({});
+  }
+
+  private applyUserVolumes(): void {
+    for (const [track, { identity }] of this.remoteAudio) this.applyUserVolume(track, identity);
+  }
+
+  /**
+   * Up to 100 % the <audio> element's volume does it. An element cannot go above 1, so louder than that runs through a
+   * GainNode on the meter's source into the shared AudioContext (which follows the voice output device where the browser
+   * can do that) while the element stays attached but silent; Chromium only feeds a remote stream into Web Audio
+   * while an element plays it. Without a running context the boost would be silence, so it falls back to 100 %.
+   */
+  private applyUserVolume(remote: RemoteTrack, identity: string): void {
+    if (remote.source === Track.Source.ScreenShareAudio) return;
+    const track = remote as RemoteAudioTrack; // remoteAudio only ever holds audio tracks (attachRemote)
+    const volume = clampUserVolume(this.userVolumes[this.volumeKey(identity)]);
+    const meter = this.meters.get(identity);
+    const ctx = this.audioCtx;
+    if (volume > 1 && meter && ctx?.state === "running") {
+      if (!meter.boost) {
+        meter.boost = ctx.createGain();
+        meter.source.connect(meter.boost);
+        meter.boost.connect(ctx.destination);
+      }
+      meter.boost.gain.value = this.state.deafened ? 0 : Math.min(USER_VOLUME_MAX, volume);
+      track.setVolume(0);
+      return;
+    }
+    track.setVolume(Math.min(1, volume));
+    if (meter?.boost) { meter.source.disconnect(meter.boost); meter.boost.disconnect(); meter.boost = null; }
   }
 
   /** @param ended a track that is going away right now but is still referenced by its publication (see TrackUnsubscribed) */
@@ -526,6 +662,7 @@ export class VoiceClient {
     const all: LkParticipant[] = [room.localParticipant, ...room.remoteParticipants.values()];
     for (const p of all) {
       const isLocal = p === room.localParticipant;
+      if (!isLocal && !this.mayViewVideo) continue; // without VIEW_VIDEO only your own feeds
       const cam = p.getTrackPublication(Track.Source.Camera)?.track;
       if ((cam instanceof LocalVideoTrack || cam instanceof RemoteVideoTrack) && cam !== ended && !cam.isMuted) {
         tiles.push({ id: `${p.identity}:camera`, identity: p.identity, name: p.name || p.identity, isLocal, source: "camera", track: cam, audio: null, hasAudio: false });
@@ -564,6 +701,7 @@ export class VoiceClient {
   async setDeafened(on: boolean): Promise<void> {
     this.patch({ deafened: on });
     for (const { element } of this.remoteAudio.values()) element.muted = on;
+    this.applyUserVolumes(); // the boosted path (above 100 %) bypasses the elements and is silenced there
     await this.applyMic();
     await this.room?.localParticipant.setAttributes({ deafened: on ? "1" : "" }).catch(() => {});
     this.log(on ? "ton aus (mikrofon mit stumm)" : `ton an (mikrofon ${this.micMutedByUser ? "bleibt stumm" : "wieder an"})`);
@@ -705,6 +843,7 @@ export class VoiceClient {
     this.routeVideoAudio();
     if (track.source === Track.Source.ScreenShareAudio) void this.applyScreenSink();
     if (track.source === Track.Source.Microphone) this.addMeter(identity, track.mediaStreamTrack);
+    this.applyUserVolume(track, identity); // after the meter: volumes above 100 % use its source
     this.patch({ canPlayback: this.room?.canPlaybackAudio ?? true });
   }
 
@@ -718,7 +857,7 @@ export class VoiceClient {
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 512;
       source.connect(analyser); // not to destination: playback keeps running through the <audio> element
-      this.meters.set(identity, { source, analyser, gate: new VoiceGate(REMOTE_SPEAK_THRESHOLD, REMOTE_SPEAK_HANGOVER_MS), samples: new Float32Array(analyser.fftSize) });
+      this.meters.set(identity, { source, analyser, gate: new VoiceGate(REMOTE_SPEAK_THRESHOLD, REMOTE_SPEAK_HANGOVER_MS), samples: new Float32Array(analyser.fftSize), boost: null });
     } catch (err) {
       this.log(`pegelmesser fuer ${identity.slice(0, 8)} nicht moeglich: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -726,7 +865,7 @@ export class VoiceClient {
   private dropMeter(identity: string) {
     const m = this.meters.get(identity);
     if (!m) return;
-    m.source.disconnect(); m.analyser.disconnect();
+    m.source.disconnect(); m.analyser.disconnect(); m.boost?.disconnect();
     this.meters.delete(identity);
   }
   /** Cue for another participant, unless we have only just connected (then they were already there). */

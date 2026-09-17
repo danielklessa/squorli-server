@@ -1,14 +1,16 @@
-import { AUDIO_BITRATES, Permission, hasPermission, permissionNames, type Ban, type Invite, type PermissionName, type ServerState } from "@squorli/protocol";
+import { PERMISSION_GROUPS, Permission, hasPermission, type Ban, type Invite, type PermissionName, type ServerState } from "@squorli/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { ServerApi } from "./api";
 import { askConfirm } from "./dialogs";
+import { roleOrder } from "./roleOrder";
+import { ChannelsTab } from "./ChannelsTab";
 import { Icon } from "./Icon";
 import { fmtDateTime, t } from "./i18n";
 
 type Tab = "server" | "channels" | "roles" | "invites" | "bans";
 
 /** Admin area: server, categories/channels, roles, invites, bans. Changes come back via the structure event. */
-export function AdminPanel({ api, server, directoryUrl, onClose }: { api: ServerApi; server: ServerState; directoryUrl: string | null; onClose: () => void }) {
+export function AdminPanel({ api, server, myUserId, directoryUrl, onClose }: { api: ServerApi; server: ServerState; myUserId: string; directoryUrl: string | null; onClose: () => void }) {
   const p = server.myPermissions;
   const allTabs: { id: Tab; label: string; icon: string; ok: boolean }[] = [
     { id: "server", label: t("admin.tab.server"), icon: "server", ok: hasPermission(p, Permission.MANAGE_SERVER) },
@@ -38,7 +40,7 @@ export function AdminPanel({ api, server, directoryUrl, onClose }: { api: Server
             {err && <p className="error">{err}</p>}
             {tab === "server" && <ServerTab api={api} server={server} directoryUrl={directoryUrl} run={run} />}
             {tab === "channels" && <ChannelsTab api={api} server={server} run={run} />}
-            {tab === "roles" && <RolesTab api={api} server={server} run={run} />}
+            {tab === "roles" && <RolesTab api={api} server={server} myUserId={myUserId} run={run} />}
             {tab === "invites" && <InvitesTab api={api} run={run} canManage={hasPermission(p, Permission.MANAGE_SERVER)} />}
             {tab === "bans" && <BansTab api={api} run={run} />}
           </div>
@@ -92,95 +94,73 @@ function ServerTab({ api, server, directoryUrl, run }: { api: ServerApi; server:
   );
 }
 
-function ChannelsTab({ api, server, run }: { api: ServerApi; server: ServerState; run: RunFn }) {
-  const [catName, setCatName] = useState("");
-  const [chName, setChName] = useState("");
-  const [chKind, setChKind] = useState<"text" | "voice">("text");
-  const [chCat, setChCat] = useState<string>("");
-  const move = (kind: "channel" | "category", id: string, dir: -1 | 1) => {
-    const list = kind === "channel" ? server.channels : server.categories;
-    const item = list.find((x) => x.id === id);
-    if (!item) return;
-    const sorted = [...list].sort((a, b) => a.position - b.position);
-    const idx = sorted.indexOf(item);
-    const other = sorted[idx + dir];
-    if (!other) return;
-    // Bound call: a bare `api.updateChannel` loses `this` and fails inside `request`.
-    const upd = (targetId: string, patch: { position: number }) => kind === "channel" ? api.updateChannel(targetId, patch) : api.updateCategory(targetId, patch);
-    void run(async () => { await upd(item.id, { position: other.position }); await upd(other.id, { position: item.position }); });
-  };
-  return (
-    <div className="stack">
-      <h3>{t("admin.categories")}</h3>
-      {server.categories.map((k) => (
-        <div key={k.id} className="row">
-          <input defaultValue={k.name} onBlur={(e) => { if (e.target.value.trim() && e.target.value.trim() !== k.name) void run(() => api.updateCategory(k.id, { name: e.target.value.trim() })); }} />
-          <button className="icon" title={t("admin.up")} onClick={() => move("category", k.id, -1)}><Icon name="chevron-up" /></button>
-          <button className="icon" title={t("admin.down")} onClick={() => move("category", k.id, 1)}><Icon name="chevron-down" /></button>
-          <button className="danger small" onClick={() => run(async () => { if (await askConfirm({ title: t("admin.deleteCategoryTitle", { name: k.name }), text: t("admin.deleteCategoryText"), confirmLabel: t("common.delete"), danger: true })) await api.deleteCategory(k.id); })}>{t("common.delete")}</button>
-        </div>
-      ))}
-      <div className="row">
-        <input value={catName} placeholder={t("admin.newCategory")} onChange={(e) => setCatName(e.target.value)} />
-        <button disabled={!catName.trim()} onClick={() => run(() => api.createCategory(catName.trim()).then(() => setCatName("")))}>{t("admin.create")}</button>
-      </div>
-
-      <h3>{t("admin.channels")}</h3>
-      {server.channels.map((c) => (
-        <div key={c.id} className="row">
-          <span className="channel-icon"><Icon name={c.kind === "text" ? "hash" : "volume-2"} /></span>
-          <input defaultValue={c.name} onBlur={(e) => { if (e.target.value.trim() && e.target.value.trim() !== c.name) void run(() => api.updateChannel(c.id, { name: e.target.value.trim() })); }} />
-          {c.kind === "text" && <input defaultValue={c.topic ?? ""} placeholder={t("admin.topic")} onBlur={(e) => { if ((e.target.value.trim() || null) !== c.topic) void run(() => api.updateChannel(c.id, { topic: e.target.value.trim() || null })); }} />}
-          {c.kind === "voice" && (
-            <>
-              <select value={c.audioBitrate} title={t("admin.bitrateHint")} onChange={(e) => run(() => api.updateChannel(c.id, { audioBitrate: Number(e.target.value) }))}>
-                {AUDIO_BITRATES.map((b) => <option key={b} value={b}>{b} kbit/s</option>)}
-              </select>
-              <label className="check" title={t("admin.stereoHint")}>
-                <input type="checkbox" checked={c.audioStereo} onChange={(e) => run(() => api.updateChannel(c.id, { audioStereo: e.target.checked }))} /> {t("admin.stereo")}
-              </label>
-            </>
-          )}
-          <select value={c.categoryId ?? ""} onChange={(e) => run(() => api.updateChannel(c.id, { categoryId: e.target.value || null }))}>
-            <option value="">{t("admin.noCategory")}</option>
-            {server.categories.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
-          </select>
-          <button className="icon" title={t("admin.up")} onClick={() => move("channel", c.id, -1)}><Icon name="chevron-up" /></button>
-          <button className="icon" title={t("admin.down")} onClick={() => move("channel", c.id, 1)}><Icon name="chevron-down" /></button>
-          <button className="danger small" onClick={() => run(async () => { if (await askConfirm({ title: t("admin.deleteChannelTitle", { name: c.name }), text: c.kind === "text" ? t("admin.deleteTextChannelText") : t("admin.deleteVoiceChannelText"), confirmLabel: t("common.delete"), danger: true })) await api.deleteChannel(c.id); })}>{t("common.delete")}</button>
-        </div>
-      ))}
-      <div className="row">
-        <select value={chKind} onChange={(e) => setChKind(e.target.value as "text" | "voice")}><option value="text">{t("admin.kindText")}</option><option value="voice">{t("admin.kindVoice")}</option></select>
-        <input value={chName} placeholder={t("admin.newChannel")} onChange={(e) => setChName(e.target.value)} />
-        <select value={chCat} onChange={(e) => setChCat(e.target.value)}>
-          <option value="">{t("admin.noCategory")}</option>
-          {server.categories.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
-        </select>
-        <button disabled={!chName.trim()} onClick={() => run(() => api.createChannel({ kind: chKind, name: chName.trim(), categoryId: chCat || null }).then(() => setChName("")))}>{t("admin.create")}</button>
-      </div>
-    </div>
-  );
-}
-
-function RolesTab({ api, server, run }: { api: ServerApi; server: ServerState; run: RunFn }) {
+function RolesTab({ api, server, myUserId, run }: { api: ServerApi; server: ServerState; myUserId: string; run: RunFn }) {
   const [sel, setSel] = useState<string | null>(server.roles.find((r) => !r.isDefault)?.id ?? server.roles[0]?.id ?? null);
   const [newName, setNewName] = useState("");
   const role = server.roles.find((r) => r.id === sel) ?? null;
   const [name, setName] = useState(role?.name ?? "");
   const [color, setColor] = useState(role?.color ?? "#888888");
   const [perms, setPerms] = useState(role?.permissions ?? 0);
-  const [position, setPosition] = useState(role?.position ?? 0);
-  useEffect(() => { setName(role?.name ?? ""); setColor(role?.color ?? "#888888"); setPerms(role?.permissions ?? 0); setPosition(role?.position ?? 0); }, [role?.id, role?.name, role?.color, role?.permissions, role?.position]);
-  const names = Object.keys(Permission) as PermissionName[];
+
+  useEffect(() => { setName(role?.name ?? ""); setColor(role?.color ?? "#888888"); setPerms(role?.permissions ?? 0); }, [role?.id, role?.name, role?.color, role?.permissions]);
+  // Active permissions in the same order as the groups below.
+  const active: PermissionName[] = PERMISSION_GROUPS.flatMap((g) => [...g.permissions]).filter((n) => (perms & Permission[n]) !== 0);
   const sorted = [...server.roles].sort((a, b) => b.position - a.position);
+  const me = server.members.find((m) => m.userId === myUserId);
+  const ceiling = me?.isOwner || server.settings.ownerId === myUserId ? Infinity : Math.max(0, ...server.roles.filter((r) => me?.roleIds.includes(r.id)).map((r) => r.position));
+  const editable = sorted.filter((r) => !r.isDefault && r.position < ceiling);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+  const busy = useRef(false);
+  const reorder = (id: string, target: string, after: boolean) => {
+    if (busy.current) return;
+    const changes = roleOrder(server.roles, id, target, after, ceiling);
+    if (!changes) { setNotice(t("admin.roleOrderSpace")); return; }
+    if (!changes.length) return;
+    busy.current = true; setSaving(true); setNotice("");
+    void run(async () => {
+      try {
+        for (const patch of changes) await api.updateRole(patch.id, { position: patch.position });
+        setNotice(t("admin.orderSaved"));
+      } finally { busy.current = false; setSaving(false); }
+    });
+  };
+  const moveRole = (id: string, direction: -1 | 1) => {
+    const target = editable[editable.findIndex((r) => r.id === id) + direction];
+    if (target) reorder(id, target.id, direction === 1);
+  };
   return (
     <div className="roles">
       <div className="roles-list">
-        <ul>{sorted.map((r) => <li key={r.id}><button className={r.id === sel ? "active" : ""} style={r.color ? { color: r.color } : undefined} onClick={() => setSel(r.id)}>{r.name}{r.isDefault && <span className="muted"> {t("admin.defaultRole")}</span>}</button></li>)}</ul>
+        <p className="muted small">{t("admin.roleSortHint")}</p>
+        <ul aria-busy={saving}>{sorted.map((r) => {
+          const index = editable.findIndex((item) => item.id === r.id);
+          return <li key={r.id} className={`role-sort-row${r.id === sel ? " active" : ""}${dragId === r.id ? " is-dragging" : ""}${drop?.id === r.id ? (drop.after ? " drop-after" : " drop-before") : ""}`}
+            onDragOver={(e) => {
+              if (!dragId || dragId === r.id || index < 0 || saving) return;
+              e.preventDefault(); e.dataTransfer.dropEffect = "move";
+              const rect = e.currentTarget.getBoundingClientRect();
+              setDrop({ id: r.id, after: e.clientY > rect.top + rect.height / 2 });
+            }}
+            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDrop(null); }}
+            onDrop={(e) => { e.preventDefault(); if (dragId && drop?.id === r.id) reorder(dragId, r.id, drop.after); setDragId(null); setDrop(null); }}>
+            {index >= 0 ? <button className="icon role-drag" draggable={!saving} disabled={saving} title={t("admin.dragItem", { name: r.name })} aria-label={t("admin.dragItem", { name: r.name })}
+              onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", r.id); if (e.currentTarget.parentElement) e.dataTransfer.setDragImage(e.currentTarget.parentElement, 16, 16); setDragId(r.id); }}
+              onDragEnd={() => { setDragId(null); setDrop(null); }}
+              onKeyDown={(e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); moveRole(r.id, e.key === "ArrowUp" ? -1 : 1); } }}><Icon name="grip-vertical" /></button> : <span className="role-fixed" title={t("admin.roleFixed")}><Icon name="lock" /></span>}
+            <button className="role-select" title={r.name} aria-pressed={r.id === sel} style={r.color ? { color: r.color } : undefined} onClick={() => setSel(r.id)}>{r.name}{r.isDefault && <span className="muted small"> {t("admin.defaultRole")}</span>}</button>
+            {index >= 0 && <div className="role-sort-actions">
+              <button className="icon" disabled={saving || index === 0} title={t("admin.up")} aria-label={`${r.name}: ${t("admin.up")}`} onClick={() => moveRole(r.id, -1)}><Icon name="chevron-up" /></button>
+              <button className="icon" disabled={saving || index === editable.length - 1} title={t("admin.down")} aria-label={`${r.name}: ${t("admin.down")}`} onClick={() => moveRole(r.id, 1)}><Icon name="chevron-down" /></button>
+            </div>}
+          </li>;
+        })}</ul>
+        <p className="muted small" role="status">{saving ? t("admin.orderSaving") : notice}</p>
         <div className="row">
           <input value={newName} placeholder={t("admin.newRole")} onChange={(e) => setNewName(e.target.value)} />
-          <button disabled={!newName.trim()} onClick={() => run(() => api.createRole({ name: newName.trim() }).then((r) => { setNewName(""); setSel(r.id); }))}>+</button>
+          <button disabled={saving || !newName.trim()} aria-label={t("admin.newRole")} onClick={() => run(() => api.createRole({ name: newName.trim() }).then((r) => { setNewName(""); setSel(r.id); }))}>+</button>
         </div>
       </div>
       {role && (
@@ -188,19 +168,24 @@ function RolesTab({ api, server, run }: { api: ServerApi; server: ServerState; r
           <div className="row">
             <input value={name} maxLength={32} onChange={(e) => setName(e.target.value)} disabled={role.isDefault} />
             <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
-            {!role.isDefault && <label className="row">{t("admin.position")} <input type="number" value={position} min={1} onChange={(e) => setPosition(Number(e.target.value))} style={{ width: "5rem" }} /></label>}
           </div>
-          <div className="perm-grid">
-            {names.map((n) => (
-              <label key={n} className="check">
-                <input type="checkbox" checked={(perms & Permission[n]) !== 0} onChange={(e) => setPerms(e.target.checked ? perms | Permission[n] : perms & ~Permission[n])} />
-                {t(`perm.${n}`)}
-              </label>
-            ))}
-          </div>
-          <p className="muted small">{t("admin.activePerms", { list: permissionNames(perms).join(", ") || t("admin.none") })}</p>
+          {/* Grouped and ordered by meaning (PERMISSION_GROUPS in the protocol package), not by bit number. */}
+          {PERMISSION_GROUPS.map((g) => (
+            <fieldset key={g.id} className="perm-group">
+              <legend>{t(`permGroup.${g.id}`)}</legend>
+              <div className="perm-grid">
+                {g.permissions.map((n) => (
+                  <label key={n} className="check">
+                    <input type="checkbox" checked={(perms & Permission[n]) !== 0} onChange={(e) => setPerms(e.target.checked ? perms | Permission[n] : perms & ~Permission[n])} />
+                    {t(`perm.${n}`)}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          ))}
+          <p className="muted small">{t("admin.activePerms", { list: active.join(", ") || t("admin.none") })}</p>
           <div className="row">
-            <button onClick={() => run(() => api.updateRole(role.id, { name: name.trim() || role.name, color, permissions: perms, ...(role.isDefault ? {} : { position }) }))}>{t("common.save")}</button>
+            <button onClick={() => run(() => api.updateRole(role.id, { name: name.trim() || role.name, color, permissions: perms }))}>{t("common.save")}</button>
             {!role.isDefault && <button className="danger" onClick={() => run(async () => { if (await askConfirm({ title: t("admin.deleteRoleTitle", { name: role.name }), text: t("admin.deleteRoleText"), confirmLabel: t("common.delete"), danger: true })) { await api.deleteRole(role.id); setSel(null); } })}>{t("common.delete")}</button>}
           </div>
           <p className="muted small">{t("admin.roleHint")}</p>

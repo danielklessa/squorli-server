@@ -1,4 +1,5 @@
 import type { VoiceClient, VideoTile } from "./voice/voiceClient";
+import { USER_VOLUME_MAX } from "./voice/userVolumes";
 import { Icon } from "./Icon";
 import { t } from "./i18n";
 
@@ -14,7 +15,8 @@ export function VideoAudioControls({ client, tile }: { client: VoiceClient; tile
     onDoubleClick={(event) => event.stopPropagation()}>
     <button className="icon" title={muteLabel} aria-label={muteLabel} aria-pressed={muted}
       onClick={() => client.toggleVideoAudioMuted(tile.id)}><Icon name={muted ? "volume-x" : "volume-2"} /></button>
-    <input type="range" min={0} max={1} step={0.01} value={volume} title={label} aria-label={label}
+    {/* A camera's audio is the person's microphone: the per-person volume, up to 200 % (same value as in the context menus). */}
+    <input type="range" min={0} max={tile.source === "screen" ? 1 : USER_VOLUME_MAX} step={0.01} value={volume} title={label} aria-label={label}
       onChange={(event) => client.setVideoAudioVolume(tile.id, Number(event.target.value))} />
     <output>{Math.round(volume * 100)}%</output>
   </div>;

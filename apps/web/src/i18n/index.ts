@@ -22,10 +22,27 @@ export function localePreference(): LocalePreference {
   try { const v = localStorage.getItem(STORAGE_KEY); return isLocale(v) ? v : "auto"; } catch { return "auto"; }
 }
 
+/** Store the choice without reloading (the store does that when the directory account's language arrives or after it pushed a change there). */
+export function storeLocalePreference(pref: LocalePreference): void {
+  try { if (pref === "auto") localStorage.removeItem(STORAGE_KEY); else localStorage.setItem(STORAGE_KEY, pref); } catch { /* private mode or similar */ }
+}
+
 /** Store the choice and reload so that every text (including the ones computed once at module load) follows it. */
 export function setLocalePreference(pref: LocalePreference): void {
-  try { if (pref === "auto") localStorage.removeItem(STORAGE_KEY); else localStorage.setItem(STORAGE_KEY, pref); } catch { /* private mode or similar */ }
+  storeLocalePreference(pref);
   window.location.reload();
+}
+
+/**
+ * The choice as the directory account last held it on this device (null = never in step). A local choice that differs from it
+ * was made by the user since (e.g. in the login footer) and wins over the account's; otherwise the account's wins.
+ */
+const ACCOUNT_KEY = "chat.locale.account";
+export function accountLocalePreference(): LocalePreference | null {
+  try { const v = localStorage.getItem(ACCOUNT_KEY); return v === "auto" || isLocale(v) ? v : null; } catch { return null; }
+}
+export function markAccountLocalePreference(pref: LocalePreference | null): void {
+  try { if (pref === null) localStorage.removeItem(ACCOUNT_KEY); else localStorage.setItem(ACCOUNT_KEY, pref); } catch { /* private mode or similar */ }
 }
 
 /** Browser language -> supported locale; English when none of the browser's languages is supported. */

@@ -1,7 +1,7 @@
 import {
   AccountStatus, Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, EmailCodeResponse, FriendSearchResponse, ServerLeaveResponse, ServerListResponse, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
   BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryActionMessage, directoryBackupMessage, directoryProfilePayload,
-  directoryRegisterMessage, directorySoundSettingsPayload, openBackup, type SoundSettings,
+  directoryRegisterMessage, directorySoundSettingsPayload, openBackup, type AccountSettings, type SoundSettings,
   type Attachment, type Category, type Channel, type Role,
 } from "@squorli/protocol";
 import { z } from "zod";
@@ -211,6 +211,14 @@ export async function directorySetSoundSettings(dirUrl: string, id: Identity, so
   const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
   const signature = await sign(id, directoryActionMessage(health.host, "sound-settings", ch.nonce, directorySoundSettingsPayload(soundSettings)));
   await directoryFetch(dirUrl, "POST", "/api/sound-settings", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, soundSettings });
+}
+/** All client settings in the account (signed; the JSON string itself is the signed payload): follow the account like the cue settings, which they include. */
+export async function directorySetSettings(dirUrl: string, id: Identity, accountSettings: AccountSettings): Promise<void> {
+  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
+  const settings = JSON.stringify(accountSettings);
+  const signature = await sign(id, directoryActionMessage(health.host, "settings", ch.nonce, settings));
+  await directoryFetch(dirUrl, "POST", "/api/settings", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, settings });
 }
 /** Delete your account on one chat server (host = its PUBLIC_DOMAIN): signed at the directory, which notifies the server; it confirms and deletes the user. */
 export async function directoryLeaveServer(dirUrl: string, id: Identity, server: string): Promise<ServerLeaveResponse> {

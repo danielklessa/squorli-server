@@ -5,6 +5,8 @@ import { ContextMenu, ContextSubmenu, type MenuAnchor } from "./ContextMenu";
 import type { ServerApi } from "./api";
 import { askConfirm, askInput } from "./dialogs";
 import { Icon } from "./Icon";
+import { UserVolumeControl } from "./UserVolumeControl";
+import type { VoiceClient } from "./voice/voiceClient";
 import { t } from "./i18n";
 
 type Props = {
@@ -15,10 +17,12 @@ type Props = {
   voice: Record<string, VoiceMember[]>; channels: Channel[];
   /** M7: friends via the directory; null = no directory socket (then no entries in the menu). */
   friends: { stateOf: (publicKey: string) => Friend["state"] | null; onRequest: (publicKey: string) => void; onMessage: (publicKey: string) => void } | null;
+  /** For the per-person playback volume in the menu. */
+  client: VoiceClient;
 };
 
 /** Right column: owners at the very top, then members grouped by highest role, online first. Context actions depending on permissions. */
-export function MemberList({ api, members, roles, myUserId, myPermissions, ownerId, voice, channels, friends }: Props) {
+export function MemberList({ api, members, roles, myUserId, myPermissions, ownerId, voice, channels, friends, client }: Props) {
   const [open, setOpen] = useState<({ userId: string } & MenuAnchor) | null>(null);
   const openMenu = (event: MouseEvent<HTMLButtonElement>, userId: string) => {
     event.preventDefault();
@@ -67,10 +71,9 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
                 <li key={m.userId} className={`member ${m.online ? "" : "offline"}`}>
                   <button className="member-btn" aria-haspopup="menu" aria-expanded={open?.userId === m.userId} onContextMenu={(e) => openMenu(e, m.userId)} onClick={(e) => openMenu(e, m.userId)}>
                     <Avatar name={m.displayName} online={m.online} />
-                    <span className="member-identity"><span style={r?.color ? { color: r.color } : undefined}>{m.displayName}</span>{m.handle && <small>@{m.handle}</small>}</span>
+                    <span className="member-identity"><span style={r?.color ? { color: r.color } : undefined}>{m.displayName}</span>{(m.handle || isMe) && <small>{m.handle && `@${m.handle}`}{m.handle && isMe && " "}{isMe && t("members.you")}</small>}</span>
                     {m.isOwner && <Icon name="crown" className="owner" title={t("members.owner")} />}
                     {m.streamBlocked && <Icon name="video-off" className="muted" title={t("members.streamBlocked")} />}
-                    {isMe && <span className="muted"> {t("members.you")}</span>}
                   </button>
                   {open?.userId === m.userId && (
                     <ContextMenu anchor={open} label={m.displayName} onClose={() => setOpen(null)}>
@@ -91,6 +94,7 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
                           </div>
                         );
                       })()}
+                      {!isMe && <UserVolumeControl client={client} publicKey={m.publicKey} />}
                       {canRoles && !isMe && roles.some((role) => !role.isDefault) && (
                         <ContextSubmenu label={t("members.roles")}>
                           {roles.filter((x) => !x.isDefault).map((x) => (

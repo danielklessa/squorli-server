@@ -58,8 +58,15 @@ describe("pop-out audio routing", () => {
     expect(share.volume).toBe(0.4);
     restore();
     expect(mic.volume).toBe(0.75);
+    // A camera's audio is the person's microphone = the per-person volume up to 200 %. Above 100 % needs the running
+    // Web Audio path; without it (as here) the element plays at 100 % while the chosen value is kept.
     client.setVideoAudioVolume("alice:camera", 2);
     expect(mic.volume).toBe(1);
+    expect(client.getVideoAudioVolume("alice:camera")).toBe(2);
+    expect(client.getUserVolume("id:alice")).toBe(2);
+    client.setUserVolume("id:alice", 0.5);
+    expect(mic.volume).toBe(0.5);
+    expect(share.volume).toBe(0.4);
     expect(client.getVideoAudioVolume("unknown:camera")).toBeNull();
   });
   it("moves camera voice and screen audio independently and restores the same elements", () => {

@@ -12,16 +12,21 @@ import { VoiceStage } from "./VoiceStage";
 import { CameraPicker } from "./CameraPicker";
 import { Icon } from "./Icon";
 import { askConfirm } from "./dialogs";
-import { ProfileDialog } from "./ProfileDialog";
+import type { MenuAnchor } from "./ContextMenu";
+import { MiniProfile } from "./MiniProfile";
+import { SettingsDialog, type SettingsTab } from "./SettingsDialog";
 import { applyBranding } from "./branding";
 import { ServerBrowser } from "./ServerBrowser";
 import { ServerRail, type RailServer } from "./ServerRail";
 import { loadVoiceSettings, saveVoiceSettings } from "./voice/settings";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
-import { Permission, directoryServerIconUrl, directoryServerUrl, displayNameOf, hasPermission } from "@squorli/protocol";
+import { Permission, directoryServerIconUrl, directoryServerUrl, displayNameOf, hasPermission, type Member } from "@squorli/protocol";
 import { Store, activeState, homeState, type State } from "./store";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
+import { videoAccessOf } from "./voice/videoAccess";
 import { t } from "./i18n";
+
+const peerKeysOf = (members: Member[]): Record<string, string> => Object.fromEntries(members.map((m) => [m.userId, m.publicKey]));
 
 export function App() {
   const store = useMemo(() => new Store(), []);
@@ -30,7 +35,12 @@ export function App() {
   const [voice, setVoice] = useState<VoiceState>(client.state);
   const [showAdmin, setShowAdmin] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
-  const [showProfile, setShowProfile] = useState(false);
+  /** Mini profile (click on your own name), anchored at the name in the dock. */
+  const [miniProfile, setMiniProfile] = useState<MenuAnchor | null>(null);
+  /** Settings dialog (gear): the category to open, null = closed. */
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null);
+  /** The settings dialog is capturing a new push-to-talk key; the dock's listener stays quiet meanwhile. */
+  const [capturingPttKey, setCapturingPttKey] = useState(false);
   const [showDebug, setShowDebug] = useState(() => new URLSearchParams(window.location.search).has("debug"));
   /** Stage (tiles/screen) instead of chat in the main area; voice keeps running independently. */
   const [stageOpen, setStageOpen] = useState(false);
@@ -74,6 +84,10 @@ export function App() {
   useEffect(() => client.subscribe(setVoice), [client]);
   // Cue settings reach the voice client from here, whether the user changed them or the directory account supplied them.
   useEffect(() => client.setSoundSettings(voiceSettings.sounds), [client, voiceSettings.sounds]);
+  // The same for the speech gate: the settings dialog only stores, a running connection follows from here.
+  useEffect(() => client.setMode(voiceSettings.mode), [client, voiceSettings.mode]);
+  useEffect(() => client.setThreshold(voiceSettings.vadThreshold), [client, voiceSettings.vadThreshold]);
+  useEffect(() => client.setHangover(voiceSettings.vadHangoverMs), [client, voiceSettings.vadHangoverMs]);
   useEffect(() => {
     // A kick, ban or session loss on the voice connection's server ends it.
     store.onRemoved = (host) => { if (host === voiceHostRef.current) { void client.leave(); setVoiceHost(null); } };
@@ -111,10 +125,12 @@ export function App() {
     if (voiceHostRef.current && voiceHostRef.current !== host) await leaveVoice();
     const { url, token } = await conn.api.rtcToken(channelId);
     const ice = new URLSearchParams(window.location.search).get("ice");
-    const ch = conn.state.server?.channels.find((c) => c.id === channelId);
+    const srv = conn.state.server;
+    const ch = srv?.channels.find((c) => c.id === channelId);
     await client.join(channelId, url, token, loadVoiceSettings(), {
       ...(ice === "relay" ? { iceTransportPolicy: "relay" as const } : {}),
       audio: { bitrate: ch?.audioBitrate ?? 64, stereo: ch?.audioStereo ?? false },
+      ...(srv ? { video: { access: videoAccessOf(srv), mayView: hasPermission(srv.myPermissions, Permission.VIEW_VIDEO) }, peerKeys: peerKeysOf(srv.members) } : {}),
     });
     setVoiceHost(host);
     conn.send({ type: "voice.join", channelId });
@@ -131,6 +147,16 @@ export function App() {
   useEffect(() => {
     if (voiceChannel) void client.setAudioProfile({ bitrate: voiceChannel.audioBitrate, stereo: voiceChannel.audioStereo });
   }, [client, voiceChannel?.audioBitrate, voiceChannel?.audioStereo]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Permission VIEW_VIDEO: roles or members changed -> the running connection restricts its camera/screen to the members
+  // who may watch (enforced by LiveKit), and stops receiving others' feeds when we lost the permission ourselves.
+  const voiceState = voiceServer?.server ?? null;
+  useEffect(() => {
+    if (voiceState) client.setVideoAccess(videoAccessOf(voiceState), hasPermission(voiceState.myPermissions, Permission.VIEW_VIDEO));
+  }, [client, voiceState?.roles, voiceState?.members, voiceState?.settings.ownerId, voiceState?.myPermissions]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Per-person playback volume is stored by public key; the voice client only sees LiveKit identities (user ids of this server).
+  useEffect(() => { if (voiceState) client.setPeerKeys(peerKeysOf(voiceState.members)); }, [client, voiceState?.members]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Moderation (M3): carry out a moderator's move or stop and tell the user what happened.
   useEffect(() => {
@@ -219,14 +245,14 @@ export function App() {
       <div className="left" id="app-navigation">
         {homeOpen ? <HomeSidebar state={state} store={store} members={server?.members ?? []} /> : server ? <Sidebar
           server={server} api={conn.api} currentChannelId={showStage && voiceChannel ? voiceChannel.id : active.currentChannelId} voice={active.voice}
-          voiceState={voiceHost === activeHost ? voice : null} unread={active.unread}
+          voiceState={voiceHost === activeHost ? voice : null} client={client} unread={active.unread}
           connection={active.connection} onSelect={(id) => { conn.selectChannel(id); setStageOpen(false); setNavigationOpen(false); }}
           onJoinVoice={(id) => { void joinVoice(activeHost, id).catch(() => {}); }} onOpenAdmin={() => setShowAdmin(true)} myUserId={active.userId ?? ""}
         /> : <nav className="sidebar"><header className="server-head"><img className="brand-mark" src="/brand/squorli-icon-small.svg" alt="" width="22" height="22" /><strong>{active.serverName ?? active.host}</strong></header></nav>}
         <VoiceDock client={client} voice={voice} channel={voiceChannel} serverName={voiceHost && voiceHost !== activeHost ? voiceServer?.server?.settings.name ?? voiceHost : null}
-          displayName={me?.displayName ?? home.me.displayName ?? "…"} onLeave={leaveVoice} onOpenProfile={() => setShowProfile(true)}
+          displayName={me?.displayName ?? home.me.displayName ?? "…"} onLeave={leaveVoice} onOpenProfile={setMiniProfile} onOpenSettings={() => setSettingsTab("profile")} pttSuspended={capturingPttKey}
           onOpenStage={voiceChannel && !showStage && voiceHost ? () => { store.openServer(voiceHost === state.homeHost ? homeDirHost : voiceHost); setStageOpen(true); } : null}
-          canStream={!!voiceServer?.server && hasPermission(voiceServer.server.myPermissions, Permission.STREAM_VIDEO)} soundSync={state.directoryUrl && state.directoryAccount ? "account" : "device"} soundSyncError={state.soundSyncError} onToggleCamera={toggleCamera} />
+          canStream={!!voiceServer?.server && hasPermission(voiceServer.server.myPermissions, Permission.STREAM_VIDEO)} onToggleCamera={toggleCamera} />
       </div>
 
       <main className="main">
@@ -251,15 +277,22 @@ export function App() {
       </main>
 
       {!homeOpen && server && <MemberList api={conn.api} members={server.members} roles={server.roles} myUserId={active.userId!} myPermissions={server.myPermissions} ownerId={server.settings.ownerId}
-        voice={active.voice} channels={server.channels} friends={friendsMenu} />}
+        voice={active.voice} channels={server.channels} friends={friendsMenu} client={client} />}
 
-      {showAdmin && server && <AdminPanel api={conn.api} server={server} directoryUrl={active.directoryUrl} onClose={() => setShowAdmin(false)} />}
+      {showAdmin && server && <AdminPanel api={conn.api} server={server} myUserId={active.userId!} directoryUrl={active.directoryUrl} onClose={() => setShowAdmin(false)} />}
       {cameraPick && <CameraPicker cameras={cameraPick} initial={voiceSettings.cameraDeviceId} initialBlur={voiceSettings.cameraBlur} onPick={(id, b) => { void pickCamera(id, b); }} onCancel={() => setCameraPick(null)} />}
-      {showProfile && active.me && (
-        <ProfileDialog api={conn.api} me={active.me} directoryUrl={state.directoryUrl} directoryAccount={state.directoryAccount} serverDomain={active.serverDomain}
-          onSaveDirectoryName={(s, n) => store.setDirectoryName(s, n)} onClose={() => setShowProfile(false)}
-          onLogout={() => { setShowProfile(false); void client.leave(); store.logout(); }}
-          onForget={() => { setShowProfile(false); void client.leave(); void store.forgetIdentity(); }} />
+      {miniProfile && active.me && (
+        <MiniProfile anchor={miniProfile} displayName={me?.displayName ?? active.me.displayName ?? "…"} storedName={active.me.displayName} handle={active.me.handle}
+          serverName={server?.settings.name ?? active.serverName} withDirectory={!!state.directoryAccount && !!active.serverDomain}
+          onSave={(n) => store.setServerDisplayName(n)} onOpenSettings={() => setSettingsTab("profile")} onClose={() => setMiniProfile(null)} />
+      )}
+      {settingsTab && active.me && (
+        <SettingsDialog api={conn.api} me={active.me} displayName={me?.displayName ?? active.me.displayName ?? "…"} directoryUrl={state.directoryUrl} directoryAccount={state.directoryAccount}
+          serverDomain={active.serverDomain} syncError={state.settingsSyncError} client={client} voice={voice} initialTab={settingsTab}
+          onSaveServerName={(n) => store.setServerDisplayName(n)} onSaveGlobalName={(n) => store.setDirectoryName(null, n)} onSetLocale={(pref) => store.setLocale(pref)}
+          onCapturingKey={setCapturingPttKey} onClose={() => setSettingsTab(null)}
+          onLogout={() => { setSettingsTab(null); void client.leave(); store.logout(); }}
+          onForget={() => { setSettingsTab(null); void client.leave(); void store.forgetIdentity(); }} />
       )}
     </div>
   );

@@ -103,7 +103,7 @@ export const BackupBlob = z.object({ handle: Handle, publicKey: PublicKey, ciphe
 
 // ---- M6c: signed account actions (authenticator, recovery codes, account status). Same pattern as registration
 // and backup: challenge + signature over host, nonce and payload (for actions with a code, the code is the payload).
-export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends", "server-leave", "sound-settings", "email-set", "email-verify", "email-code"]);
+export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends", "server-leave", "sound-settings", "email-set", "email-verify", "email-code", "settings"]);
 export type DirectoryAction = z.infer<typeof DirectoryAction>;
 export function directoryActionMessage(directoryHost: string, action: DirectoryAction, nonce: string, payload = ""): string {
   return `community-directory-${action}\n${directoryHost}\n${nonce}\n${payload}`;
@@ -148,6 +148,42 @@ export function directorySoundSettingsPayload(s: SoundSettings): string {
   return `${bit(s.selfJoin)}${bit(s.selfLeave)}${bit(s.peerJoin)}${bit(s.peerLeave)}\n${s.volume}`;
 }
 export const SoundSettingsUpdateRequest = SignedActionRequest.extend({ soundSettings: SoundSettings });
+
+// ---- All client settings in the account (17 September 2026, user's wish: every user setting follows the directory account and can be
+// changed from the client of any chat server). Everything except the device selection (microphone, outputs, camera: device ids are
+// per browser) lives here. Every field has a default, so objects stored by older clients stay valid. Written with the signed action
+// `settings`: the request carries the settings as a JSON *string* and exactly that string is the signature's payload (no canonical
+// form needed); the directory parses it with `AccountSettings` afterwards. `sound-settings` stays for clients that predate this; the
+// directory keeps `sounds` here and the older `soundSettings` in step.
+export const ACCOUNT_SETTINGS_MAX_LENGTH = 4000;
+export const AccountSettings = z.object({
+  /** UI language of the chat client ("auto" = follow the browser). */
+  locale: z.enum(["auto", "de", "en"]).default("auto"),
+  voice: z.object({
+    mode: z.enum(["vad", "ptt"]).default("vad"),
+    /** KeyboardEvent.code, e.g. "Space". */
+    pttKey: z.string().min(1).max(40).default("Space"),
+    vadThreshold: z.number().min(0).max(1).default(0.04),
+    vadHangoverMs: z.number().int().min(100).max(1500).default(400),
+  }).default({}),
+  camera: z.object({
+    quality: z.enum(["360p", "720p"]).default("720p"),
+    /** Background blur radius, 0 = off. */
+    blur: z.number().min(0).max(100).default(0),
+  }).default({}),
+  sounds: SoundSettings.default({ selfJoin: true, selfLeave: true, peerJoin: true, peerLeave: true, volume: 0.6 }),
+  stage: z.object({
+    /** Speaker view: may you yourself be shown large as the active speaker? */
+    featureSelf: z.boolean().default(true),
+  }).default({}),
+});
+export type AccountSettings = z.infer<typeof AccountSettings>;
+export const AccountSettingsUpdateRequest = SignedActionRequest.extend({ settings: z.string().min(2).max(ACCOUNT_SETTINGS_MAX_LENGTH) });
+/** The settings in a stored or received JSON string; null when it is not valid JSON or does not fit the schema. */
+export function parseAccountSettings(json: string | null | undefined): AccountSettings | null {
+  if (!json) return null;
+  try { const r = AccountSettings.safeParse(JSON.parse(json)); return r.success ? r.data : null; } catch { return null; }
+}
 /** A chat server that has looked up the key (a sign-in there), with the display name that applies there (account page). `verified` = registered with the directory. */
 export const AccountServer = z.object({
   host: ServerHost, name: z.string().nullable(), displayName: DisplayName.nullable(), lastSeenAt: Iso, verified: z.boolean().default(false),
@@ -251,6 +287,8 @@ export const AccountStatus = DirectoryAccount.extend({
   servers: z.array(AccountServer),
   /** Voice cue settings stored in the account; null = never set (the client keeps its per-device settings). */
   soundSettings: SoundSettings.nullable().default(null),
+  /** All client settings stored in the account (action `settings`); null = never set or a directory that predates them. */
+  settings: AccountSettings.nullable().default(null),
   /** Confirmed e-mail address (null = none) and an address waiting for its confirmation code (null = none). */
   email: EmailAddress.nullable().default(null),
   emailPending: EmailAddress.nullable().default(null),
@@ -261,8 +299,8 @@ export const DirectoryHealth = z.object({
   service: z.literal("directory"),
   /** Host that registration signatures are bound to. */
   host: z.string(),
-  /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. `email`: SMTP configured (address, notices, e-mail code). */
-  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false) }),
+  /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. `email`: SMTP configured (address, notices, e-mail code). `settings`: the account stores all client settings (action `settings`). */
+  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false), settings: z.boolean().default(false) }),
   time: Iso,
 });
 

@@ -2,7 +2,9 @@ import { Avatar } from "./Avatar";
 import { Permission, hasPermission, type Channel, type ServerState, type VoiceMember } from "@squorli/protocol";
 import { useState } from "react";
 import type { ServerApi } from "./api";
-import type { VoiceState } from "./voice/voiceClient";
+import { ContextMenu, type MenuAnchor } from "./ContextMenu";
+import { UserVolumeControl } from "./UserVolumeControl";
+import type { VoiceClient, VoiceState } from "./voice/voiceClient";
 import { Icon } from "./Icon";
 import { t, tOr } from "./i18n";
 
@@ -14,6 +16,8 @@ type Props = {
   voice: Record<string, VoiceMember[]>;
   /** Your own voice connection if it belongs to this server; otherwise null (multi-server client). */
   voiceState: VoiceState | null;
+  /** For the per-person playback volume in the voice members' context menu. */
+  client: VoiceClient;
   unread: Record<string, boolean>;
   connection: string;
   onSelect: (channelId: string) => void;
@@ -22,7 +26,10 @@ type Props = {
   myUserId: string;
 };
 
-export function Sidebar({ server, api, currentChannelId, voice, voiceState, unread, connection, onSelect, onJoinVoice, onOpenAdmin, myUserId }: Props) {
+export function Sidebar({ server, api, currentChannelId, voice, voiceState, client, unread, connection, onSelect, onJoinVoice, onOpenAdmin, myUserId }: Props) {
+  // Right-click on a voice member: how loud to play them back (not for yourself).
+  const [menu, setMenu] = useState<({ userId: string } & MenuAnchor) | null>(null);
+  const menuMember = menu ? server.members.find((m) => m.userId === menu.userId) ?? null : null;
   // Drag & drop: drag a voice participant onto another voice channel (yourself always, others with MODERATE_VOICE).
   const canModerate = hasPermission(server.myPermissions, Permission.MODERATE_VOICE);
   const [dragging, setDragging] = useState<{ userId: string; from: string } | null>(null);
@@ -66,8 +73,9 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, unre
             {members.map((m) => {
               const p = voiceState?.channelId === c.id ? voiceState.participants.find((x) => x.identity === m.userId) : undefined;
               const draggable = canDrag(m.userId);
-              return <li key={m.userId} className={`${p?.speaking ? "speaking" : ""} ${draggable ? "draggable" : ""} ${dragging?.userId === m.userId ? "dragging" : ""}`}
+              return <li key={m.userId} className={`${p?.speaking ? "speaking" : ""} ${draggable ? "draggable" : ""} ${dragging?.userId === m.userId ? "dragging" : ""} ${menu?.userId === m.userId ? "menu-open" : ""}`}
                 draggable={draggable} title={draggable ? t("sidebar.dragHint") : undefined}
+                onContextMenu={(e) => { if (m.userId === myUserId) return; e.preventDefault(); setMenu({ userId: m.userId, trigger: e.currentTarget, x: e.clientX, y: e.clientY }); }}
                 onDragStart={(e) => { if (!draggable) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", m.userId); setDragging({ userId: m.userId, from: c.id }); }}
                 onDragEnd={() => { setDragging(null); setDropTarget(null); }}><Avatar name={m.displayName} size="small" /><span className="member-name">{m.displayName}</span>{p?.micMuted && <Icon name="mic-off" className="muted" title={t("voice.micMuted")} />}{p?.deafened && <Icon name="headphone-off" className="muted" title={t("voice.deafened")} />}{p?.cameraOn && <Icon name="video" title={t("voice.cameraOn")} />}{p?.screenOn && <Icon name="screen-share" title={t("voice.sharingScreen")} />}</li>;
             })}
@@ -85,6 +93,12 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, unre
         {connection !== "connected" && <span className="muted"> · {tOr(`conn.${connection}`, connection)}</span>}
         {canAdmin && <button className="icon" title={t("sidebar.admin")} onClick={onOpenAdmin}><Icon name="settings" /></button>}
       </header>
+      {menu && menuMember && (
+        <ContextMenu anchor={menu} label={menuMember.displayName} onClose={() => setMenu(null)}>
+          <div className="context-identity" role="presentation"><Avatar name={menuMember.displayName} online={menuMember.online} /><strong>{menuMember.displayName}</strong></div>
+          <UserVolumeControl client={client} publicKey={menuMember.publicKey} />
+        </ContextMenu>
+      )}
       {dragErr && <p className="error small" style={{ padding: "0 0.9rem" }}>{dragErr}</p>}
       <div className="channel-list">
         {groups.map((g) => (

@@ -27,6 +27,8 @@ export type VoiceSettings = {
   cameraBlur: number;
   /** Cues when you or someone else joins or leaves the voice room; each one switchable. With a directory account these follow the account. */
   sounds: SoundSettings;
+  /** Speaker view of the stage: may you yourself be shown large as the active speaker? Off = only others are featured. */
+  featureSelfInSpeakerView: boolean;
 };
 
 /** Who changed the settings: the user on this device, or the directory account (applied from the account, not pushed back). */
@@ -46,6 +48,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   cameraQuality: "720p",
   cameraBlur: 0,
   sounds: { ...DEFAULT_SOUND_SETTINGS },
+  featureSelfInSpeakerView: true,
 };
 
 function readStored(): VoiceSettings {

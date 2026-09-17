@@ -285,6 +285,12 @@ export class ServerConnection {
   }
 
   // ---------- Channels and messages
+  /** Change your display name on this server; `me` follows right away (the member list follows via the server's broadcast). */
+  async updateDisplayName(displayName: string | null): Promise<void> {
+    const me = await this.api.updateMe(displayName);
+    this.set({ me });
+  }
+
   selectChannel(channelId: string) {
     this.set({ currentChannelId: channelId, unread: { ...this.state.unread, [channelId]: false } });
     if (!this.state.messages[channelId]?.loaded) void this.loadHistory(channelId);

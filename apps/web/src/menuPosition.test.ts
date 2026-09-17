@@ -13,6 +13,12 @@ describe("context menu placement", () => {
   it("preserves a reachable top edge for oversized scrollable menus", () => {
     expect(menuPosition({ x: -5, y: 0 }, menu, { width: 280, height: 200 })).toEqual({ left: 8, top: 8 });
   });
+  it("grows upwards from its bottom edge when asked to", () => {
+    expect(menuPosition({ x: 96, y: 650, above: true }, menu, viewport)).toEqual({ left: 96, top: 250 });
+  });
+  it("keeps an upward menu inside the viewport", () => {
+    expect(menuPosition({ x: 96, y: 300, above: true }, menu, viewport)).toEqual({ left: 96, top: 8 });
+  });
   it("opens a submenu to the right when space allows", () => {
     expect(submenuPosition({ left: 400, right: 672, top: 100 }, menu, viewport)).toEqual({ left: 672, top: 100 });
   });

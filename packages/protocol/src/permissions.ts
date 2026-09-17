@@ -17,6 +17,7 @@ export const Permission = {
   ATTACH_FILES: 1 << 11,
   STREAM_VIDEO: 1 << 12,
   MODERATE_VOICE: 1 << 13,
+  VIEW_VIDEO: 1 << 14,
 } as const;
 
 export type PermissionName = keyof typeof Permission;
@@ -36,17 +37,35 @@ export const PERMISSION_LABELS: Record<PermissionName, string> = {
   ATTACH_FILES: "Dateien anhängen",
   STREAM_VIDEO: "Kamera und Bildschirm teilen",
   MODERATE_VOICE: "Sprachkanäle moderieren (verschieben, Kamera/Bildschirm beenden, Streamen sperren)",
+  VIEW_VIDEO: "Kamera- und Bildschirmübertragungen sehen",
 };
+
+/**
+ * How the permissions are shown to an admin (role editor): groups in this order. Administration comes first with
+ * ADMINISTRATOR at its top (user decision of 2026-09-17); otherwise a group runs from everyday to powerful.
+ * The bit order above is history (append only) and says nothing about meaning, so display order lives here.
+ * Every permission belongs to exactly one group (pinned by a test). A new permission is sorted in where it belongs by
+ * meaning, never just appended; check on each addition whether the grouping as a whole still reads well.
+ */
+export const PERMISSION_GROUPS = [
+  { id: "admin", permissions: ["ADMINISTRATOR", "MANAGE_CHANNELS", "MANAGE_ROLES", "MANAGE_SERVER"] },
+  { id: "text", permissions: ["VIEW_CHANNELS", "SEND_MESSAGES", "ATTACH_FILES", "MANAGE_MESSAGES"] },
+  { id: "voice", permissions: ["CONNECT_VOICE", "VIEW_VIDEO", "STREAM_VIDEO", "MODERATE_VOICE"] },
+  { id: "members", permissions: ["CREATE_INVITES", "KICK_MEMBERS", "BAN_MEMBERS"] },
+] as const satisfies readonly { id: string; permissions: readonly PermissionName[] }[];
+
+export type PermissionGroupId = (typeof PERMISSION_GROUPS)[number]["id"];
 
 /**
  * Default role "guest" (everyone gets it on joining): only view channels and enter voice channels.
  * User decision of 2026-09-13. Everything else via the "member" role, which admins grant.
+ * Guests hear a voice channel but do not see camera or screen (no VIEW_VIDEO, user decision of 2026-09-17).
  */
 export const DEFAULT_EVERYONE_PERMISSIONS = Permission.VIEW_CHANNELS | Permission.CONNECT_VOICE;
 
-/** Role "member" (created on first start, not granted automatically): post, attach, invite, camera/screen. */
+/** Role "member" (created on first start, not granted automatically): post, attach, invite, share and watch camera/screen. */
 export const DEFAULT_MEMBER_PERMISSIONS =
-  DEFAULT_EVERYONE_PERMISSIONS | Permission.SEND_MESSAGES | Permission.ATTACH_FILES | Permission.CREATE_INVITES | Permission.STREAM_VIDEO;
+  DEFAULT_EVERYONE_PERMISSIONS | Permission.SEND_MESSAGES | Permission.ATTACH_FILES | Permission.CREATE_INVITES | Permission.STREAM_VIDEO | Permission.VIEW_VIDEO;
 
 export const ALL_PERMISSIONS = Object.values(Permission).reduce((a, b) => a | b, 0);
 

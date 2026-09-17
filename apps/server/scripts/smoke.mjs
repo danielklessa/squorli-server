@@ -16,7 +16,7 @@ const OWNER_FILE = join(dirname(fileURLToPath(import.meta.url)), ".smoke-owner.j
 const hex = (b) => Buffer.from(b).toString("hex");
 let failures = 0;
 const check = (label, ok, detail = "") => { console.log(`${ok ? "ok  " : "FAIL"} ${label}${detail ? " " + detail : ""}`); if (!ok) failures++; };
-const P = { ADMINISTRATOR: 1, MANAGE_CHANNELS: 4, KICK_MEMBERS: 16, VIEW_CHANNELS: 128, SEND_MESSAGES: 256, MANAGE_MESSAGES: 512, CONNECT_VOICE: 1024, STREAM_VIDEO: 4096, MODERATE_VOICE: 8192 };
+const P = { ADMINISTRATOR: 1, MANAGE_CHANNELS: 4, KICK_MEMBERS: 16, VIEW_CHANNELS: 128, SEND_MESSAGES: 256, MANAGE_MESSAGES: 512, CONNECT_VOICE: 1024, STREAM_VIDEO: 4096, MODERATE_VOICE: 8192, VIEW_VIDEO: 16384 };
 
 async function api(method, path, body, token, raw = false, extraHeaders = {}) {
   const headers = { ...extraHeaders };
@@ -141,7 +141,7 @@ const defaultRole = ownerState.roles.find((r) => r.isDefault);
 check("default role exists", !!defaultRole);
 check("default role = Gast: nur sehen + Sprache", defaultRole?.name === "Gast" && defaultRole.permissions === (P.VIEW_CHANNELS | P.CONNECT_VOICE));
 const memberRole = ownerState.roles.find((r) => r.name === "Mitglied" && !r.isDefault);
-check("role Mitglied exists", !!memberRole && (memberRole.permissions & P.SEND_MESSAGES) !== 0 && (memberRole.permissions & P.STREAM_VIDEO) !== 0);
+check("role Mitglied exists", !!memberRole && (memberRole.permissions & P.SEND_MESSAGES) !== 0 && (memberRole.permissions & P.STREAM_VIDEO) !== 0 && (memberRole.permissions & P.VIEW_VIDEO) !== 0);
 
 // server not open (default) so the invite logic applies
 await api("PATCH", "/api/settings", { openJoin: false, name: "Rauchtest-Server" }, owner.token);
@@ -358,6 +358,14 @@ check("rtc-token owner: mic+camera+screen+screen audio", ["microphone", "camera"
 await api("PATCH", `/api/roles/${memberRole.id}`, { permissions: memberRole.permissions & ~P.STREAM_VIDEO }, owner.token);
 const [, bTok] = await api("POST", "/api/rtc-token", { channelId: voiceCh.id }, B.token);
 check("rtc-token ohne STREAM_VIDEO: nur Mikrofon", JSON.stringify(grantOf(bTok.token).canPublishSources) === JSON.stringify(["microphone"]));
+await api("PATCH", `/api/roles/${memberRole.id}`, { permissions: memberRole.permissions }, owner.token);
+// VIEW_VIDEO (guests lack it, "Mitglied" has it): the app server only reports it (`me`, roles); the senders' clients
+// restrict their tracks at LiveKit. Voice itself stays allowed.
+const [, stView] = await api("GET", "/api/state", undefined, B.token);
+await api("PATCH", `/api/roles/${memberRole.id}`, { permissions: memberRole.permissions & ~P.VIEW_VIDEO }, owner.token);
+const [, stNoView] = await api("GET", "/api/state", undefined, B.token);
+const [sNoView] = await api("POST", "/api/rtc-token", { channelId: voiceCh.id }, B.token);
+check("VIEW_VIDEO via Mitglied; without it: state reports it, voice token still issued", (stView.myPermissions & P.VIEW_VIDEO) !== 0 && (stNoView.myPermissions & P.VIEW_VIDEO) === 0 && sNoView === 200);
 await api("PATCH", `/api/roles/${memberRole.id}`, { permissions: memberRole.permissions }, owner.token);
 
 // ---------- Voice channel moderation (M3): move, stop camera/screen, block streaming

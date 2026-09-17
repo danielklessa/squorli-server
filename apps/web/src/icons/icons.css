@@ -7,13 +7,16 @@
 .ic-check::before { content: "\e06c"; }
 .ic-chevron-down::before { content: "\e06d"; }
 .ic-chevron-up::before { content: "\e070"; }
+.ic-cloud::before { content: "\e088"; }
 .ic-compass::before { content: "\e09b"; }
 .ic-crown::before { content: "\e1d6"; }
 .ic-external-link::before { content: "\e0b9"; }
+.ic-grip-vertical::before { content: "\e0eb"; }
 .ic-hash::before { content: "\e0ef"; }
 .ic-headphone-off::before { content: "\e62d"; }
 .ic-headphones::before { content: "\e0f1"; }
 .ic-key-round::before { content: "\e4a7"; }
+.ic-languages::before { content: "\e0fe"; }
 .ic-link::before { content: "\e102"; }
 .ic-lock::before { content: "\e10b"; }
 .ic-maximize::before { content: "\e112"; }
@@ -28,6 +31,7 @@
 .ic-phone::before { content: "\e133"; }
 .ic-pin::before { content: "\e259"; }
 .ic-play::before { content: "\e13c"; }
+.ic-rotate-ccw::before { content: "\e148"; }
 .ic-screen-share::before { content: "\e14f"; }
 .ic-screen-share-off::before { content: "\e150"; }
 .ic-server::before { content: "\e153"; }

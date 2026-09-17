@@ -3,12 +3,14 @@ import { createPortal } from "react-dom";
 import { Icon } from "./Icon";
 import { menuPosition, submenuPosition } from "./menuPosition";
 
-export type MenuAnchor = { x: number; y: number; trigger: HTMLElement };
+/** `above`: open upwards with the bottom edge at `y` instead of downwards from it. `width`: fixed width in px instead of the menu's own (to match the element it belongs to). */
+export type MenuAnchor = { x: number; y: number; trigger: HTMLElement; above?: boolean; width?: number };
 
 function navigate(event: KeyboardEvent<HTMLElement>) {
   const panel = (event.target as HTMLElement).closest<HTMLElement>('[role="menu"]');
   if (!panel) return;
-  const items = [...panel.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]')]
+  // data-menu-item: controls that are no buttons (the volume slider) but belong to the arrow-key order.
+  const items = [...panel.querySelectorAll<HTMLButtonElement | HTMLInputElement>('[role^="menuitem"], [data-menu-item]')]
     .filter((item) => !item.disabled && item.closest('[role="menu"]') === panel);
   const index = items.indexOf(document.activeElement as HTMLButtonElement);
   let next: number;
@@ -59,7 +61,7 @@ export function ContextMenu({ anchor, label, onClose, children }: {
     };
   }, [anchor]);
   return createPortal(
-    <div ref={ref} className="user-context-menu" role="menu" aria-label={label} tabIndex={-1} style={position}
+    <div ref={ref} className="user-context-menu" role="menu" aria-label={label} tabIndex={-1} style={anchor.width ? { ...position, width: anchor.width } : position}
       onKeyDown={navigate} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}>
       {children}
     </div>, document.body,

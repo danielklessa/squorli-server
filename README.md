@@ -64,6 +64,8 @@ The first user who logs in becomes the owner (or the key given in `OWNER_PUBLIC_
 
 New members are guests (view and voice only). Admins grant the member role via the member list, which unlocks writing, files, camera and screen share.
 
+Guests hear a voice channel but do not see what others share there: without the permission "Watch camera and screen shares" a member receives no camera, screen share or screen audio. The member role has it; to let guests watch too, tick it on the guest role (admin panel, Roles). When updating an existing server, every role except the guest role receives the permission automatically. The restriction works once everybody in the channel runs a client that knows the permission (reload the page after updating the server).
+
 ## Configuration
 
 All variables are documented in [.env.example](.env.example). The most relevant optional ones:
