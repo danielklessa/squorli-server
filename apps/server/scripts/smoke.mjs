@@ -330,6 +330,49 @@ const [, page2] = await api("GET", `/api/channels/${textCh.id}/messages?limit=10
 check("history paging", sh === 200 && page1.messages.length === 2 && page1.hasMore === true && page2.messages.length === 3 && page2.hasMore === false
   && page2.messages[0].id === msg1.id, `seq ${page1.messages.map((m) => m.seq)} | ${page2.messages.map((m) => m.seq)}`);
 
+// Read states (all devices of a member): B joined in this run and has never opened the channel, so the owner's messages count
+const readOf = async (token) => { const [s, body] = await api("GET", "/api/read-state", undefined, token); return [s, body?.channels?.find((c) => c.channelId === textCh.id)]; };
+const [srs1, rs1] = await readOf(B.token);
+check("read state: unread since joining, own messages do not count", srs1 === 200 && rs1?.lastReadSeq === null && rs1.unread === true && rs1.mentions === 0 && rs1.latestSeq === page1.messages[1].seq, JSON.stringify(rs1));
+const [, mention] = await api("POST", `/api/channels/${textCh.id}/messages`, { content: `Hallo <@${B.userId}>, schau mal` }, owner.token);
+const [, rs2] = await readOf(B.token);
+check("read state: mention counted", rs2?.unread === true && rs2.mentions === 1 && rs2.latestSeq === mention.seq, JSON.stringify(rs2));
+const [sack, ack] = await api("POST", `/api/channels/${textCh.id}/read`, { seq: mention.seq }, B.token);
+const evRead = await wsB.waitFor((e) => e.type === "read.update" && e.channelId === textCh.id).catch(() => null);
+const [, rs3] = await readOf(B.token);
+check("mark read: clears marks, tells my own connections only", sack === 200 && ack.lastReadSeq === mention.seq && evRead?.lastReadSeq === mention.seq
+  && rs3?.unread === false && rs3.mentions === 0 && rs3.lastReadSeq === mention.seq && !wsA.events.some((e) => e.type === "read.update"), JSON.stringify(rs3));
+const [, ackBack] = await api("POST", `/api/channels/${textCh.id}/read`, { seq: 0 }, B.token);
+const [, ackFuture] = await api("POST", `/api/channels/${textCh.id}/read`, { seq: 2 ** 40 }, B.token);
+check("mark read: never backwards, never beyond the newest message", ackBack.lastReadSeq === mention.seq && ackFuture.lastReadSeq === mention.seq, `${ackBack.lastReadSeq} ${ackFuture.lastReadSeq}`);
+const [sackVoice] = await api("POST", `/api/channels/${voiceCh.id}/read`, { seq: 1 }, B.token);
+const [sackBad] = await api("POST", `/api/channels/${textCh.id}/read`, { seq: -1 }, B.token);
+const [sackAnon] = await api("GET", "/api/read-state");
+check("mark read: text channels only, valid input, signed in", sackVoice === 404 && sackBad === 400 && sackAnon === 401, `${sackVoice} ${sackBad} ${sackAnon}`);
+await api("POST", `/api/channels/${textCh.id}/messages`, { content: "danach" }, owner.token);
+const [, rs4] = await readOf(B.token);
+check("read state: a newer message marks the channel again", rs4?.unread === true && rs4.mentions === 0);
+
+// Mutes (per member, all their devices): a channel and the whole server
+const [smu1, mu1] = await api("PUT", `/api/channels/${textCh.id}/mute`, { muted: true }, B.token);
+const evMute = await wsB.waitFor((e) => e.type === "mute.update" && e.channelIds?.includes(textCh.id)).catch(() => null);
+const [, rsMuted] = await api("GET", "/api/read-state", undefined, B.token);
+const [, rsOwner] = await api("GET", "/api/read-state", undefined, owner.token);
+check("mute channel: stored for me only, told to my connections", smu1 === 200 && mu1.channelIds.includes(textCh.id) && mu1.serverMuted === false && !!evMute
+  && rsMuted.channels.find((c) => c.channelId === textCh.id)?.muted === true && rsOwner.channels.find((c) => c.channelId === textCh.id)?.muted === false
+  && !wsA.events.some((e) => e.type === "mute.update"));
+const [smu2, mu2] = await api("PUT", "/api/me/mute", { muted: true }, B.token);
+const [, rsServer] = await api("GET", "/api/read-state", undefined, B.token);
+check("mute server", smu2 === 200 && mu2.serverMuted === true && mu2.channelIds.includes(textCh.id) && rsServer.serverMuted === true && rsOwner.serverMuted === false);
+await api("PUT", `/api/channels/${textCh.id}/mute`, { muted: true }, B.token);   // twice = still once
+const [, mu3] = await api("PUT", `/api/channels/${textCh.id}/mute`, { muted: false }, B.token);
+const [, mu4] = await api("PUT", "/api/me/mute", { muted: false }, B.token);
+check("unmute channel and server", mu3.channelIds.length === 0 && mu3.serverMuted === true && mu4.serverMuted === false);
+const [smuVoice] = await api("PUT", `/api/channels/${voiceCh.id}/mute`, { muted: true }, B.token);
+const [smuBad] = await api("PUT", "/api/me/mute", { muted: "ja" }, B.token);
+const [smuAnon] = await api("PUT", "/api/me/mute", { muted: true });
+check("mute: text channels only, valid input, signed in", smuVoice === 404 && smuBad === 400 && smuAnon === 401, `${smuVoice} ${smuBad} ${smuAnon}`);
+
 // Deleting: a mod may delete others' messages, the author their own
 const [sd1] = await api("DELETE", `/api/messages/${page1.messages[1].id}`, undefined, B.token);
 const evDel = await wsA.waitFor((e) => e.type === "message.delete" && e.id === page1.messages[1].id).catch(() => null);

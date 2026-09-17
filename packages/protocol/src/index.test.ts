@@ -1,12 +1,26 @@
 import { describe, expect, it } from "vitest";
 import {
-  ClientEvent, CreateMessageRequest, DEFAULT_EVERYONE_PERMISSIONS, DEFAULT_MEMBER_PERMISSIONS, PERMISSION_GROUPS, Permission, RtcTokenRequest, ServerEvent,
+  ClientEvent, CreateMessageRequest, MarkReadRequest, MuteRequest, ReadStateResponse, DEFAULT_EVERYONE_PERMISSIONS, DEFAULT_MEMBER_PERMISSIONS, PERMISSION_GROUPS, Permission, RtcTokenRequest, ServerEvent,
   UpdateMeRequest, VerifyRequest, challengeMessage, displayNameOf, hasPermission, permissionNames,
 } from "./index";
 
 const U1 = "6f1c2a4e-1b2c-4d3e-8f90-123456789abc";
 
 describe("protocol", () => {
+  it("carries read states and the event for my other devices", () => {
+    expect(ReadStateResponse.safeParse({ channels: [{ channelId: U1, lastReadSeq: null, latestSeq: null, unread: false, mentions: 0 }, { channelId: U1, lastReadSeq: 4, latestSeq: 9, unread: true, mentions: 2 }] }).success).toBe(true);
+    expect(ReadStateResponse.safeParse({ channels: [{ channelId: U1, lastReadSeq: 4, latestSeq: 9, unread: true, mentions: -1 }] }).success).toBe(false);
+    expect(MarkReadRequest.safeParse({ seq: 12 }).success).toBe(true);
+    expect(MarkReadRequest.safeParse({ seq: -1 }).success).toBe(false);
+    expect(MarkReadRequest.safeParse({ seq: 1.5 }).success).toBe(false);
+    expect(ServerEvent.safeParse({ type: "read.update", channelId: U1, lastReadSeq: 12 }).success).toBe(true);
+    // Mutes: a server from before mutes leaves the fields out, the client reads that as "not muted".
+    const old = ReadStateResponse.parse({ channels: [{ channelId: U1, lastReadSeq: 4, latestSeq: 9, unread: true, mentions: 0 }] });
+    expect(old.serverMuted).toBe(false);
+    expect(old.channels[0]?.muted).toBe(false);
+    expect(ServerEvent.safeParse({ type: "mute.update", serverMuted: true, channelIds: [U1] }).success).toBe(true);
+    expect(MuteRequest.safeParse({ muted: "ja" }).success).toBe(false);
+  });
   it("parses a hello", () => {
     expect(ClientEvent.safeParse({ type: "hello", protocolVersion: 1, sessionToken: "x" }).success).toBe(true);
   });

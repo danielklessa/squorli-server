@@ -20,6 +20,7 @@ import { registerChannelRoutes } from "./routes/channels";
 import { registerInviteRoutes } from "./routes/invites";
 import { registerMemberRoutes } from "./routes/members";
 import { registerMessageRoutes } from "./routes/messages";
+import { registerReadStateRoutes } from "./routes/readState";
 import { registerRoleRoutes } from "./routes/roles";
 import { registerSettingsRoutes } from "./routes/settings";
 import { deleteUserAccount, type DeleteUserResult } from "./users/deleteUser";
@@ -128,6 +129,7 @@ async function main() {
   await registerMemberRoutes(app, db, hub, presence, new LivekitAdmin(config, app.log));
   await registerInviteRoutes(app, db);
   await registerMessageRoutes(app, db, hub);
+  await registerReadStateRoutes(app, db, hub);
   await registerAttachmentRoutes(app, db, config);
   await registerLivekitRoutes(app, db, config);
   await registerWs(app, db, hub, presence);

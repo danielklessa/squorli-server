@@ -1,7 +1,19 @@
-import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, memo, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { parseMarkdown, type Block, type Inline, type ListBlock, type TableBlock } from "./markdown";
 import { t } from "./i18n";
+
+/**
+ * Who a mention `<@userId>` is right now: the channel chat provides the names of its members and the own id (mentions of
+ * yourself stand out). Without a provider (direct messages) a token stays the text it is.
+ */
+export const MentionContext = createContext<{ names: ReadonlyMap<string, string>; me: string } | null>(null);
+
+function Mention({ userId }: { userId: string }) {
+  const ctx = useContext(MentionContext);
+  if (!ctx) return <>{`<@${userId}>`}</>;
+  return <span className={userId === ctx.me ? "mention me" : "mention"}>@{(ctx.names.get(userId) ?? t("chat.formerMember")).replace(/^@+/, "")}</span>;
+}
 
 /**
  * Message text as Markdown (channel chat and direct messages). The tree from `markdown.ts` becomes React elements, never
@@ -114,6 +126,7 @@ function renderInline(nodes: Inline[]): ReactNode[] {
       case "code": return <code key={i}>{n.text}</code>;
       // The title shows what was typed (":smile:", ":)"), so a conversion is never a riddle.
       case "emoji": return <span key={i} className="emoji" title={n.source ?? undefined}>{n.text}</span>;
+      case "mention": return <Mention key={i} userId={n.userId} />;
       case "strong": return <strong key={i}>{renderInline(n.children)}</strong>;
       case "em": return <em key={i}>{renderInline(n.children)}</em>;
       case "del": return <del key={i}>{renderInline(n.children)}</del>;

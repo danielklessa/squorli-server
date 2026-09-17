@@ -2,7 +2,7 @@ import {
   AccountStatus, Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, EmailCodeResponse, FriendSearchResponse, ServerLeaveResponse, ServerListResponse, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
   BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryActionMessage, directoryBackupMessage, directoryProfilePayload,
   directoryRegisterMessage, directorySoundSettingsPayload, openBackup, type AccountSettings, type SoundSettings,
-  type Attachment, type Category, type Channel, type Role,
+  MuteState, ReadStateResponse, type Attachment, type Category, type Channel, type Role,
 } from "@squorli/protocol";
 import { z } from "zod";
 import { type Identity, identityFromPrivateKey, sign } from "./identity";
@@ -67,6 +67,12 @@ export class ServerApi {
   getInvitePreview(code: string) { return this.request<InvitePreview>("GET", `/api/invites/${encodeURIComponent(code)}`, undefined, { auth: false }).then((p) => InvitePreview.parse(p)); }
 
   // ---------- Messages
+  /** Read states kept by the server (all my devices). Older servers answer 404: the caller falls back to the per-device state. */
+  getReadState() { return this.request<ReadStateResponse>("GET", "/api/read-state").then((p) => ReadStateResponse.parse(p)); }
+  /** Mute a text channel or this whole server for myself; the answer is my complete mute state. */
+  setChannelMuted(channelId: string, muted: boolean) { return this.request<MuteState>("PUT", `/api/channels/${channelId}/mute`, { muted }).then((p) => MuteState.parse(p)); }
+  setServerMuted(muted: boolean) { return this.request<MuteState>("PUT", "/api/me/mute", { muted }).then((p) => MuteState.parse(p)); }
+  markRead(channelId: string, seq: number) { return this.request<{ lastReadSeq: number }>("POST", `/api/channels/${channelId}/read`, { seq }); }
   getMessages(channelId: string, before?: number) {
     return this.request<MessagePage>("GET", `/api/channels/${channelId}/messages?limit=50${before ? `&before=${before}` : ""}`).then((p) => MessagePage.parse(p));
   }

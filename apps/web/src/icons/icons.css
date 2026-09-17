@@ -3,6 +3,7 @@
 .ic { font-family: "lucide" !important; font-style: normal; font-weight: normal; line-height: 1; display: inline-block; vertical-align: -0.125em; -webkit-font-smoothing: antialiased; }
 .ic-ban::before { content: "\e051"; }
 .ic-bell::before { content: "\e059"; }
+.ic-bell-off::before { content: "\e05a"; }
 .ic-bug::before { content: "\e20c"; }
 .ic-check::before { content: "\e06c"; }
 .ic-chevron-down::before { content: "\e06d"; }

@@ -19,6 +19,12 @@ type Props = {
   /** For the per-person playback volume in the voice members' context menu. */
   client: VoiceClient;
   unread: Record<string, boolean>;
+  /** Unseen messages that mention me, per channel. */
+  mentions: Record<string, number>;
+  /** Channels I have muted; `canMute` = the server keeps mutes (offers the context menu). */
+  muted: Record<string, boolean>;
+  canMute: boolean;
+  onMuteChannel: (channelId: string, muted: boolean) => void;
   connection: string;
   onSelect: (channelId: string) => void;
   onJoinVoice: (channelId: string) => void;
@@ -26,9 +32,12 @@ type Props = {
   myUserId: string;
 };
 
-export function Sidebar({ server, api, currentChannelId, voice, voiceState, client, unread, connection, onSelect, onJoinVoice, onOpenAdmin, myUserId }: Props) {
+export function Sidebar({ server, api, currentChannelId, voice, voiceState, client, unread, mentions, muted, canMute, onMuteChannel, connection, onSelect, onJoinVoice, onOpenAdmin, myUserId }: Props) {
   // Right-click on a voice member: how loud to play them back (not for yourself).
   const [menu, setMenu] = useState<({ userId: string } & MenuAnchor) | null>(null);
+  // Right-click on a text channel: mute it for myself.
+  const [channelMenu, setChannelMenu] = useState<({ channelId: string } & MenuAnchor) | null>(null);
+  const menuChannel = channelMenu ? server.channels.find((c) => c.id === channelMenu.channelId) ?? null : null;
   const menuMember = menu ? server.members.find((m) => m.userId === menu.userId) ?? null : null;
   // Drag & drop: drag a voice participant onto another voice channel (yourself always, others with MODERATE_VOICE).
   const canModerate = hasPermission(server.myPermissions, Permission.MODERATE_VOICE);
@@ -59,14 +68,17 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, clie
     const joined = c.kind === "voice" && voiceState?.channelId === c.id;
     const droppable = c.kind === "voice" && dragging !== null && dragging.from !== c.id;
     return (
-      <li key={c.id} className={`channel ${active ? "active" : ""} ${joined ? "joined" : ""} ${unread[c.id] ? "unread" : ""} ${droppable ? "droppable" : ""} ${dropTarget === c.id ? "drop-target" : ""}`}
+      <li key={c.id} className={`channel ${active ? "active" : ""} ${joined ? "joined" : ""} ${unread[c.id] && !muted[c.id] ? "unread" : ""} ${(mentions[c.id] ?? 0) > 0 ? "mentioned" : ""} ${muted[c.id] ? "muted-channel" : ""} ${droppable ? "droppable" : ""} ${dropTarget === c.id ? "drop-target" : ""}`}
         onDragOver={(e) => { if (droppable) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dropTarget !== c.id) setDropTarget(c.id); } }}
         onDragLeave={(e) => { if (dropTarget === c.id && !e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(null); }}
         onDrop={(e) => { if (droppable) { e.preventDefault(); onDrop(c.id); } }}>
-        <button className="channel-btn" aria-current={active ? "page" : undefined} onClick={() => (c.kind === "text" ? onSelect(c.id) : onJoinVoice(c.id))} title={c.topic ?? undefined}>
+        <button className="channel-btn" aria-current={active ? "page" : undefined} onClick={() => (c.kind === "text" ? onSelect(c.id) : onJoinVoice(c.id))} title={c.topic ?? undefined}
+          onContextMenu={(e) => { if (c.kind !== "text" || !canMute) return; e.preventDefault(); setChannelMenu({ channelId: c.id, trigger: e.currentTarget, x: e.clientX, y: e.clientY }); }}>
           <span className="channel-icon"><Icon name={c.kind === "text" ? "hash" : "volume-2"} /></span>
           <span className="channel-name">{c.name}</span>
           {c.kind === "voice" && members.length > 0 && <span className="count">{members.length}</span>}
+          {muted[c.id] && <span className="channel-muted" title={t("sidebar.muted")}><Icon name="bell-off" /></span>}
+          {(mentions[c.id] ?? 0) > 0 && <span className="mention-badge" title={t("sidebar.mentions", { n: mentions[c.id] ?? 0 })}>{mentions[c.id]}</span>}
         </button>
         {c.kind === "voice" && members.length > 0 && (
           <ul className="voice-members">
@@ -93,6 +105,13 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, clie
         {connection !== "connected" && <span className="muted"> · {tOr(`conn.${connection}`, connection)}</span>}
         {canAdmin && <button className="icon" title={t("sidebar.admin")} onClick={onOpenAdmin}><Icon name="settings" /></button>}
       </header>
+      {channelMenu && menuChannel && (
+        <ContextMenu anchor={channelMenu} label={menuChannel.name} onClose={() => setChannelMenu(null)}>
+          <button role="menuitem" onClick={() => { onMuteChannel(menuChannel.id, !muted[menuChannel.id]); setChannelMenu(null); }}>
+            <Icon name={muted[menuChannel.id] ? "bell" : "bell-off"} /> {muted[menuChannel.id] ? t("sidebar.unmuteChannel") : t("sidebar.muteChannel")}
+          </button>
+        </ContextMenu>
+      )}
       {menu && menuMember && (
         <ContextMenu anchor={menu} label={menuMember.displayName} onClose={() => setMenu(null)}>
           <div className="context-identity" role="presentation"><Avatar name={menuMember.displayName} online={menuMember.online} /><strong>{menuMember.displayName}</strong></div>

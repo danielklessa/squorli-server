@@ -11,6 +11,7 @@ This README explains how to run your own Squorli server. Working on the code: [d
 ## What you get
 
 - Text channels with history, editing, deleting and attachments; voice channels with voice activation or push-to-talk.
+- Mentions with `@name` suggestions, a highlight for messages that mention you and counters per channel and server.
 - Markdown in messages (formatting, lists and task lists, tables, code blocks with a copy button) and emoji: an emoji picker, `:shortcodes:` and emoticons such as `:)`, shown in an emoji font that your own server delivers, so they look the same on every system and no font service is involved.
 - Camera and screen share (screen audio in Chromium browsers), tile and speaker view.
 - Categories, roles with permissions and hierarchy, invite links, kick and ban, admin panel in the browser.

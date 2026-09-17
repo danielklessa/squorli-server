@@ -1,4 +1,4 @@
-import { bigserial, boolean, index, integer, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, bigserial, boolean, index, integer, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 const ts = (name: string) => timestamp(name, { withTimezone: true });
 
@@ -54,6 +54,8 @@ export const members = pgTable("members", {
   streamBlocked: boolean("stream_blocked").notNull().default(false),
   /** Owner (several possible). The first one is additionally recorded in server_settings.owner_id and cannot be revoked. */
   isOwner: boolean("is_owner").notNull().default(false),
+  /** The member has muted this server: their clients show no unread mark for it on the server rail. */
+  muted: boolean("muted").notNull().default(false),
 });
 
 export const categories = pgTable("categories", {
@@ -123,6 +125,33 @@ export const messages = pgTable(
     editedAt: ts("edited_at"),
   },
   (t) => ({ byChannel: index("messages_channel_seq_idx").on(t.channelId, t.seq) }),
+);
+
+/**
+ * How far a member has read a text channel (`messages.seq`), so unread marks and mention counters are the same on every
+ * device. No row = never opened: then the messages since `members.joined_at` count (migration 0015 gave every existing
+ * member a row per channel at the newest message, so an update does not mark everything).
+ */
+export const readStates = pgTable(
+  "read_states",
+  {
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    channelId: uuid("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+    lastReadSeq: bigint("last_read_seq", { mode: "number" }).notNull(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.userId, t.channelId] }) }),
+);
+
+/** Text channels a member has muted (no unread mark; mentions still count). A row = muted. */
+export const channelMutes = pgTable(
+  "channel_mutes",
+  {
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    channelId: uuid("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+    createdAt: ts("created_at").notNull().defaultNow(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.userId, t.channelId] }) }),
 );
 
 /** The file lives under DATA_DIR/attachments/<id>; messageId is set when the message is sent. */

@@ -108,7 +108,9 @@ export class Store {
       onToken: (token) => this.storeToken(host, token),
       onSessionLost: (message) => this.sessionLost(host, message),
       onRemoved: () => this.onRemoved?.(host),
-      onConnected: () => { void this.refreshAccountServers(); },
+      // Your own server, or a server the rail does not list yet (first sign-in there): fetch the list again. Servers connected in the
+      // background are already on it, asking the directory once per server would be pointless.
+      onConnected: () => { if (host === this.homeHost || !(this.state.accountServers ?? []).some((s) => this.hostFor(s.host) === host)) void this.refreshAccountServers(); },
       onVoiceMoved: (channelId, by) => this.onVoiceMoved?.(host, channelId, by),
       onVoiceStop: (what, by) => this.onVoiceStop?.(host, what, by),
     });
@@ -175,6 +177,21 @@ export class Store {
     }
     const st = conn.state;
     if (st.connection === "idle" && !st.removed) void this.connectForeign(conn);
+  }
+  /**
+   * Connect every server of the rail in the background (signing in with your own key like `openServer`, but without showing
+   * it), so the rail can mark servers with unread messages and mentions, live. Only while signed in on your own server;
+   * a server whose account deletion is pending is left alone. Consequence: you are online on all your servers.
+   */
+  private connectAccountServers(servers: readonly AccountServer[]) {
+    if (!this.home.state.me) return;
+    for (const s of servers) {
+      const host = this.hostFor(s.host);
+      if (host === this.homeHost || s.leaveRequestedAt || this.conns.has(host)) continue;
+      const conn = this.createConnection(host, directoryServerUrl(host));
+      this.set({ servers: { ...this.state.servers, [host]: conn.state } });
+      void this.connectForeign(conn);
+    }
   }
   /** Try again (after an error or a removal). */
   retryServer(host: string) {
@@ -376,6 +393,7 @@ export class Store {
       const acc = this.state.directoryAccount;
       this.set({ accountServers: status.servers, ...(acc ? { directoryAccount: { ...acc, displayName: status.displayName } } : {}) });
       this.adoptAccountSettings(status);
+      this.connectAccountServers(status.servers);
     } catch (err) { console.warn("Serverliste vom Verzeichnis nicht verfuegbar", err); }
   }
 

@@ -227,6 +227,33 @@ export const CreateMessageRequest = z.object({
 export const UpdateMessageRequest = z.object({ content: MessageContent });
 export const MessagePage = z.object({ messages: z.array(Message), hasMore: z.boolean() });
 
+/**
+ * Read state of one text channel for the signed-in member, kept by the server so it holds on every device
+ * (GET /api/read-state). `lastReadSeq` null = never opened: then everything since joining counts. `unread` and `mentions`
+ * are computed by the server over messages of other people newer than the read state; `mentions` counts messages whose
+ * text contains the member's token `<@userId>`.
+ */
+export const ChannelReadState = z.object({
+  channelId: Uuid,
+  lastReadSeq: z.number().int().nullable(),
+  /** Newest message in the channel, null = empty. */
+  latestSeq: z.number().int().nullable(),
+  unread: z.boolean(),
+  mentions: z.number().int().min(0),
+  /** The member has muted this channel: clients show no unread mark for it (mentions still count). Default for servers from before mutes. */
+  muted: z.boolean().default(false),
+});
+export const ReadStateResponse = z.object({
+  channels: z.array(ChannelReadState),
+  /** The member has muted this whole server: no unread mark on the server rail (mentions still count). */
+  serverMuted: z.boolean().default(false),
+});
+/** PUT /api/channels/:id/mute and PUT /api/me/mute. */
+export const MuteRequest = z.object({ muted: z.boolean() });
+export const MuteState = z.object({ serverMuted: z.boolean(), channelIds: z.array(Uuid) });
+/** POST /api/channels/:id/read: everything up to `seq` has been seen. The server never moves a read state backwards. */
+export const MarkReadRequest = z.object({ seq: z.number().int().min(0) });
+
 /** The complete state a client needs after the handshake. */
 export const ServerState = z.object({
   settings: ServerSettings,
@@ -286,6 +313,13 @@ export const ServerMessageCreate = z.object({ type: z.literal("message.create"),
 export const ServerMessageUpdate = z.object({ type: z.literal("message.update"), message: Message });
 export const ServerMessageDelete = z.object({ type: z.literal("message.delete"), channelId: Uuid, id: Uuid });
 export const ServerTyping = z.object({ type: z.literal("typing"), channelId: Uuid, userId: Uuid });
+/**
+ * You have read a channel on one of your devices (sent only to your own connections, so the others drop their marks).
+ * Added without a PROTOCOL_VERSION bump: clients drop events they cannot parse, and nothing depends on receiving it.
+ */
+export const ServerReadUpdate = z.object({ type: z.literal("read.update"), channelId: Uuid, lastReadSeq: z.number().int() });
+/** Your mutes changed on one of your devices: the complete state (sent only to your own connections; no version bump, as above). */
+export const ServerMuteUpdate = z.object({ type: z.literal("mute.update"), serverMuted: z.boolean(), channelIds: z.array(Uuid) });
 /** A moderator moves you to another voice channel (null = out of the channel); the client joins there or leaves. */
 export const ServerVoiceMoved = z.object({ type: z.literal("voice.moved"), channelId: Uuid.nullable(), by: z.string() });
 /** A moderator stops your camera and/or screen share (LiveKit has already muted the tracks). */
@@ -300,7 +334,7 @@ export const ServerError = z.object({
 
 export const ServerEvent = z.discriminatedUnion("type", [
   ServerWelcome, ServerPong, ServerVoiceState, ServerStructure, ServerMe,
-  ServerMessageCreate, ServerMessageUpdate, ServerMessageDelete, ServerTyping, ServerVoiceMoved, ServerVoiceStop, ServerRemoved, ServerError,
+  ServerMessageCreate, ServerMessageUpdate, ServerMessageDelete, ServerTyping, ServerReadUpdate, ServerMuteUpdate, ServerVoiceMoved, ServerVoiceStop, ServerRemoved, ServerError,
 ]);
 
 export type ClientEvent = z.infer<typeof ClientEvent>;
@@ -319,5 +353,8 @@ export type InvitePreview = z.infer<typeof InvitePreview>;
 export type Message = z.infer<typeof Message>;
 export type Attachment = z.infer<typeof Attachment>;
 export type MessagePage = z.infer<typeof MessagePage>;
+export type ChannelReadState = z.infer<typeof ChannelReadState>;
+export type ReadStateResponse = z.infer<typeof ReadStateResponse>;
+export type MuteState = z.infer<typeof MuteState>;
 export type ServerState = z.infer<typeof ServerState>;
 export type VoiceMember = z.infer<typeof VoiceMember>;

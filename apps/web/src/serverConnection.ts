@@ -2,6 +2,8 @@ import { PROTOCOL_VERSION, ServerEvent, type ClientEvent, type Me, type Message,
 import { ServerApi, explainLoginError, type Health } from "./api";
 import type { Identity } from "./identity";
 import { t } from "./i18n";
+import { mentionsUser } from "./mentions";
+import { catchUp, loadReadState, markRead, pruneReadState, saveReadState, type ReadState } from "./readState";
 
 /**
  * Connection to exactly one chat server (multi-server client): session, WebSocket with reconnect, server state,
@@ -31,8 +33,15 @@ export type ServerConnState = {
   /** channelId -> userId -> timestamp of the last typing event */
   typing: Record<string, Record<string, number>>;
   currentChannelId: string | null;
-  /** Channel with unread messages (since it was last viewed). */
+  /** Channel with unread messages (since it was last viewed; also from before this session, see readState.ts). */
   unread: Record<string, boolean>;
+  /** Messages that mention me per channel, since it was last viewed (like `unread`, also from before this session). */
+  mentions: Record<string, number>;
+  /** Channels I have muted and whether I have muted this whole server: no unread marks for them (mentions still show). Kept by the server. */
+  muted: Record<string, boolean>;
+  serverMuted: boolean;
+  /** The server keeps read states and mutes (false = older server: marks per device, no muting). */
+  readSync: boolean;
   log: RawLogEntry[];
   /** Server name and icon from /api/health (the icon already resolved against the server), for title/favicon/rail even before sign-in. */
   serverName: string | null;
@@ -62,6 +71,10 @@ export type ConnectionHooks = {
 };
 
 const LOG_MAX = 80;
+/** After connecting, at most this many text channels are checked for messages that arrived while we were away. */
+const CATCH_UP_CHANNELS = 50;
+const READ_SYNC_MIN_MS = 15_000;
+const READ_ACK_DELAY_MS = 800;
 const EMPTY: ChannelMessages = { list: [], hasMore: true, loaded: false, loading: false };
 
 export class ServerConnection {
@@ -72,15 +85,29 @@ export class ServerConnection {
   private reconnectDelay = 1000;
   private wantConnection = false;
   private pingTimer: number | null = null;
+  /** Newest message shown per channel (readState.ts), loaded for the signed-in user at every welcome. */
+  private read: ReadState = {};
+  /** The server keeps read states (GET /api/read-state answered): marks come from there and hold on every device. */
+  private serverRead = false;
+  /** What the server has acknowledged as read per channel, and pending acknowledgements (coalesced). */
+  private acked: ReadState = {};
+  private ackTimers = new Map<string, number>();
+  /** Newest live message of other people per channel that is not on screen: an older answer of the server must not clear its mark. */
+  private liveLatest: ReadState = {};
+  private lastReadSync = 0;
 
   constructor(host: string, base: string, private readonly identity: () => Identity | null, private readonly hooks: ConnectionHooks) {
     this.api = new ServerApi(base);
     this.state = {
       host, base, me: null, userId: null, connection: "idle", error: null, removed: null, server: null,
-      voice: {}, messages: {}, typing: {}, currentChannelId: null, unread: {}, log: [],
+      voice: {}, messages: {}, typing: {}, currentChannelId: null, unread: {}, mentions: {}, muted: {}, serverMuted: false, readSync: false, log: [],
       serverName: null, iconUrl: null, serverDomain: null, requireAccount: false, serverVersion: null, directoryUrl: null,
     };
     // Token rejected by the server (expired, signed out from another device): do not keep running with a dead token.
+    // Back in front of this tab: another device may have read channels meanwhile (normally `read.update` says so right away).
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && this.serverRead && this.state.connection === "connected" && Date.now() - this.lastReadSync > READ_SYNC_MIN_MS) void this.syncReadState();
+    });
     this.api.onUnauthorized = () => { if (this.state.me) this.sessionLost("Die Sitzung ist abgelaufen oder wurde abgemeldet. Bitte erneut anmelden."); };
   }
 
@@ -147,7 +174,9 @@ export class ServerConnection {
     this.close();
     this.api.setToken(null);
     this.hooks.onToken(null);
-    this.set({ me: null, userId: null, connection: "idle", server: null, messages: {}, voice: {}, currentChannelId: null, removed: null, error });
+    for (const timer of this.ackTimers.values()) clearTimeout(timer);
+    this.ackTimers.clear(); this.acked = {}; this.liveLatest = {}; this.serverRead = false;
+    this.set({ me: null, userId: null, connection: "idle", server: null, messages: {}, voice: {}, currentChannelId: null, unread: {}, mentions: {}, muted: {}, serverMuted: false, readSync: false, removed: null, error });
   }
 
   /** Close the connection without forgetting the session (e.g. on an identity switch). */
@@ -205,6 +234,8 @@ export class ServerConnection {
           ? this.state.currentChannelId
           : e.state.channels.find((c) => c.kind === "text")?.id ?? null;
         this.set({ server: e.state, userId: e.userId, connection: "connected", currentChannelId: current, error: null });
+        this.read = pruneReadState(loadReadState(this.state.host, e.userId), e.state.channels.map((c) => c.id));
+        void this.syncReadState();
         if (!wasReconnect) this.hooks.onConnected();
         if (this.pingTimer) clearInterval(this.pingTimer);
         this.pingTimer = window.setInterval(() => this.send({ type: "ping", t: Date.now() }), 20_000);
@@ -249,7 +280,14 @@ export class ServerConnection {
         const typing = { ...(this.state.typing[e.message.channelId] ?? {}) };
         delete typing[e.message.authorId];
         const unread = e.message.channelId !== this.state.currentChannelId && e.message.authorId !== this.state.userId;
-        this.set({ typing: { ...this.state.typing, [e.message.channelId]: typing }, unread: unread ? { ...this.state.unread, [e.message.channelId]: true } : this.state.unread });
+        if (e.message.channelId === this.state.currentChannelId) this.rememberRead(e.message.channelId, [e.message]);
+        if (unread) this.liveLatest = { ...this.liveLatest, [e.message.channelId]: e.message.seq };
+        const mentioned = unread && this.state.userId !== null && mentionsUser(e.message.content, this.state.userId);
+        this.set({
+          typing: { ...this.state.typing, [e.message.channelId]: typing },
+          unread: unread ? { ...this.state.unread, [e.message.channelId]: true } : this.state.unread,
+          mentions: mentioned ? { ...this.state.mentions, [e.message.channelId]: (this.state.mentions[e.message.channelId] ?? 0) + 1 } : this.state.mentions,
+        });
         break;
       }
       case "message.update": {
@@ -262,6 +300,20 @@ export class ServerConnection {
         if (ch) this.set({ messages: { ...this.state.messages, [e.channelId]: { ...ch, list: ch.list.filter((m) => m.id !== e.id) } } });
         break;
       }
+      case "read.update": {
+        // One of my devices (this one included) has read a channel.
+        this.acked = { ...this.acked, [e.channelId]: Math.max(this.acked[e.channelId] ?? -1, e.lastReadSeq) };
+        if (this.state.userId && (this.read[e.channelId] ?? -1) < e.lastReadSeq) { this.read = { ...this.read, [e.channelId]: e.lastReadSeq }; saveReadState(this.state.host, this.state.userId, this.read); }
+        if (e.channelId === this.state.currentChannelId) break;
+        const list = this.state.messages[e.channelId]?.list ?? [];
+        const newest = Math.max(this.liveLatest[e.channelId] ?? -1, list[list.length - 1]?.seq ?? -1);
+        if (newest <= e.lastReadSeq) this.set({ unread: { ...this.state.unread, [e.channelId]: false }, mentions: { ...this.state.mentions, [e.channelId]: 0 } });
+        else void this.syncReadState();   // read only in part over there: let the server count what is left
+        break;
+      }
+      case "mute.update":
+        this.set({ serverMuted: e.serverMuted, muted: Object.fromEntries(e.channelIds.map((id) => [id, true])) });
+        break;
       case "typing":
         this.set({ typing: { ...this.state.typing, [e.channelId]: { ...(this.state.typing[e.channelId] ?? {}), [e.userId]: Date.now() } } });
         break;
@@ -291,9 +343,98 @@ export class ServerConnection {
     this.set({ me });
   }
 
+  /** Mute or unmute a text channel / this whole server for myself (kept by the server, so it holds on every device). */
+  async setChannelMuted(channelId: string, muted: boolean): Promise<void> { this.applyMutes(await this.api.setChannelMuted(channelId, muted)); }
+  async setServerMuted(muted: boolean): Promise<void> { this.applyMutes(await this.api.setServerMuted(muted)); }
+  private applyMutes(m: { serverMuted: boolean; channelIds: string[] }) { this.set({ serverMuted: m.serverMuted, muted: Object.fromEntries(m.channelIds.map((id) => [id, true])) }); }
+
   selectChannel(channelId: string) {
-    this.set({ currentChannelId: channelId, unread: { ...this.state.unread, [channelId]: false } });
+    this.set({ currentChannelId: channelId, unread: { ...this.state.unread, [channelId]: false }, mentions: { ...this.state.mentions, [channelId]: 0 } });
+    this.rememberRead(channelId, this.state.messages[channelId]?.list ?? []);
     if (!this.state.messages[channelId]?.loaded) void this.loadHistory(channelId);
+  }
+
+  /**
+   * The channel is on screen: its newest message counts as read from now on. Told to the server (all my devices) when it
+   * keeps read states, and always remembered on this device (readState.ts) for servers that do not.
+   */
+  private rememberRead(channelId: string, shown: readonly Message[]) {
+    const userId = this.state.userId;
+    if (!userId) return;
+    const next = markRead(this.read, channelId, shown);
+    if (next !== this.read) { this.read = next; saveReadState(this.state.host, userId, next); }
+    this.acknowledge(channelId);
+  }
+
+  /** Coalesced: a busy open channel sends one acknowledgement per pause, not one per message. */
+  private acknowledge(channelId: string) {
+    const seq = this.read[channelId];
+    if (!this.serverRead || seq === undefined || seq <= (this.acked[channelId] ?? -1) || this.ackTimers.has(channelId)) return;
+    this.ackTimers.set(channelId, window.setTimeout(() => {
+      this.ackTimers.delete(channelId);
+      const latest = this.read[channelId];
+      if (latest === undefined || !this.serverRead) return;
+      this.api.markRead(channelId, latest).then(
+        (r) => { this.acked = { ...this.acked, [channelId]: Math.max(this.acked[channelId] ?? -1, r.lastReadSeq) }; },
+        () => { /* offline or no access: the next message or the next welcome tries again */ },
+      );
+    }, READ_ACK_DELAY_MS));
+  }
+
+  /**
+   * After every welcome (and when the tab comes back): ask the server how far I have read each text channel, on whatever
+   * device, and take its marks and mention counts. A server without read states (older version) answers 404: then this
+   * device's own state decides (`catchUpChannels`).
+   */
+  private async syncReadState() {
+    const userId = this.state.userId;
+    if (!userId) return;
+    let remote;
+    try { remote = await this.api.getReadState(); } catch { this.serverRead = false; this.set({ readSync: false }); return this.catchUpChannels(); }
+    if (this.state.userId !== userId) return;
+    this.serverRead = true;
+    this.lastReadSync = Date.now();
+    const unread = { ...this.state.unread }, mentions = { ...this.state.mentions };
+    for (const c of remote.channels) {
+      this.acked = { ...this.acked, [c.channelId]: Math.max(this.acked[c.channelId] ?? -1, c.lastReadSeq ?? -1) };
+      if (c.channelId === this.state.currentChannelId) continue;   // on screen = read, acknowledged below
+      if ((this.liveLatest[c.channelId] ?? -1) > (c.latestSeq ?? -1)) continue;   // a live message is newer than this answer
+      unread[c.channelId] = c.unread;
+      mentions[c.channelId] = c.mentions;
+    }
+    this.set({ unread, mentions, readSync: true, serverMuted: remote.serverMuted, muted: Object.fromEntries(remote.channels.filter((c) => c.muted).map((c) => [c.channelId, true])) });
+    const current = this.state.currentChannelId;
+    if (current) this.rememberRead(current, this.state.messages[current]?.list ?? []);
+  }
+
+  /**
+   * Fallback for servers without read states: fetch the newest page of each text channel that is not on screen and compare it with what this
+   * device has read, so channels are marked (and mentions counted) for messages that arrived while we were away or before
+   * a reload. The pages also fill the message cache, so opening such a channel needs no request. One channel after the
+   * other, to be gentle with the server; a channel we may not read simply gets no mark.
+   */
+  private async catchUpChannels() {
+    const userId = this.state.userId;
+    const channels = (this.state.server?.channels ?? []).filter((c) => c.kind === "text").slice(0, CATCH_UP_CHANNELS);
+    for (const c of channels) {
+      if (c.id === this.state.currentChannelId) continue;
+      try {
+        const page = await this.api.getMessages(c.id);
+        if (!userId || this.state.userId !== userId || this.state.connection !== "connected") return;   // signed out or another user meanwhile
+        const cur = this.state.messages[c.id];
+        const list = cur?.loaded ? mergeLatest(cur.list, page.messages) : page.messages;
+        const messages = { ...this.state.messages, [c.id]: { list, hasMore: cur?.loaded ? cur.hasMore : page.hasMore, loaded: true, loading: cur?.loading ?? false } };
+        if (c.id === this.state.currentChannelId) { this.set({ messages }); this.rememberRead(c.id, list); continue; }   // opened while we were fetching
+        const result = catchUp(page.messages, this.read[c.id], userId);
+        if (this.read[c.id] === undefined) this.rememberRead(c.id, page.messages);   // first sight on this device: start from here
+        this.set({
+          messages,
+          unread: { ...this.state.unread, [c.id]: (this.state.unread[c.id] ?? false) || result.unread },
+          // Messages that came in live since the welcome are part of the page too: the larger number is the right one.
+          mentions: { ...this.state.mentions, [c.id]: Math.max(this.state.mentions[c.id] ?? 0, result.mentions) },
+        });
+      } catch { /* not allowed or not reachable: no mark */ }
+    }
   }
 
   async loadHistory(channelId: string, older = false) {
@@ -306,6 +447,7 @@ export class ServerConnection {
       const cur = this.state.messages[channelId] ?? EMPTY;
       const merged = older ? [...page.messages, ...cur.list] : mergeLatest(cur.list, page.messages);
       this.set({ messages: { ...this.state.messages, [channelId]: { list: merged, hasMore: older ? page.hasMore : (cur.loaded ? cur.hasMore : page.hasMore), loaded: true, loading: false } } });
+      if (channelId === this.state.currentChannelId) this.rememberRead(channelId, merged);
     } catch (err) {
       this.set({ messages: { ...this.state.messages, [channelId]: { ...ch, loading: false } }, error: String(err) });
     }

@@ -5,7 +5,9 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { askConfirm } from "./dialogs";
 import { EmojiButton } from "./EmojiPicker";
 import { Icon } from "./Icon";
-import { MessageText } from "./MessageText";
+import { MentionContext, MessageText } from "./MessageText";
+import { useMentionSuggest } from "./MentionSuggest";
+import { decodeMentions, encodeMentions, mentionsUser, type Picked } from "./mentions";
 import type { ChannelMessages } from "./store";
 import type { ServerConnection } from "./serverConnection";
 import { fmtDay, fmtTime, t } from "./i18n";
@@ -28,19 +30,22 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
   const [draft, setDraft] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
-  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  /** `picked`: who the "@names" in the text stand for (from the tokens of the message being edited). */
+  const [editing, setEditing] = useState<{ id: string; text: string; picked: Picked } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const stickToBottom = useRef(true);
   const lastTyping = useRef(0);
   const nameOf = useMemo(() => new Map(members.map((m) => [m.userId, m.displayName])), [members]);
+  const mentionCtx = useMemo(() => ({ names: nameOf, me: myUserId }), [nameOf, myUserId]);
+  const mention = useMentionSuggest({ inputRef, value: draft, onChange: setDraft, members });
   const canSend = hasPermission(myPermissions, Permission.SEND_MESSAGES);
   const canAttach = hasPermission(myPermissions, Permission.ATTACH_FILES);
   const canManage = hasPermission(myPermissions, Permission.MANAGE_MESSAGES);
 
   // Stay at the bottom when switching channels and on new messages, unless the user has scrolled up.
-  useEffect(() => { stickToBottom.current = true; setDraft(""); setFiles([]); setEditing(null); }, [channel.id]);
+  useEffect(() => { stickToBottom.current = true; setDraft(""); setFiles([]); setEditing(null); mention.picked.clear(); mention.close(); }, [channel.id]);
   useEffect(() => {
     const el = listRef.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
@@ -69,8 +74,8 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
     if ((!content && files.length === 0) || sending) return;
     setSending(true); setErr(null);
     try {
-      await conn.sendMessage(channel.id, content, files);
-      setDraft(""); setFiles([]);
+      await conn.sendMessage(channel.id, encodeMentions(content, members, mention.picked), files);
+      setDraft(""); setFiles([]); mention.picked.clear();
       stickToBottom.current = true;
     } catch (e) {
       setErr(String(e));
@@ -78,6 +83,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
   }
 
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (mention.onKeyDown(e)) return;   // the suggestion list takes arrows, Enter, Tab and Escape while it is open
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); }
     else if (Date.now() - lastTyping.current > 2500) { lastTyping.current = Date.now(); conn.typing(channel.id); }
   }
@@ -86,7 +92,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
     if (!editing) return;
     const text = editing.text.trim();
     if (!text) return;
-    try { await conn.api.editMessage(editing.id, text); setEditing(null); } catch (e) { setErr(String(e)); }
+    try { await conn.api.editMessage(editing.id, encodeMentions(text, members, editing.picked)); setEditing(null); } catch (e) { setErr(String(e)); }
   }
 
   const typers = Object.entries(typing).filter(([uid, t]) => uid !== myUserId && Date.now() - t < 4000).map(([uid]) => nameOf.get(uid) ?? t("chat.someone"));
@@ -98,6 +104,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
         {channel.topic && <span className="muted topic">{channel.topic}</span>}
       </header>
 
+      <MentionContext.Provider value={mentionCtx}>
       <div className="messages" ref={listRef} onScroll={onScroll}>
         {messages.loading && <p className="muted center">{t("common.loading")}</p>}
         {messages.loaded && !messages.hasMore && <p className="muted center">{t("chat.beginning", { name: channel.name })}</p>}
@@ -106,10 +113,11 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
           const grouped = prev && prev.authorId === m.authorId && new Date(m.createdAt).getTime() - new Date(prev.createdAt).getTime() < GROUP_MS;
           const newDay = !prev || fmtDay(prev.createdAt) !== fmtDay(m.createdAt);
           const mine = m.authorId === myUserId;
+          const mentioned = !mine && mentionsUser(m.content, myUserId);
           return (
             <div key={m.id}>
               {newDay && <div className="day-sep"><span>{fmtDay(m.createdAt)}</span></div>}
-              <article className={`msg ${grouped && !newDay ? "grouped" : ""}`}>
+              <article className={`msg ${grouped && !newDay ? "grouped" : ""} ${mentioned ? "mentions-me" : ""}`}>
                 {!(grouped && !newDay) && (
                   <div className="msg-head">
                     <Avatar name={nameOf.get(m.authorId) ?? t("chat.formerMember")} />
@@ -120,7 +128,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
                 <div className="msg-body">
                   {editing?.id === m.id ? (
                     <div className="edit-box">
-                      <AutoGrowTextarea value={editing.text} autoFocus rows={2} onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
+                      <AutoGrowTextarea value={editing.text} autoFocus rows={2} onChange={(e) => setEditing((cur) => cur && { ...cur, text: e.target.value })}
                         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void saveEdit(); } if (e.key === "Escape") setEditing(null); }} />
                       <span className="muted">{t("chat.editHint")}</span>
                     </div>
@@ -137,8 +145,8 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
                 </div>
                 {(mine || canManage) && editing?.id !== m.id && (
                   <div className="msg-actions">
-                    {mine && m.content && <button className="icon" title={t("chat.edit")} onClick={() => setEditing({ id: m.id, text: m.content })}><Icon name="pencil" /></button>}
-                    <button className="icon" title={t("common.delete")} onClick={() => { void askConfirm({ title: t("chat.deleteTitle"), text: m.content ? m.content.slice(0, 160) + (m.content.length > 160 ? "…" : "") : t("chat.attachments", { n: m.attachments.length }), confirmLabel: t("common.delete"), danger: true }).then((ok) => { if (ok) return conn.api.deleteMessage(m.id); }).catch((e) => setErr(String(e))); }}><Icon name="trash-2" /></button>
+                    {mine && m.content && <button className="icon" title={t("chat.edit")} onClick={() => setEditing({ id: m.id, ...decodeMentions(m.content, members) })}><Icon name="pencil" /></button>}
+                    <button className="icon" title={t("common.delete")} onClick={() => { void askConfirm({ title: t("chat.deleteTitle"), text: m.content ? ((c) => c.slice(0, 160) + (c.length > 160 ? "…" : ""))(decodeMentions(m.content, members).text) : t("chat.attachments", { n: m.attachments.length }), confirmLabel: t("common.delete"), danger: true }).then((ok) => { if (ok) return conn.api.deleteMessage(m.id); }).catch((e) => setErr(String(e))); }}><Icon name="trash-2" /></button>
                   </div>
                 )}
               </article>
@@ -146,8 +154,10 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
           );
         })}
       </div>
+      </MentionContext.Provider>
 
       <footer className="composer">
+        {mention.popup}
         {err && <p className="error">{err}</p>}
         {files.length > 0 && (
           <div className="pending-files">
@@ -162,8 +172,11 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
           )}
           <AutoGrowTextarea
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => { setDraft(e.target.value); mention.sync(); }}
             onKeyDown={onKey}
+            onKeyUp={mention.sync}
+            onClick={mention.sync}
+            onBlur={mention.close}
             rows={1}
             placeholder={canSend ? t("chat.placeholder", { name: channel.name }) : t("chat.noPermission")}
             disabled={!canSend}

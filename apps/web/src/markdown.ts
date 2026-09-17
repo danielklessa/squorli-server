@@ -16,6 +16,8 @@ export type Inline =
   | { type: "code"; text: string }
   /** `source` = what was typed when the emoji was written as a shortcode or emoticon (":smile:", ":)"), else null. */
   | { type: "emoji"; text: string; source: string | null }
+  /** `<@userId>`: a mentioned member (mentions.ts); the view resolves the current name. */
+  | { type: "mention"; userId: string }
   | { type: "strong" | "em" | "del" | "mark" | "sub" | "sup"; children: Inline[] }
   | { type: "link"; href: string; children: Inline[] };
 
@@ -51,6 +53,7 @@ const langRe = /^[\w+#.-]{1,32}$/;
 const safeHrefRe = /^(?:https?:\/\/|mailto:)[^\s]+$/i;
 const wordRe = /[\p{L}\p{N}]/u;
 const escapableRe = /[!-/:-@[-`{-~]/;
+const mentionRe = /<@([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})>/y;
 const subRe = /~([^\s~]+)~(?!~)/y;
 const supRe = /\^([^\s^]+)\^/y;
 const taskRe = /^\[([ xX])\][ \t]+(\S.*)$/;
@@ -204,6 +207,12 @@ export function parseInline(text: string, inLink = false): Inline[] {
     if (c === "\n") { flush(); out.push({ type: "br" }); i++; continue; }
 
     if (c === "\\" && i + 1 < text.length && escapableRe.test(text[i + 1]!)) { buf += text[i + 1]!; i += 2; continue; }
+
+    if (c === "<" && text[i + 1] === "@") {
+      mentionRe.lastIndex = i;
+      const m = mentionRe.exec(text);
+      if (m) { flush(); out.push({ type: "mention", userId: m[1]! }); i += m[0].length; continue; }
+    }
 
     // Written emoji: ":smile:" and ":)" (emoji/convert.ts). Before everything else, "<3" and ":*" would otherwise be read as markup.
     const written = (c === ":" ? shortcodeAt(text, i) : null) ?? (EMOTICON_STARTS.has(c) ? emoticonAt(text, i) : null);
