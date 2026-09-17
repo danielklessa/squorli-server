@@ -281,8 +281,10 @@ export class VoiceClient {
 
     // adaptiveStream: receive quality depending on the size of the <video> element (simulcast layer), pauses invisible tracks.
     // dynacast: the sender turns off layers nobody subscribes to. Together: PLAN M3 "simulcast layers depending on tile size".
+    // pauseVideoInBackground off: LiveKit would pause every video once the main page is hidden, also one showing in a pop-out
+    // window; each video view handles that for its own window instead (videoDisplay.ts `watchDocumentHidden`).
     const room = new Room({
-      adaptiveStream: true,
+      adaptiveStream: { pauseVideoInBackground: false },
       dynacast: true,
       videoCaptureDefaults: { resolution: VideoPresets.h720.resolution },
       publishDefaults: {

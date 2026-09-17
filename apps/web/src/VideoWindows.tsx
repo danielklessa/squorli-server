@@ -4,14 +4,18 @@ import type { VoiceClient, VideoTile } from "./voice/voiceClient";
 import { Icon } from "./Icon";
 import { VideoAudioControls } from "./VideoAudioControls";
 import { t } from "./i18n";
-import { attachVideoView, fitVideoWindow, toggleVideoFullscreen } from "./videoDisplay";
+import { attachVideoView, fitVideoWindow, toggleVideoFullscreen, watchDocumentHidden } from "./videoDisplay";
 
 export function TrackVideo({ tile }: { tile: VideoTile }) {
   const ref = useRef<HTMLVideoElement>(null);
+  // Attached only while the window this view lives in (the page or a pop-out) can be seen: videoDisplay.ts `watchDocumentHidden`.
+  const [unseen, setUnseen] = useState(false);
+  useEffect(() => watchDocumentHidden(ref.current!.ownerDocument, setUnseen), []);
   useEffect(() => {
+    if (unseen) return;
     const element = ref.current!;
     return attachVideoView(tile.track, element);
-  }, [tile.track]);
+  }, [tile.track, unseen]);
   return <video ref={ref} className={tile.isLocal && tile.source === "camera" ? "mirror" : ""} autoPlay playsInline muted />;
 }
 
