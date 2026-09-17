@@ -1,6 +1,6 @@
 # Squorli Server: development guide
 
-This document is for people who work on the code. Operators who only want to run a server should read the [README](../README.md). Conventions, pitfalls and the current test status for developers and AI agents are in [AGENTS.md](../AGENTS.md); plan and architecture in [PLAN.md](PLAN.md).
+This document is for people who work on the code. Operators who only want to run a server should read the [README](../README.md). Conventions and pitfalls for developers and AI agents start in [AGENTS.md](../AGENTS.md), which maps the `AGENTS.md` of each area and the feature notes under [features/](features/); the current test status is in [VERIFIED-STATE.md](VERIFIED-STATE.md); plan and architecture in [PLAN.md](PLAN.md).
 
 **Status: M3 (video and screen share) implemented in the browser, acceptance pending.** Multiple text and voice channels in categories, roles with permissions and hierarchy, invite links, kick and ban, text chat with history, editing, deleting and attachments, admin interface, member list with online status. Voice with voice activation/push-to-talk and device selection; camera with simulcast, stage with tile and speaker view, screen share with audio (Chromium) as a separate audio track, bandwidth in the debug view. New members are "Gast" (guest: view and voice only), admins grant "Mitglied" (member). Friends and end-to-end encrypted direct messages between friends are implemented via the optional Directory (M7). Not yet: desktop client, reactions, audit log.
 
