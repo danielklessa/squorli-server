@@ -1,3 +1,5 @@
+import type { ElementInfo } from "livekit-client";
+
 /** Fullscreen must be requested on the element's own document (which may be a pop-out). */
 export async function toggleVideoFullscreen(element: {
   requestFullscreen?: () => Promise<void>;
@@ -9,8 +11,46 @@ export async function toggleVideoFullscreen(element: {
   return true;
 }
 
+/**
+ * What LiveKit's adaptiveStream needs to know about a video view in a POP-OUT window, reported from that window.
+ * LiveKit's own `HTMLElementInfo` watches every attached element with one IntersectionObserver created in the main window
+ * (`root: null`). Firefox never reports an element of another window as intersecting (the implicit root is the observer's
+ * own top-level document), so adaptiveStream took the pop-out for invisible and paused the track: the camera froze on its
+ * first frames as soon as it was popped out (user's report, 18 September 2026). Chrome measures against the element's own
+ * document and was fine. Registered before `attach()`, so LiveKit skips its own info for the element.
+ */
+export class PopoutElementInfo implements ElementInfo {
+  /** The window shows nothing but this video; a window hidden for a while detaches the view (`watchDocumentHidden`). */
+  visible = true;
+  pictureInPicture = false;
+  visibilityChangedAt: number | undefined = undefined;
+  handleResize?: () => void;
+  handleVisibilityChanged?: () => void;
+  private observer: ResizeObserver | null = null;
+  constructor(readonly element: HTMLElement) {}
+  width() { return this.element.clientWidth; }
+  height() { return this.element.clientHeight; }
+  observe() {
+    // The pop-out's own ResizeObserver, not the main window's: the simulcast layer follows the window's size.
+    const win = this.element.ownerDocument.defaultView;
+    if (!win?.ResizeObserver) return;
+    this.observer = new win.ResizeObserver(() => this.handleResize?.());
+    this.observer.observe(this.element);
+  }
+  stopObserving() { this.observer?.disconnect(); this.observer = null; }
+}
+
+type ViewTrack<T> = { attach: (element: T) => unknown; detach: (element: T) => unknown; observeElementInfo?: (info: ElementInfo) => void };
+/** An element that lives in another window than the client (a pop-out). */
+const inOtherWindow = (element: unknown): element is HTMLElement => {
+  const view = (element as { ownerDocument?: { defaultView?: unknown } } | null)?.ownerDocument?.defaultView;
+  return !!view && (typeof window === "undefined" || view !== window);
+};
+
 /** Detach only this view, never stop the shared track or detach the other windows. */
-export function attachVideoView<T>(track: { attach: (element: T) => unknown; detach: (element: T) => unknown }, element: T) {
+export function attachVideoView<T>(track: ViewTrack<T>, element: T) {
+  // Remote tracks only (local ones have no adaptiveStream); `detach()` stops the info again.
+  if (track.observeElementInfo && inOtherWindow(element)) track.observeElementInfo(new PopoutElementInfo(element));
   track.attach(element);
   return () => { track.detach(element); };
 }

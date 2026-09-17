@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { attachVideoView, fitVideoWindow, toggleVideoFullscreen, watchDocumentHidden } from "./videoDisplay";
+import type { ElementInfo } from "livekit-client";
+import { attachVideoView, fitVideoWindow, PopoutElementInfo, toggleVideoFullscreen, watchDocumentHidden } from "./videoDisplay";
 
 describe("video window sizing", () => {
   it("uses landscape, portrait and ultrawide video proportions", () => {
@@ -89,5 +90,43 @@ describe("shared video views", () => {
     expect(track.stop).not.toHaveBeenCalled();
     closeMain();
     expect(track.detach.mock.calls).toEqual([[popup], [main]]);
+  });
+
+  function popoutElement(observe: ReturnType<typeof vi.fn>, disconnect: ReturnType<typeof vi.fn>) {
+    let callback: (() => void) | null = null;
+    const win = { ResizeObserver: class { constructor(cb: () => void) { callback = cb; } observe = observe; disconnect = disconnect; } };
+    const element = { clientWidth: 640, clientHeight: 360, ownerDocument: { defaultView: win } };
+    return { element, resize: () => callback?.() };
+  }
+  it("tells LiveKit about a view in a pop-out window from that window, before attaching", () => {
+    // Firefox: LiveKit's own IntersectionObserver from the main window never sees the pop-out's element, so the track was paused.
+    const calls: string[] = [];
+    let info: ElementInfo | undefined;
+    const track = { attach: vi.fn(() => calls.push("attach")), detach: vi.fn(), observeElementInfo: vi.fn((i: ElementInfo) => { calls.push("observe"); info = i; }) };
+    const observe = vi.fn(), disconnect = vi.fn();
+    const { element, resize } = popoutElement(observe, disconnect);
+    attachVideoView(track, element);
+    expect(calls).toEqual(["observe", "attach"]);
+    expect(info).toBeInstanceOf(PopoutElementInfo);
+    expect(info!.element).toBe(element);
+    expect(info!.visible).toBe(true);
+    expect([info!.width(), info!.height()]).toEqual([640, 360]);
+    info!.handleResize = vi.fn();
+    info!.observe();
+    expect(observe).toHaveBeenCalledWith(element);
+    resize();
+    expect(info!.handleResize).toHaveBeenCalledOnce();
+    info!.stopObserving();
+    expect(disconnect).toHaveBeenCalledOnce();
+  });
+  it("leaves views in the main window and local tracks to LiveKit", () => {
+    const remote = { attach: vi.fn(), detach: vi.fn(), observeElementInfo: vi.fn() };
+    attachVideoView(remote, { ownerDocument: { defaultView: null } });
+    attachVideoView(remote, {});
+    expect(remote.observeElementInfo).not.toHaveBeenCalled();
+    const local = { attach: vi.fn(), detach: vi.fn() };
+    const { element } = popoutElement(vi.fn(), vi.fn());
+    attachVideoView(local, element);
+    expect(local.attach).toHaveBeenCalledWith(element);
   });
 });
