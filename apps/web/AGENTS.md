@@ -10,7 +10,7 @@ Part of the project description. The entry point is the root [AGENTS.md](../../A
 
 | Files | Notes |
 |---|---|
-| `voice/`, `VoiceStage.tsx`, `VoiceDock.tsx`, `VideoWindows.tsx`, `VideoAudioControls.tsx`, `videoDisplay.ts`, `CameraPicker.tsx`, `UserVolumeControl.tsx` | `src/voice/AGENTS.md` (standing rules, pitfalls) and `docs/features/voice-video.md` |
+| `voice/`, `VoiceStage.tsx`, `VoiceDock.tsx`, `VideoWindows.tsx`, `VideoAudioControls.tsx`, `videoDisplay.ts` (`attachVideoView` with `PopoutElementInfo` for views in pop-out windows, `watchDocumentHidden`, fullscreen, window size; tested), `CameraPicker.tsx`, `UserVolumeControl.tsx` | `src/voice/AGENTS.md` (standing rules, pitfalls) and `docs/features/voice-video.md` |
 | `activity.ts`, `idleDetection.ts`, the AFK parts of `App.tsx`, `store.ts`, `serverConnection.ts`, `directoryLink.ts`, `VoiceDock.tsx`, `Avatar.tsx`, `ChannelsTab.tsx` | `docs/features/afk.md` |
 | `RadioControl.tsx`, `RadioTab.tsx`, `radioLabel.ts`, `EmbedPlayer.tsx`, `embedControl.ts`, `twitch.ts`, `youtube.ts`, `watchSync.ts`, `playerWindow*.ts`, `player-window.html`, `voice/radioPlayer.ts` | `docs/features/radio.md` |
 | `mentions.ts`, `MentionSuggest.tsx`, `readState.ts`, unread/mention/mute parts of `serverConnection.ts`, `store.ts`, `Sidebar.tsx`, `ServerRail.tsx` | `docs/features/mentions-unread.md` |

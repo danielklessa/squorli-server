@@ -314,8 +314,9 @@ export class VoiceClient {
       .on(RoomEvent.Reconnected, () => this.log("wieder verbunden"))
       .on(RoomEvent.MediaDevicesError, (e) => this.log(`Gerätefehler: ${e.message}`))
       .on(RoomEvent.ActiveSpeakersChanged, () => this.refreshParticipants())
-      .on(RoomEvent.TrackMuted, () => this.refreshParticipants())
-      .on(RoomEvent.TrackUnmuted, () => this.refreshParticipants())
+      // A camera turned off is a MUTED track that stays published (LiveKit's setCameraEnabled(false)); the tile goes with the mute.
+      .on(RoomEvent.TrackMuted, () => { this.refreshParticipants(); this.refreshTiles(); })
+      .on(RoomEvent.TrackUnmuted, () => { this.refreshParticipants(); this.refreshTiles(); })
       .on(RoomEvent.ConnectionQualityChanged, () => this.refreshParticipants())
       .on(RoomEvent.ParticipantAttributesChanged, () => this.refreshParticipants())
       .on(RoomEvent.TrackSubscribed, (track, _pub, p) => { this.attachRemote(track, p.identity); if (track.kind === Track.Kind.Video) this.log(`video von ${p.identity.slice(0, 8)}: ${track.source}`); this.refreshTiles(); })
