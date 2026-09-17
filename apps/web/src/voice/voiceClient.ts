@@ -345,6 +345,8 @@ export class VoiceClient {
         void this.leave().then(() => { if (why.unexpected) this.patch({ error: why.long }); });
       });
 
+    // A failing microphone is no connection problem: it must not come with the proxy hint of explainConnectError().
+    let micFailed = false;
     try {
       await room.connect(url, token, opts.iceTransportPolicy ? { rtcConfig: { iceTransportPolicy: opts.iceTransportPolicy } } : {});
       // VIEW_VIDEO before anything is published: restricted members start with nothing and get the microphone once it has a track id.
@@ -368,7 +370,8 @@ export class VoiceClient {
         if (changed) this.refreshParticipants(); // own speaker highlight immediately, not only once LiveKit reports it
       };
       mic.setMode(settings.mode);
-      const track = await mic.start(settings.inputDeviceId, this.audioProfile.stereo);
+      const track = await mic.start(settings.inputDeviceId, this.audioProfile.stereo).catch((err) => { micFailed = true; throw err; });
+      if (mic.deviceFallback) this.log("gewaehltes mikrofon nicht gefunden, nutze das standardmikrofon");
       this.publication = await room.localParticipant.publishTrack(track, this.micPublishOptions());
       this.log(`opus ${this.audioProfile.bitrate} kbit/s ${this.audioProfile.stereo ? "stereo" : "mono, dtx+red"}`);
       if (settings.outputDeviceId) await this.setOutputDevice(settings.outputDeviceId).catch(() => {});
@@ -383,9 +386,9 @@ export class VoiceClient {
       // Participants already in the room arrive as subscriptions right after connecting, not as arrivals: no cue for them.
       this.peerCuesFrom = Date.now() + PEER_CUE_GRACE_MS;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorText(err);
       await this.leave();
-      this.patch({ error: explainConnectError(message, url), rtcUrl: url });
+      this.patch({ error: micFailed ? t("voice.errMic", { err: message }) : explainConnectError(message, url), rtcUrl: url });
       throw err;
     }
   }
@@ -748,10 +751,15 @@ export class VoiceClient {
 
   async setInputDevice(deviceId: string | null): Promise<void> {
     if (!this.mic || !this.publication) return;
-    const track = await this.mic.start(deviceId, this.audioProfile.stereo);
-    const local = this.publication.track;
-    if (local instanceof LocalAudioTrack) await local.replaceTrack(track, true);
-    this.patch({ inputDeviceId: this.mic.activeDeviceId() });
+    try {
+      const track = await this.mic.start(deviceId, this.audioProfile.stereo);
+      if (this.mic.deviceFallback) this.log("gewaehltes mikrofon nicht gefunden, nutze das standardmikrofon");
+      const local = this.publication.track;
+      if (local instanceof LocalAudioTrack) await local.replaceTrack(track, true);
+      this.patch({ inputDeviceId: this.mic.activeDeviceId(), error: null });
+    } catch (err) {
+      this.patch({ error: t("voice.errMic", { err: errorText(err) }) });
+    }
   }
 
   async setOutputDevice(deviceId: string): Promise<void> {
@@ -983,7 +991,12 @@ function explainConnectError(message: string, url: string): string {
   return t("voice.connErrGeneric", { message, url, check: url.replace(/^ws/, "http") });
 }
 
-const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+/** Message of an error; media errors without one (Chromium's OverconstrainedError) give their name instead of "[object …]". */
+const errorText = (err: unknown) => {
+  if (typeof err !== "object" || err === null) return String(err);
+  const { message, name } = err as { message?: unknown; name?: unknown };
+  return typeof message === "string" && message ? message : typeof name === "string" && name ? name : String(err);
+};
 /** The user cancelled the browser dialog (camera/screen picker). */
 const isUserCancel = (err: unknown) => err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "AbortError");
 

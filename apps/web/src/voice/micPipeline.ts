@@ -9,6 +9,37 @@ import { VoiceGate, rmsLevel } from "./gate";
  */
 export type GateMode = "vad" | "ptt";
 
+/** The chosen device does not exist (any more): unplugged, or the browser handed out new device ids. */
+const isDeviceGone = (err: unknown) => {
+  const name = typeof err === "object" && err !== null ? (err as { name?: unknown }).name : undefined;
+  return name === "OverconstrainedError" || name === "NotFoundError";
+};
+
+/**
+ * Opens the microphone. The stored device is requested with `exact` so the browser does not quietly pick another one
+ * while it exists; when it is gone, the default microphone takes over (`fellBack`) instead of the join failing
+ * with "Constraints could not be satisfied". The stored choice stays, so the device is used again once it is back.
+ */
+export async function openMic(
+  getUserMedia: (c: MediaStreamConstraints) => Promise<MediaStream>, deviceId: string | null, stereo: boolean,
+): Promise<{ stream: MediaStream; fellBack: boolean }> {
+  const audio = (id: string | null): MediaTrackConstraints => ({
+    ...(id ? { deviceId: { exact: id } } : {}),
+    // Use the browser's own processing (PLAN 7: "browser-native echo/noise suppression").
+    // Stereo (music channels): processing off, because echo/noise suppression downmixes to mono.
+    echoCancellation: !stereo,
+    noiseSuppression: !stereo,
+    autoGainControl: !stereo,
+    channelCount: stereo ? 2 : 1,
+  });
+  try {
+    return { stream: await getUserMedia({ audio: audio(deviceId) }), fellBack: false };
+  } catch (err) {
+    if (!deviceId || !isDeviceGone(err)) throw err;
+    return { stream: await getUserMedia({ audio: audio(null) }), fellBack: true };
+  }
+}
+
 export class MicPipeline {
   private ctx: AudioContext | null = null;
   private stream: MediaStream | null = null;
@@ -25,6 +56,8 @@ export class MicPipeline {
   /** Current level (0..1) and whether the gate is open; for the display. */
   readonly state = { level: 0, open: false };
   onState: ((s: { level: number; open: boolean }) => void) | null = null;
+  /** The last start() used the default microphone because the chosen device was gone. */
+  deviceFallback = false;
 
   private ownsCtx: boolean;
 
@@ -41,17 +74,9 @@ export class MicPipeline {
   /** Starts the capture. Returns the track that is published to LiveKit. */
   async start(deviceId: string | null, stereo = false): Promise<MediaStreamTrack> {
     await this.stopCapture();
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-        // Use the browser's own processing (PLAN 7: "browser-native echo/noise suppression").
-        // Stereo (music channels): processing off, because echo/noise suppression downmixes to mono.
-        echoCancellation: !stereo,
-        noiseSuppression: !stereo,
-        autoGainControl: !stereo,
-        channelCount: stereo ? 2 : 1,
-      },
-    });
+    const opened = await openMic((c) => navigator.mediaDevices.getUserMedia(c), deviceId, stereo);
+    this.stream = opened.stream;
+    this.deviceFallback = opened.fellBack;
     if (!this.ctx || this.ctx.state === "closed") { this.ctx = new AudioContext(); this.ownsCtx = true; }
     // resume() hangs forever in some browsers without a user gesture; do not wait for it, the click fallback in the
     // VoiceClient catches up on it. Until then the pipeline delivers silence (level 0).

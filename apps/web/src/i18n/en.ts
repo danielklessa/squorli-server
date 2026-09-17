@@ -704,6 +704,7 @@ export const en: Messages = {
   "voice.connErrLocalhost": "{message}. The server announced \"{url}\" as the LiveKit address; that is the dev setting (LIVEKIT_PUBLIC_URL) and unreachable from other devices. On the server remove LIVEKIT_PUBLIC_URL (default: wss://PUBLIC_DOMAIN) or set it to the public address.",
   "voice.connErrWs": "{message}. This page runs over HTTPS but the LiveKit address \"{url}\" uses ws:// (unencrypted); browsers block that. Switch LIVEKIT_PUBLIC_URL to wss://.",
   "voice.connErrGeneric": "{message} (LiveKit address: {url}). Check: {check}/rtc/validate must return 401 in the browser; otherwise the proxy does not forward /rtc.",
+  "voice.errMic": "Microphone: {err}. Check that a microphone is connected, that the browser may use it, and that the right one is chosen under Settings > Audio devices.",
   "voice.errCamera": "Camera: {err}",
   "voice.errBlur": "Background blur: {err}",
   "voice.errProfile": "Voice profile: {err}",
