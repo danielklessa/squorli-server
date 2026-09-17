@@ -7,6 +7,8 @@ import { askConfirm } from "./dialogs";
 import { Icon } from "./Icon";
 import { LicensesTab } from "./LicensesTab";
 import { LOCALES, fmtDateTime, localePreference, t, type LocalePreference } from "./i18n";
+import { activity } from "./activity";
+import { idleDetectionSupported, idleDetectionWanted, setIdleDetection } from "./idleDetection";
 import { saveVoiceSettings, type VoiceSettings } from "./voice/settings";
 import { SOUND_CUES, type SoundCue, type SoundSettings } from "./voice/sounds";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
@@ -77,6 +79,9 @@ export function SettingsDialog({ api, me, displayName, directoryUrl, directoryAc
   const [saved, setSaved] = useState(false);
   const [sessions, setSessions] = useState<SessionInfo[] | null>(null);
   const [busy, setBusy] = useState(false);
+  /** AFK detection across the whole system (Idle Detection API): per browser, because the permission is the browser's. */
+  const [idleDetect, setIdleDetect] = useState(() => idleDetectionSupported() && idleDetectionWanted());
+  const [idleDenied, setIdleDenied] = useState(false);
   const [devices, setDevices] = useState<{ inputs: MediaDeviceInfo[]; outputs: MediaDeviceInfo[]; cameras: MediaDeviceInfo[] }>({ inputs: [], outputs: [], cameras: [] });
   const [capturingKey, setCapturingKey] = useState(false);
   const dirHost = directoryUrl ? new URL(directoryUrl).host : null;
@@ -196,6 +201,15 @@ export function SettingsDialog({ api, me, displayName, directoryUrl, directoryAc
                   {t("settings.featureSelf")}
                 </label>
                 <span className="muted small">{t("settings.featureSelfHint")}</span>
+                <h3>{t("settings.idle")}</h3>
+                <label className="check">
+                  {/* The permission prompt only opens inside the click, so the switch asks right here. */}
+                  <input type="checkbox" checked={idleDetect} disabled={!idleDetectionSupported()} onChange={(e) => { const on = e.target.checked; void setIdleDetection(activity, on).then((ok) => { setIdleDetect(ok); setIdleDenied(on && !ok); }); }} />
+                  {t("settings.idleDetect")}
+                </label>
+                <span className="muted small">{t("settings.idleHint")}</span>
+                {!idleDetectionSupported() && <span className="muted small">{t("settings.idleUnsupported")}</span>}
+                {idleDenied && <span className="error small">{t("settings.idleDenied")}</span>}
               </>
             )}
 

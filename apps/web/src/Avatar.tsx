@@ -7,10 +7,13 @@ type Props = {
   src?: string | null;
   size?: "small" | "medium" | "large";
   online?: boolean;
+  /** Online but absent (AFK detection): an amber crescent instead of the green dot. */
+  afk?: boolean;
 };
 
 /** Names are rendered beside avatars; only presence needs an accessible label. */
-export function Avatar({ name, src, size = "medium", online }: Props) {
+export function Avatar({ name, src, size = "medium", online, afk }: Props) {
+  const presence = !online ? "off" : afk ? "afk" : "on";
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const words = name.trim().split(/\s+/u).filter(Boolean);
   const initials = (words.length > 1
@@ -21,7 +24,7 @@ export function Avatar({ name, src, size = "medium", online }: Props) {
       {src && src !== failedSrc
         ? <img key={src} src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailedSrc(src)} />
         : <span aria-hidden="true">{initials}</span>}
-      {online !== undefined && <span className={`avatar-presence ${online ? "on" : "off"}`} role="img" aria-label={t(online ? "members.online" : "members.offline")} />}
+      {online !== undefined && <span className={`avatar-presence ${presence}`} role="img" aria-label={t(presence === "on" ? "members.online" : presence === "afk" ? "members.afk" : "members.offline")} title={presence === "afk" ? t("members.afk") : undefined} />}
     </span>
   );
 }

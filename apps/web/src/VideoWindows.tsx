@@ -4,6 +4,7 @@ import type { VoiceClient, VideoTile } from "./voice/voiceClient";
 import { Icon } from "./Icon";
 import { VideoAudioControls } from "./VideoAudioControls";
 import { t } from "./i18n";
+import { activity, watchActivity } from "./activity";
 import { attachVideoView, fitVideoWindow, toggleVideoFullscreen, watchDocumentHidden } from "./videoDisplay";
 
 export function TrackVideo({ tile }: { tile: VideoTile }) {
@@ -107,6 +108,8 @@ function VideoWindow({ entry, tile, client, onClose }: { entry: Entry; tile: Vid
   const volume = client.getVideoAudioVolume(tile.id);
   const [error, setError] = useState("");
   const [focused, setFocused] = useState(() => entry.document.hasFocus());
+  // AFK detection: input in a pop-out counts like input in the main window.
+  useEffect(() => watchActivity(activity, entry.window), [entry.window]);
   useEffect(() => {
     const focus = () => setFocused(true);
     const blur = () => setFocused(false);

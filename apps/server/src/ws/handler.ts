@@ -73,6 +73,9 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
         }
         case "voice.leave":
           return presence.leave(socket);
+        case "activity":
+          // AFK detection: the hub turns the connections' reports into the member's state (index.ts broadcasts and moves).
+          return hub.setIdle(socket, ev.data.idle);
         case "typing": {
           const now = Date.now();
           if (now - lastTyping < 2000) return; // Throttling: at most every 2 s

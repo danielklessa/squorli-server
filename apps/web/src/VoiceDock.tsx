@@ -25,13 +25,15 @@ type Props = {
   onOpenStage: (() => void) | null;
   canStream: boolean;
   onToggleCamera: () => Promise<void>;
+  /** Moved to the AFK channel for inactivity: explain it and offer the way back (`name` null = that channel is gone). */
+  afkReturn: { name: string | null; onReturn: () => void } | null;
 };
 
 const isTypingTarget = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
 
 /** Bottom area of the sidebar: voice status with mute and leave, below it your own name (mini profile) and the gear (settings). */
-export function VoiceDock({ client, voice, channel, serverName, displayName, onLeave, onOpenProfile, onOpenSettings, pttSuspended, onOpenStage, canStream, onToggleCamera }: Props) {
+export function VoiceDock({ client, voice, channel, serverName, displayName, onLeave, onOpenProfile, onOpenSettings, pttSuspended, onOpenStage, canStream, onToggleCamera, afkReturn }: Props) {
   const settings = useVoiceSettings();
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -78,6 +80,12 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, onL
             {voice.status === "connected" && voice.audioContext !== "running" && voice.audioContext !== "none" && <button className="small warn" title={t("dock.unblockMicHint")} onClick={() => client.prepareAudio()}>{t("dock.unblockMic")}</button>}
           </div>
           {voice.error && <p className="error small">{voice.error}</p>}
+          {voice.afkRoom && (
+            <div className="warn-box small dock-afk" role="status">
+              <span><Icon name="moon" /> {afkReturn ? t("dock.afkMoved") : t("dock.afkChannel")}</span>
+              {afkReturn?.name && <button className="small" onClick={afkReturn.onReturn}>{t("dock.afkReturn", { name: afkReturn.name })}</button>}
+            </div>
+          )}
           {voice.notice && <p className="warn-box small">{voice.notice} <button className="icon" title={t("common.dismiss")} onClick={() => client.setNotice(null)}><Icon name="x" /></button></p>}
           <div className={`dock-input ${voice.micMuted ? "is-muted" : ""}`}>
             <span className="dock-input-label"><Icon name={voice.micMuted ? "mic-off" : "mic"} />{voice.micMuted ? t("voice.micMuted") : t("dock.micLevel")}</span>
@@ -88,9 +96,9 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, onL
           </div>
           {/* quick actions of the voice connection: its own area above the name row */}
           <div className="dock-row dock-controls">
-            <button aria-label={t("voice.mute")} aria-pressed={voice.micMuted} className={`icon ${voice.micMuted ? "danger" : ""}`} title={voice.micMuted ? (voice.deafened ? t("voice.unmuteAll") : t("voice.unmute")) : t("voice.mute")} onClick={() => client.setMuted(!voice.micMuted)}><Icon name={voice.micMuted ? "mic-off" : "mic"} /></button>
-            <button aria-label={t("voice.deafen")} aria-pressed={voice.deafened} className={`icon ${voice.deafened ? "danger" : ""}`} title={voice.deafened ? t("voice.undeafen") : t("voice.deafen")} onClick={() => client.setDeafened(!voice.deafened)}><Icon name={voice.deafened ? "headphone-off" : "headphones"} /></button>
-            {canStream && <button aria-label={t("voice.cameraOnBtn")} aria-pressed={voice.cameraOn} className={`icon ${voice.cameraOn ? "on" : ""}`} title={voice.cameraOn ? t("voice.cameraOff") : t("voice.cameraOnBtn")} onClick={() => { void onToggleCamera(); }}><Icon name={voice.cameraOn ? "video" : "video-off"} /></button>}
+            <button aria-label={t("voice.mute")} aria-pressed={voice.micMuted} className={`icon ${voice.micMuted ? "danger" : ""}`} disabled={voice.afkRoom} title={voice.afkRoom ? t("dock.afkChannel") : voice.micMuted ? (voice.deafened ? t("voice.unmuteAll") : t("voice.unmute")) : t("voice.mute")} onClick={() => client.setMuted(!voice.micMuted)}><Icon name={voice.micMuted ? "mic-off" : "mic"} /></button>
+            <button aria-label={t("voice.deafen")} aria-pressed={voice.deafened} className={`icon ${voice.deafened ? "danger" : ""}`} disabled={voice.afkRoom} title={voice.afkRoom ? t("dock.afkChannel") : voice.deafened ? t("voice.undeafen") : t("voice.deafen")} onClick={() => client.setDeafened(!voice.deafened)}><Icon name={voice.deafened ? "headphone-off" : "headphones"} /></button>
+            {canStream && !voice.afkRoom && <button aria-label={t("voice.cameraOnBtn")} aria-pressed={voice.cameraOn} className={`icon ${voice.cameraOn ? "on" : ""}`} title={voice.cameraOn ? t("voice.cameraOff") : t("voice.cameraOnBtn")} onClick={() => { void onToggleCamera(); }}><Icon name={voice.cameraOn ? "video" : "video-off"} /></button>}
             <button aria-label={t("voice.leave")} className="icon hangup" title={t("voice.leave")} onClick={() => onLeave()}><Icon name="phone" rotate={135} /></button>
           </div>
         </div>

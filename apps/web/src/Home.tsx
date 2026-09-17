@@ -84,7 +84,7 @@ export function HomeSidebar({ state, store, members }: { state: State; store: St
             return (
               <li key={f.publicKey} className={`channel friend ${state.currentPeer === f.publicKey ? "active" : ""} ${unread ? "unread" : ""} ${f.online ? "" : "offline"}`}>
                 <button className="channel-btn" onClick={() => store.selectPeer(f.publicKey)} title={`@${f.handle}`}>
-                  <Avatar name={friendName(f)} online={f.online} />
+                  <Avatar name={friendName(f)} online={f.online} afk={f.afk} />
                   <span className="channel-name">{friendName(f)}</span>
                   {unread > 0 && <span className="count">{unread}</span>}
                 </button>

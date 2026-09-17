@@ -8,7 +8,7 @@ import { channels, radioStations } from "../db/schema";
 import type { Hub } from "../hub";
 import { resolveStreamUrl } from "../radio/resolve";
 import { lookupYoutube } from "../radio/youtube";
-import { broadcastStructure, radioHostOf } from "../state";
+import { broadcastStructure, loadSettings, radioHostOf } from "../state";
 import { compact } from "../util";
 
 const Params = { type: "object", properties: { id: { type: "string", format: "uuid" } }, required: ["id"] } as const;
@@ -73,6 +73,8 @@ export async function registerRadioRoutes(app: FastifyInstance, db: Db, hub: Hub
     if (!can(m.actor, Permission.CONTROL_RADIO)) return reply.code(403).send({ error: "forbidden" });
     const body = SetChannelRadioRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    // Nobody hears anything in the AFK channel, so it has no radio.
+    if ((await loadSettings(db)).afkChannelId === req.params.id) return reply.code(409).send({ error: "afk_channel" });
     // Either one of the server's stations or an address typed in by the member (CONTROL_RADIO covers both, user's decision).
     let source: { stationId: string | null; url: string; name: string | null };
     if ("stationId" in body.data) {

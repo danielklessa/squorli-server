@@ -15,9 +15,18 @@ export class DirectoryLink {
   private ping: number | null = null;
   private delay = 1000;
   private want = false;
+  /** AFK detection: the user's activity state (activity.ts), reported when the directory knows the `activity` event (features.afk). */
+  private idle = false;
 
   constructor(private readonly url: string, private readonly identity: Identity,
-    private readonly onEvent: (e: DirectoryServerEvent) => void, private readonly onStatus: (s: LinkStatus, error?: string) => void) {}
+    private readonly onEvent: (e: DirectoryServerEvent) => void, private readonly onStatus: (s: LinkStatus, error?: string) => void, private readonly reportsActivity = false) {}
+
+  /** The user turned idle or came back. The directory counts a fresh socket as active, so only `true` is repeated after a welcome. */
+  setIdle(idle: boolean) {
+    if (idle === this.idle) return;
+    this.idle = idle;
+    if (this.reportsActivity) this.send({ type: "activity", idle });
+  }
 
   connect() {
     this.want = true;
@@ -39,6 +48,7 @@ export class DirectoryLink {
         this.onStatus("connected");
         if (this.ping) clearInterval(this.ping);
         this.ping = window.setInterval(() => this.send({ type: "ping", t: Date.now() }), 25_000);
+        if (this.idle && this.reportsActivity) this.send({ type: "activity", idle: true });
       }
       if (e.type === "error" && (e.code === "version" || e.code === "unauthorized" || e.code === "unknown_account")) {
         // No reconnect: the client does not match the service, or the key has no account there.

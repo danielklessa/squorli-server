@@ -34,6 +34,7 @@
 .ic-minimize::before { content: "\e11a"; }
 .ic-monitor::before { content: "\e11d"; }
 .ic-monitor-smartphone::before { content: "\e3a6"; }
+.ic-moon::before { content: "\e11e"; }
 .ic-paperclip::before { content: "\e12d"; }
 .ic-pencil::before { content: "\e1f9"; }
 .ic-phone::before { content: "\e133"; }

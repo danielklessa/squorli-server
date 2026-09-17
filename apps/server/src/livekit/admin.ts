@@ -38,4 +38,17 @@ export class LivekitAdmin {
       this.log.debug({ err, room, identity }, "livekit setCanStream: Teilnehmer nicht im Raum oder LiveKit nicht erreichbar");
     }
   }
+
+  /**
+   * The room became the AFK channel while this participant sits in it: no sending and no receiving from now on (LiveKit
+   * unpublishes their tracks). Whoever joins later gets a token without these grants (livekit/routes.ts); the way back
+   * when the room stops being the AFK channel is setCanStream.
+   */
+  async silence(room: string, identity: string): Promise<void> {
+    try {
+      await this.svc.updateParticipant(room, identity, { permission: { canPublish: false, canSubscribe: false, canPublishData: false, canUpdateMetadata: true, canPublishSources: [] } });
+    } catch (err) {
+      this.log.debug({ err, room, identity }, "livekit silence: Teilnehmer nicht im Raum oder LiveKit nicht erreichbar");
+    }
+  }
 }

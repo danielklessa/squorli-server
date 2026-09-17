@@ -102,8 +102,20 @@ export const ServerSettings = z.object({
    * Optional = feature flag: a server from before it does not send the field and the admin area hides the switch.
    */
   radioAutoStop: z.boolean().optional(),
+  /**
+   * AFK channel: the voice channel absent members are moved to, null = none. Nobody can send, hear or share anything in it
+   * (the LiveKit token carries no publish or subscribe grant) and it has no radio. Optional = feature flag: a server from
+   * before the AFK detection does not send the field; clients then report no activity to it and hide the setting.
+   */
+  afkChannelId: Uuid.nullable().optional(),
+  /** Minutes without activity after which a member in a voice channel is moved to the AFK channel (one of AFK_MOVE_MINUTES). */
+  afkMoveMinutes: z.number().int().min(5).max(60).optional(),
 });
-export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true, requireAccount: true, listed: true, description: true, radioAutoStop: true }).partial();
+export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true, requireAccount: true, listed: true, description: true, radioAutoStop: true, afkChannelId: true }).partial()
+  .extend({ afkMoveMinutes: z.union([z.literal(5), z.literal(10), z.literal(15), z.literal(30), z.literal(60)]).optional() });
+/** What the admin area offers for ServerSettings.afkMoveMinutes; the AFK status itself always comes after AFK_AFTER_MS. */
+export const AFK_MOVE_MINUTES = [5, 10, 15, 30, 60] as const;
+export const DEFAULT_AFK_MOVE_MINUTES = 5;
 /** How long a voice channel may stay empty before its radio is turned off (ServerSettings.radioAutoStop). */
 export const RADIO_IDLE_STOP_MS = 2 * 60_000;
 
@@ -260,6 +272,8 @@ export const Member = z.object({
   roleIds: z.array(Uuid),
   joinedAt: Iso,
   online: z.boolean(),
+  /** Absent: online, but no activity on any connection for AFK_AFTER_MS (reported by the clients, event `activity`). Default for servers from before it. */
+  afk: z.boolean().default(false),
   /** A moderator has blocked camera/screen for this member (overrides STREAM_VIDEO from roles). */
   streamBlocked: z.boolean(),
   /** Verified handle from the directory service (M6), otherwise null. */
@@ -382,8 +396,14 @@ export const ClientPing = z.object({ type: z.literal("ping"), t: z.number() });
 export const ClientVoiceJoin = z.object({ type: z.literal("voice.join"), channelId: Uuid });
 export const ClientVoiceLeave = z.object({ type: z.literal("voice.leave") });
 export const ClientTyping = z.object({ type: z.literal("typing"), channelId: Uuid });
+/**
+ * AFK detection: this connection's user has given no input (and has not spoken) for AFK_AFTER_MS (`idle: true`) or is back.
+ * A connection counts as active until it says otherwise; a member is AFK once all their connections are idle. Sent only to
+ * servers whose settings carry `afkMoveMinutes` (older servers would answer `bad_message`).
+ */
+export const ClientActivity = z.object({ type: z.literal("activity"), idle: z.boolean() });
 
-export const ClientEvent = z.discriminatedUnion("type", [ClientHello, ClientPing, ClientVoiceJoin, ClientVoiceLeave, ClientTyping]);
+export const ClientEvent = z.discriminatedUnion("type", [ClientHello, ClientPing, ClientVoiceJoin, ClientVoiceLeave, ClientTyping, ClientActivity]);
 
 export const ServerWelcome = z.object({
   type: z.literal("welcome"),
@@ -429,8 +449,12 @@ export const ServerRadioMeta = z.object({ type: z.literal("radio.meta"), channel
  * channel list carries the same state for whoever connects later. No PROTOCOL_VERSION bump: older clients drop the event.
  */
 export const ServerRadioPlayback = z.object({ type: z.literal("radio.playback"), channelId: Uuid, playback: RadioPlayback });
-/** A moderator moves you to another voice channel (null = out of the channel); the client joins there or leaves. */
-export const ServerVoiceMoved = z.object({ type: z.literal("voice.moved"), channelId: Uuid.nullable(), by: z.string() });
+/**
+ * A moderator moves you to another voice channel (null = out of the channel); the client joins there or leaves.
+ * `reason: "afk"` = moved by the server into the AFK channel for inactivity (`by` is then the server's name; older clients
+ * ignore the field and show the usual notice).
+ */
+export const ServerVoiceMoved = z.object({ type: z.literal("voice.moved"), channelId: Uuid.nullable(), by: z.string(), reason: z.enum(["afk"]).optional() });
 /** A moderator stops your camera and/or screen share (LiveKit has already muted the tracks). */
 export const ServerVoiceStop = z.object({ type: z.literal("voice.stop"), camera: z.boolean(), screen: z.boolean(), by: z.string() });
 /** The server removed you (kick/ban); it closes the connection afterwards. */

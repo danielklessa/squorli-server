@@ -64,8 +64,10 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, clie
     ...server.categories.map((k) => ({ id: k.id, name: k.name, channels: server.channels.filter((c) => c.categoryId === k.id) })),
   ].filter((g) => g.channels.length > 0 || g.id !== null);
 
+  const afkOf = new Set(server.members.filter((m) => m.afk).map((m) => m.userId));
   const renderChannel = (c: Channel) => {
     const members = voice[c.id] ?? [];
+    const isAfkChannel = c.kind === "voice" && server.settings.afkChannelId === c.id;
     const active = c.id === currentChannelId;
     const joined = c.kind === "voice" && voiceState?.channelId === c.id;
     const droppable = c.kind === "voice" && dragging !== null && dragging.from !== c.id;
@@ -74,9 +76,9 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, clie
         onDragOver={(e) => { if (droppable) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dropTarget !== c.id) setDropTarget(c.id); } }}
         onDragLeave={(e) => { if (dropTarget === c.id && !e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(null); }}
         onDrop={(e) => { if (droppable) { e.preventDefault(); onDrop(c.id); } }}>
-        <button className="channel-btn" aria-current={active ? "page" : undefined} onClick={() => (c.kind === "text" ? onSelect(c.id) : onJoinVoice(c.id))} title={c.topic ?? undefined}
+        <button className="channel-btn" aria-current={active ? "page" : undefined} onClick={() => (c.kind === "text" ? onSelect(c.id) : onJoinVoice(c.id))} title={isAfkChannel ? t("sidebar.afkChannel") : c.topic ?? undefined}
           onContextMenu={(e) => { if (c.kind !== "text" || !canMute) return; e.preventDefault(); setChannelMenu({ channelId: c.id, trigger: e.currentTarget, x: e.clientX, y: e.clientY }); }}>
-          <span className="channel-icon"><Icon name={c.kind === "text" ? "hash" : "volume-2"} /></span>
+          <span className="channel-icon"><Icon name={c.kind === "text" ? "hash" : isAfkChannel ? "moon" : "volume-2"} /></span>
           <span className="channel-name">{c.name}</span>
           {c.radio && <span className="channel-radio" title={radioTitles[c.id] ? t("radio.inChannelPlaying", { name: c.radio.name, title: radioTitles[c.id] ?? "" }) : t("radio.inChannel", { name: c.radio.name })}><Icon name="radio" /></span>}
           {c.kind === "voice" && members.length > 0 && <span className="count">{members.length}</span>}
@@ -92,7 +94,7 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, clie
                 draggable={draggable} title={draggable ? t("sidebar.dragHint") : undefined}
                 onContextMenu={(e) => { if (m.userId === myUserId) return; e.preventDefault(); setMenu({ userId: m.userId, trigger: e.currentTarget, x: e.clientX, y: e.clientY }); }}
                 onDragStart={(e) => { if (!draggable) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", m.userId); setDragging({ userId: m.userId, from: c.id }); }}
-                onDragEnd={() => { setDragging(null); setDropTarget(null); }}><Avatar name={m.displayName} size="small" /><span className="member-name">{m.displayName}</span>{p?.micMuted && <Icon name="mic-off" className="muted" title={t("voice.micMuted")} />}{p?.deafened && <Icon name="headphone-off" className="muted" title={t("voice.deafened")} />}{p?.cameraOn && <Icon name="video" title={t("voice.cameraOn")} />}{p?.screenOn && <Icon name="screen-share" title={t("voice.sharingScreen")} />}</li>;
+                onDragEnd={() => { setDragging(null); setDropTarget(null); }}><Avatar name={m.displayName} size="small" /><span className="member-name">{m.displayName}</span>{afkOf.has(m.userId) && <Icon name="moon" className="afk" title={t("members.afk")} />}{p?.micMuted && <Icon name="mic-off" className="muted" title={t("voice.micMuted")} />}{p?.deafened && <Icon name="headphone-off" className="muted" title={t("voice.deafened")} />}{p?.cameraOn && <Icon name="video" title={t("voice.cameraOn")} />}{p?.screenOn && <Icon name="screen-share" title={t("voice.sharingScreen")} />}</li>;
             })}
           </ul>
         )}

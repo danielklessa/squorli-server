@@ -60,7 +60,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
   const [layout, setLayout] = useState<Layout>("grid"); // always start with tiles
   const [pinned, setPinned] = useState<string | null>(null);
   const [lastSpeaker, setLastSpeaker] = useState<string | null>(null);
-  const canStream = hasPermission(myPermissions, Permission.STREAM_VIDEO);
+  const canStream = hasPermission(myPermissions, Permission.STREAM_VIDEO) && !voice.afkRoom; // nothing is sent in the AFK channel
   // Without VIEW_VIDEO others' camera and screen never arrive; say so while somebody is sharing, instead of just showing avatars.
   const hiddenStreams = !hasPermission(myPermissions, Permission.VIEW_VIDEO) && participants.some((p) => !p.isLocal && (p.cameraOn || p.screenOn));
 
@@ -120,7 +120,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
         <span className="channel-icon"><Icon name="volume-2" /></span><strong>{channel.name}</strong>
         <span className="muted small">· {t("stage.participants", { n: voice.participants.length })}{voice.audioProfile && ` · Opus ${voice.audioProfile.bitrate} kbit/s ${voice.audioProfile.stereo ? t("stage.stereo") : t("stage.mono")}`}</span>
         <span className="spacer" />
-        {radioStations && <RadioControl api={api} player={radio} channel={channel} stations={radioStations} nowPlaying={radioTitle} canControl={hasPermission(myPermissions, Permission.CONTROL_RADIO)} />}
+        {radioStations && !voice.afkRoom && <RadioControl api={api} player={radio} channel={channel} stations={radioStations} nowPlaying={radioTitle} canControl={hasPermission(myPermissions, Permission.CONTROL_RADIO)} />}
         <div className="seg">
           <button className={layout === "focus" ? "active" : ""} title={t("stage.speakerHint")} onClick={() => setLayout("focus")}>{t("stage.speaker")}</button>
           <button className={layout === "grid" ? "active" : ""} title={t("stage.gridHint")} onClick={() => setLayout("grid")}>{t("stage.grid")}</button>
@@ -128,6 +128,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
       </header>
 
       {voice.error && <p className="error small stage-hint">{voice.error}</p>}
+      {voice.afkRoom && <p className="warn-box small stage-hint"><Icon name="moon" /> {t("dock.afkChannel")}</p>}
       {voice.notice && <p className="warn-box small stage-hint">{voice.notice} <button className="icon" title={t("common.dismiss")} onClick={() => client.setNotice(null)}><Icon name="x" /></button></p>}
       {screenHint && <p className="warn-box small stage-hint">{screenHint}</p>}
       {hiddenStreams && <p className="warn-box small stage-hint">{t("stage.noViewPermission")}</p>}
@@ -163,14 +164,14 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
       )}
 
       <footer className="stage-bar">
-        <button className={`bar-btn ${voice.micMuted ? "off" : ""}`} title={voice.micMuted ? (voice.deafened ? t("voice.unmuteAll") : t("voice.unmute")) : t("voice.mute")} onClick={() => client.setMuted(!voice.micMuted)}><Icon name={voice.micMuted ? "mic-off" : "mic"} /></button>
-        <button className={`bar-btn ${voice.deafened ? "off" : ""}`} title={voice.deafened ? t("voice.undeafen") : t("voice.deafen")} onClick={() => client.setDeafened(!voice.deafened)}><Icon name={voice.deafened ? "headphone-off" : "headphones"} /></button>
-        <button className={`bar-btn ${voice.cameraOn ? "on" : ""}`} disabled={!canStream} title={canStream ? (voice.cameraOn ? t("voice.cameraOff") : t("voice.cameraOnBtn")) : t("stage.noStreamPermission")}
+        <button className={`bar-btn ${voice.micMuted ? "off" : ""}`} disabled={voice.afkRoom} title={voice.afkRoom ? t("dock.afkChannel") : voice.micMuted ? (voice.deafened ? t("voice.unmuteAll") : t("voice.unmute")) : t("voice.mute")} onClick={() => client.setMuted(!voice.micMuted)}><Icon name={voice.micMuted ? "mic-off" : "mic"} /></button>
+        <button className={`bar-btn ${voice.deafened ? "off" : ""}`} disabled={voice.afkRoom} title={voice.afkRoom ? t("dock.afkChannel") : voice.deafened ? t("voice.undeafen") : t("voice.deafen")} onClick={() => client.setDeafened(!voice.deafened)}><Icon name={voice.deafened ? "headphone-off" : "headphones"} /></button>
+        <button className={`bar-btn ${voice.cameraOn ? "on" : ""}`} disabled={!canStream} title={voice.afkRoom ? t("dock.afkChannel") : canStream ? (voice.cameraOn ? t("voice.cameraOff") : t("voice.cameraOnBtn")) : t("stage.noStreamPermission")}
           onClick={() => { void onToggleCamera(); }}><Icon name={voice.cameraOn ? "video" : "video-off"} /></button>
         {voice.cameraOn && VoiceClient.supportsBlur() && (
           <button className={`bar-btn ${voice.cameraBlur > 0 ? "on" : ""}`} title={voice.cameraBlur > 0 ? t("stage.unblur") : t("stage.blur")} onClick={() => { void onToggleBlur(); }}><Icon name="wand-sparkles" /></button>
         )}
-        <button className={`bar-btn ${voice.screenOn ? "on" : ""}`} disabled={!canStream} title={canStream ? (voice.screenOn ? t("stage.stopShare") : isChromium() ? t("stage.shareWithAudio") : t("stage.shareNoAudio")) : t("stage.noStreamPermission")}
+        <button className={`bar-btn ${voice.screenOn ? "on" : ""}`} disabled={!canStream} title={voice.afkRoom ? t("dock.afkChannel") : canStream ? (voice.screenOn ? t("stage.stopShare") : isChromium() ? t("stage.shareWithAudio") : t("stage.shareNoAudio")) : t("stage.noStreamPermission")}
           onClick={() => client.setScreenShareEnabled(!voice.screenOn)}><Icon name={voice.screenOn ? "screen-share-off" : "screen-share"} /></button>
         <button className="bar-btn leave" title={t("voice.leave")} onClick={() => onLeave()}><Icon name="phone" rotate={135} /></button>
       </footer>

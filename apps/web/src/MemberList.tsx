@@ -70,14 +70,14 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
               return (
                 <li key={m.userId} className={`member ${m.online ? "" : "offline"}`}>
                   <button className="member-btn" aria-haspopup="menu" aria-expanded={open?.userId === m.userId} onContextMenu={(e) => openMenu(e, m.userId)} onClick={(e) => openMenu(e, m.userId)}>
-                    <Avatar name={m.displayName} online={m.online} />
+                    <Avatar name={m.displayName} online={m.online} afk={m.afk} />
                     <span className="member-identity"><span style={r?.color ? { color: r.color } : undefined}>{m.displayName}</span>{(m.handle || isMe) && <small>{m.handle && `@${m.handle}`}{m.handle && isMe && " "}{isMe && t("members.you")}</small>}</span>
                     {m.isOwner && <Icon name="crown" className="owner" title={t("members.owner")} />}
                     {m.streamBlocked && <Icon name="video-off" className="muted" title={t("members.streamBlocked")} />}
                   </button>
                   {open?.userId === m.userId && (
                     <ContextMenu anchor={open} label={m.displayName} onClose={() => setOpen(null)}>
-                      <div className="context-identity" role="presentation"><Avatar name={m.displayName} online={m.online} /><strong>{m.displayName}</strong></div>
+                      <div className="context-identity" role="presentation"><Avatar name={m.displayName} online={m.online} afk={m.afk} /><strong>{m.displayName}</strong></div>
                       <div className="muted small">{m.handle && <><strong>@{m.handle}</strong> · </>}{m.publicKey.slice(0, 16)}…</div>
                       {friends && !isMe && (() => {
                         // M7: add friend / write a message. Without a handle the member has no directory account, so friendship is not possible.

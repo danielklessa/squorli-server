@@ -2,6 +2,7 @@ import {
   deriveDmKey, directoryServerUrl, openDm, sealDm,
   type AccountServer, type AccountSettings, type AccountStatus, type DirectoryAccount, type DirectoryServerEvent, type DmConversation, type DmMessage, type Friend, type ServerLeaveResponse,
 } from "@squorli/protocol";
+import { activity } from "./activity";
 import * as api from "./api";
 import { DirectoryLink, type LinkStatus } from "./directoryLink";
 import { loadOrCreateIdentity, storeIdentity, type Identity } from "./identity";
@@ -76,7 +77,7 @@ export class Store {
   /** Set by the voice client: a kick/session loss on `host` ends the voice connection if it runs there. */
   onRemoved: ((host: string) => void) | null = null;
   /** Moderation (M3) on `host`: moving to another voice channel (null = out) and stopping camera/screen. */
-  onVoiceMoved: ((host: string, channelId: string | null, by: string) => void) | null = null;
+  onVoiceMoved: ((host: string, channelId: string | null, by: string, reason: "afk" | null) => void) | null = null;
   onVoiceStop: ((host: string, what: { camera: boolean; screen: boolean }, by: string) => void) | null = null;
   /** Settings as the directory account holds them (null = none there or no account); user changes are pushed when they differ. */
   private accountSettings: AccountSettings | null = null;
@@ -92,6 +93,8 @@ export class Store {
       directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null, friendsError: null,
     };
     subscribeVoiceSettings((_s, source) => { if (source === "user") this.scheduleSettingsPush(); });
+    // AFK detection: every chat server and the directory hear when the user turns idle or comes back (activity.ts).
+    activity.subscribe((idle) => { for (const conn of this.conns.values()) conn.setIdle(idle); this.link?.setIdle(idle); });
   }
 
   subscribe(fn: (s: State) => void) { this.listeners.add(fn); fn(this.state); return () => { this.listeners.delete(fn); }; }
@@ -111,9 +114,10 @@ export class Store {
       // Your own server, or a server the rail does not list yet (first sign-in there): fetch the list again. Servers connected in the
       // background are already on it, asking the directory once per server would be pointless.
       onConnected: () => { if (host === this.homeHost || !(this.state.accountServers ?? []).some((s) => this.hostFor(s.host) === host)) void this.refreshAccountServers(); },
-      onVoiceMoved: (channelId, by) => this.onVoiceMoved?.(host, channelId, by),
+      onVoiceMoved: (channelId, by, reason) => this.onVoiceMoved?.(host, channelId, by, reason),
       onVoiceStop: (what, by) => this.onVoiceStop?.(host, what, by),
     });
+    conn.setIdle(activity.idle);
     this.conns.set(host, conn);
     return conn;
   }
@@ -247,7 +251,8 @@ export class Store {
     if (!id || !url || !this.state.directoryAccount) return;
     const health = await api.directoryHealth(url).catch(() => null);
     if (!health?.features.friends) return;
-    const link = new DirectoryLink(url, id, (e) => this.handleDirectory(e), (status, error) => this.set({ directoryLink: status, directoryLinkError: error ?? null }));
+    const link = new DirectoryLink(url, id, (e) => this.handleDirectory(e), (status, error) => this.set({ directoryLink: status, directoryLinkError: error ?? null }), health.features.afk);
+    link.setIdle(activity.idle);
     this.link = link;
     link.connect();
   }
@@ -283,7 +288,7 @@ export class Store {
         break;
       }
       case "friends.presence":
-        this.set({ friends: (this.state.friends ?? []).map((f) => (f.publicKey === e.publicKey ? { ...f, online: e.online } : f)) });
+        this.set({ friends: (this.state.friends ?? []).map((f) => (f.publicKey === e.publicKey ? { ...f, online: e.online, afk: e.afk } : f)) });
         break;
       case "dm.message": {
         const m = e.message;

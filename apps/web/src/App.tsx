@@ -26,6 +26,8 @@ import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 import { RadioPlayer, type RadioState } from "./voice/radioPlayer";
 import { EmbedPlayer, embedKeyOf, usePlayerWindow, type EmbedSource } from "./EmbedPlayer";
 import { videoAccessOf } from "./voice/videoAccess";
+import { activity, watchActivity } from "./activity";
+import { resumeIdleDetection } from "./idleDetection";
 import { t } from "./i18n";
 
 const peerKeysOf = (members: Member[]): Record<string, string> => Object.fromEntries(members.map((m) => [m.userId, m.publicKey]));
@@ -58,6 +60,13 @@ export function App() {
   const [voiceHost, setVoiceHost] = useState<string | null>(null);
   const voiceHostRef = useRef<string | null>(null);
   voiceHostRef.current = voiceHost;
+  /** Moved to the AFK channel for inactivity: the voice channel the dock offers the way back to (user's decision: never automatically). */
+  const [afkReturn, setAfkReturn] = useState<{ host: string; channelId: string } | null>(null);
+
+  // AFK detection: input in this window, speaking (open gate of an unmuted microphone) and, where the user allowed it,
+  // input anywhere in the system keep the user present (activity.ts); the store reports the state to servers and directory.
+  useEffect(() => { void resumeIdleDetection(activity); return watchActivity(activity); }, []);
+  useEffect(() => client.subscribe((s) => { if (s.gateOpen && !s.micMuted) activity.touch(); }), [client]);
 
   // Camera on/off. With several cameras always ask first (as the user specified), with one switch on directly.
   const toggleCamera = useCallback(async () => {
@@ -103,7 +112,7 @@ export function App() {
     const now = voice.status !== "disconnected";
     if (wasInVoice && !now) {
       if (voiceHostRef.current) store.connection(voiceHostRef.current)?.send({ type: "voice.leave" });
-      setVoiceHost(null); setStageOpen(false);
+      setVoiceHost(null); setStageOpen(false); setAfkReturn(null);
     }
     setWasInVoice(now);
   }, [voice.status]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -114,17 +123,21 @@ export function App() {
 
   const leaveVoice = useCallback(async () => {
     if (voiceHostRef.current) store.connection(voiceHostRef.current)?.send({ type: "voice.leave" });
-    setVoiceHost(null);
+    setVoiceHost(null); setAfkReturn(null);
     await client.leave();
   }, [client, store]);
 
-  /** Join a voice channel on `host`; if voice is running on another server, it is ended there first. */
-  const joinVoice = useCallback(async (host: string, channelId: string) => {
+  /**
+   * Join a voice channel on `host`; if voice is running on another server, it is ended there first. `auto` = not the user's
+   * own step (moved to the AFK channel, the channel's AFK role changed): the view stays as it is and the way back is kept.
+   * `force` joins again although already there (a fresh token with the grants that fit the channel now).
+   */
+  const joinVoice = useCallback(async (host: string, channelId: string, opts: { auto?: boolean; force?: boolean } = {}) => {
     client.prepareAudio(); // still inside the user gesture, before the first await (browsers' autoplay/AudioContext rules)
     const conn = store.connection(host);
     if (!conn) return;
-    setStageOpen(true);
-    if (voiceHostRef.current === host && voice.channelId === channelId) return;
+    if (!opts.auto) { setStageOpen(true); setAfkReturn(null); }
+    if (voiceHostRef.current === host && voice.channelId === channelId && !opts.force) return;
     if (voiceHostRef.current && voiceHostRef.current !== host) await leaveVoice();
     const { url, token } = await conn.api.rtcToken(channelId);
     const ice = new URLSearchParams(window.location.search).get("ice");
@@ -134,6 +147,7 @@ export function App() {
       ...(ice === "relay" ? { iceTransportPolicy: "relay" as const } : {}),
       audio: { bitrate: ch?.audioBitrate ?? 64, stereo: ch?.audioStereo ?? false },
       ...(srv ? { video: { access: videoAccessOf(srv), mayView: hasPermission(srv.myPermissions, Permission.VIEW_VIDEO) }, peerKeys: peerKeysOf(srv.members) } : {}),
+      afk: !!srv && srv.settings.afkChannelId === channelId,
     });
     setVoiceHost(host);
     conn.send({ type: "voice.join", channelId });
@@ -150,6 +164,13 @@ export function App() {
   useEffect(() => {
     if (voiceChannel) void client.setAudioProfile({ bitrate: voiceChannel.audioBitrate, stereo: voiceChannel.audioStereo });
   }, [client, voiceChannel?.audioBitrate, voiceChannel?.audioStereo]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The admin made this channel the AFK channel (or an ordinary one again): join once more, because the token decides what
+  // may be sent and heard there. LiveKit has already enforced it for this connection (server, routes/settings.ts).
+  const voiceChannelIsAfk = !!voiceChannel && voiceServer?.server?.settings.afkChannelId === voiceChannel.id;
+  useEffect(() => {
+    if (voice.status === "connected" && voiceHost && voiceChannel && voiceChannelIsAfk !== voice.afkRoom) void joinVoice(voiceHost, voiceChannel.id, { auto: true, force: true }).catch(() => {});
+  }, [voiceChannelIsAfk, voice.afkRoom, voice.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Web radio of the voice channel: played locally, only while connected there; follows deafen.
   const channelRadio = voice.status === "connected" || voice.status === "reconnecting" ? voiceChannel?.radio ?? null : null;
@@ -177,6 +198,7 @@ export function App() {
   // Permission VIEW_VIDEO: roles or members changed -> the running connection restricts its camera/screen to the members
   // who may watch (enforced by LiveKit), and stops receiving others' feeds when we lost the permission ourselves.
   const voiceState = voiceServer?.server ?? null;
+  const afkReturnChannel = afkReturn && voice.afkRoom ? state.servers[afkReturn.host]?.server?.channels.find((c) => c.id === afkReturn.channelId) ?? null : null;
   useEffect(() => {
     if (voiceState) client.setVideoAccess(videoAccessOf(voiceState), hasPermission(voiceState.myPermissions, Permission.VIEW_VIDEO));
   }, [client, voiceState?.roles, voiceState?.members, voiceState?.settings.ownerId, voiceState?.myPermissions]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -186,9 +208,15 @@ export function App() {
 
   // Moderation (M3): carry out a moderator's move or stop and tell the user what happened.
   useEffect(() => {
-    store.onVoiceMoved = (host, channelId, by) => {
+    store.onVoiceMoved = (host, channelId, by, reason) => {
       if (host !== voiceHostRef.current) return;
-      if (channelId) {
+      if (channelId && reason === "afk") {
+        // Inactivity: into the AFK channel; the dock explains it and offers the way back to where the user was.
+        const from = client.state.channelId;
+        if (from === channelId) return;
+        if (from) setAfkReturn({ host, channelId: from });
+        void joinVoice(host, channelId, { auto: true }).catch(() => {});
+      } else if (channelId) {
         const name = store.connection(host)?.state.server?.channels.find((c) => c.id === channelId)?.name ?? t("app.otherChannel");
         client.setNotice(t("app.movedNotice", { by, name }));
         void joinVoice(host, channelId).catch(() => {});
@@ -282,7 +310,8 @@ export function App() {
         <VoiceDock client={client} voice={voice} channel={voiceChannel} serverName={voiceHost && voiceHost !== activeHost ? voiceServer?.server?.settings.name ?? voiceHost : null}
           displayName={me?.displayName ?? home.me.displayName ?? "…"} onLeave={leaveVoice} onOpenProfile={setMiniProfile} onOpenSettings={() => setSettingsTab("profile")} pttSuspended={capturingPttKey}
           onOpenStage={voiceChannel && !showStage && voiceHost ? () => { store.openServer(voiceHost === state.homeHost ? homeDirHost : voiceHost); setStageOpen(true); } : null}
-          canStream={!!voiceServer?.server && hasPermission(voiceServer.server.myPermissions, Permission.STREAM_VIDEO)} onToggleCamera={toggleCamera} />
+          canStream={!!voiceServer?.server && hasPermission(voiceServer.server.myPermissions, Permission.STREAM_VIDEO)} onToggleCamera={toggleCamera}
+          afkReturn={afkReturn && voice.afkRoom ? { name: afkReturnChannel?.name ?? null, onReturn: () => { void joinVoice(afkReturn.host, afkReturn.channelId).catch(() => {}); } } : null} />
       </div>
 
       <main className="main">

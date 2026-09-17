@@ -1,4 +1,4 @@
-import { AUDIO_BITRATES, type ServerState } from "@squorli/protocol";
+import { AFK_MOVE_MINUTES, AUDIO_BITRATES, DEFAULT_AFK_MOVE_MINUTES, Permission, hasPermission, type ServerState } from "@squorli/protocol";
 import { useRef, useState, type DragEvent } from "react";
 import type { ServerApi } from "./api";
 import { reorderItems } from "./channelOrder";
@@ -118,7 +118,7 @@ export function ChannelsTab({ api, server, run }: { api: ServerApi; server: Serv
         <div key={c.id} className={rowClass("channel-editor", c.id)} {...dropProps("channel", c.id)}>
           <div className="channel-editor-head">
             {dragHandle("channel", c.id, c.name)}
-            <span className="channel-icon" title={t(c.kind === "text" ? "admin.kindText" : "admin.kindVoice")}><Icon name={c.kind === "text" ? "hash" : "volume-2"} /></span>
+            <span className="channel-icon" title={t(c.kind === "text" ? "admin.kindText" : "admin.kindVoice")}><Icon name={c.kind === "text" ? "hash" : c.id === server.settings.afkChannelId ? "moon" : "volume-2"} /></span>
             <input aria-label={t("admin.channelName")} maxLength={64} defaultValue={c.name} onBlur={(e) => { if (e.target.value.trim() && e.target.value.trim() !== c.name) void run(() => api.updateChannel(c.id, { name: e.target.value.trim() })); }} />
             <div className="channel-actions">
               {sortButtons("channel", c.id, c.name)}
@@ -145,6 +145,25 @@ export function ChannelsTab({ api, server, run }: { api: ServerApi; server: Serv
         <select aria-label={t("admin.categories")} value={chCat} onChange={(e) => setChCat(e.target.value)}>{categoryOptions}</select>
         <button disabled={saving || !chName.trim()}>{t("admin.create")}</button>
       </form>
+
+      {/* AFK channel: a server setting (MANAGE_SERVER), kept here because it is about a channel. Hidden on servers from before it. */}
+      {server.settings.afkMoveMinutes !== undefined && hasPermission(server.myPermissions, Permission.MANAGE_SERVER) && (
+        <>
+          <h3>{t("admin.afk")}</h3>
+          <p className="muted small">{t("admin.afkHint")}</p>
+          {channels.some((c) => c.kind === "voice") ? (
+            <div className="channel-editor-fields">
+              <label>{t("admin.afkChannel")}<select value={server.settings.afkChannelId ?? ""} disabled={saving} onChange={(e) => run(() => api.updateSettings({ afkChannelId: e.target.value || null }))}>
+                <option value="">{t("admin.afkNone")}</option>
+                {channels.filter((c) => c.kind === "voice").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select></label>
+              <label>{t("admin.afkAfter")}<select value={server.settings.afkMoveMinutes ?? DEFAULT_AFK_MOVE_MINUTES} disabled={saving || !server.settings.afkChannelId} onChange={(e) => run(() => api.updateSettings({ afkMoveMinutes: Number(e.target.value) }))}>
+                {AFK_MOVE_MINUTES.map((n) => <option key={n} value={n}>{t("admin.afkMinutes", { n })}</option>)}
+              </select></label>
+            </div>
+          ) : <p className="muted small">{t("admin.afkNoVoice")}</p>}
+        </>
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { can } from "../authz";
 import type { Config } from "../config";
 import type { Db } from "../db";
 import { channels } from "../db/schema";
+import { loadSettings } from "../state";
 
 /**
  * The app server decides who may enter which room and issues a
@@ -14,6 +15,8 @@ import { channels } from "../db/schema";
  * Room name = channel id. Permission: member with CONNECT_VOICE and VIEW_CHANNELS.
  * Camera and screen (including screen audio as its own track, PLAN 3.6) only with STREAM_VIDEO;
  * LiveKit enforces this via canPublishSources, not just the client.
+ * The AFK channel (server setting) gets a token without publish and subscribe grants: nobody sends or hears anything
+ * in it, whatever the client does; participants still see who is there.
  */
 export async function registerLivekitRoutes(app: FastifyInstance, db: Db, config: Config) {
   app.post("/api/rtc-token", async (req, reply) => {
@@ -33,8 +36,11 @@ export async function registerLivekitRoutes(app: FastifyInstance, db: Db, config
     });
     const sources = [TrackSource.MICROPHONE];
     if (can(m.actor, Permission.STREAM_VIDEO)) sources.push(TrackSource.CAMERA, TrackSource.SCREEN_SHARE, TrackSource.SCREEN_SHARE_AUDIO);
+    const afk = (await loadSettings(db)).afkChannelId === channel.id;
     // canUpdateOwnMetadata: the client reports "audio off" as a participant attribute so others can see it.
-    at.addGrant({ roomJoin: true, room: channel.id, canPublish: true, canPublishSources: sources, canSubscribe: true, canPublishData: false, canUpdateOwnMetadata: true });
+    at.addGrant(afk
+      ? { roomJoin: true, room: channel.id, canPublish: false, canSubscribe: false, canPublishData: false, canUpdateOwnMetadata: true }
+      : { roomJoin: true, room: channel.id, canPublish: true, canPublishSources: sources, canSubscribe: true, canPublishData: false, canUpdateOwnMetadata: true });
 
     const res: RtcTokenResponse = { url: config.livekitPublicUrl, token: await at.toJwt() };
     return res;

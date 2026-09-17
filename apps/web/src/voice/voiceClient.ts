@@ -63,6 +63,8 @@ export type VoiceStatus = "disconnected" | "connecting" | "connected" | "reconne
 export type VoiceState = {
   status: VoiceStatus;
   channelId: string | null;
+  /** Connected to the server's AFK channel (JoinOptions.afk): nothing is sent or heard there, the controls are locked. */
+  afkRoom: boolean;
   participants: VoiceParticipant[];
   /** Microphone effectively muted (manually or because of deafening); visible to others. */
   micMuted: boolean;
@@ -120,6 +122,11 @@ export type JoinOptions = {
   video?: { access: VideoAccess; mayView: boolean };
   /** LiveKit identity (user id on this server) -> public key, for the per-person playback volume (see setPeerKeys). */
   peerKeys?: Record<string, string>;
+  /**
+   * The server's AFK channel: its token carries no publish or subscribe grant. The client asks for no microphone, shows
+   * microphone and audio as off and refuses camera, screen and the mute buttons until another channel is joined.
+   */
+  afk?: boolean;
 };
 
 export type VideoSendStat = { source: "camera" | "screen"; rid: string; width: number; height: number; fps: number; bytesSent: number; limitation?: string | undefined };
@@ -152,7 +159,7 @@ export class VoiceClient {
   private readonly videoAudioHosts = new Map<string, HTMLElement>();
   private readonly listeners = new Set<(s: VoiceState) => void>();
   state: VoiceState = {
-    status: "disconnected", channelId: null, participants: [], micMuted: false, deafened: false, gateOpen: false, level: 0,
+    status: "disconnected", channelId: null, afkRoom: false, participants: [], micMuted: false, deafened: false, gateOpen: false, level: 0,
     canPlayback: true, audioContext: "none", inputDeviceId: null, cameraOn: false, cameraBlur: 0, screenOn: false, screenAudio: null, tiles: [], notice: null, screenSink: { deviceId: null, tracks: 0, error: null }, audioProfile: null, rtcUrl: null, events: [], error: null,
   };
   private audioProfile: AudioProfile = DEFAULT_AUDIO_PROFILE;
@@ -277,7 +284,8 @@ export class VoiceClient {
     this.mayViewVideo = opts.video?.mayView ?? true;
     this.sentVideoAccess = "";
     this.peerKeys = opts.peerKeys ?? {};
-    this.patch({ status: "connecting", channelId, rtcUrl: url, error: null, audioProfile: this.audioProfile });
+    const afk = opts.afk === true;
+    this.patch({ status: "connecting", channelId, afkRoom: afk, rtcUrl: url, error: null, audioProfile: this.audioProfile });
 
     // adaptiveStream: receive quality depending on the size of the <video> element (simulcast layer), pauses invisible tracks.
     // dynacast: the sender turns off layers nobody subscribes to. Together: PLAN M3 "simulcast layers depending on tile size".
@@ -342,6 +350,15 @@ export class VoiceClient {
       // VIEW_VIDEO before anything is published: restricted members start with nothing and get the microphone once it has a track id.
       this.applyVideoAccess();
       this.applyVideoSubscriptions();
+      if (afk) {
+        // AFK channel: nothing to publish and nothing to hear. Shown as muted and deafened, also to the others in the room.
+        this.micMutedByUser = false;
+        this.patch({ status: mapState(room.state), canPlayback: true, inputDeviceId: null, micMuted: true, deafened: true });
+        await room.localParticipant.setAttributes({ deafened: "1" }).catch(() => {});
+        this.refreshParticipants();
+        this.cueJoined = true;
+        return;
+      }
       // Microphone only after connecting, so a connection error does not also cost a permission prompt.
       const mic = new MicPipeline(settings.vadThreshold, settings.vadHangoverMs, this.ensureCtx());
       this.mic = mic;
@@ -394,7 +411,7 @@ export class VoiceClient {
     this.videoAudioHosts.clear();
     this.audioHost.replaceChildren();
     this.micMutedByUser = false;
-    this.patch({ status: "disconnected", channelId: null, participants: [], gateOpen: false, level: 0, micMuted: false, deafened: false, inputDeviceId: null, cameraOn: false, screenOn: false, screenAudio: null, tiles: [] });
+    this.patch({ status: "disconnected", channelId: null, afkRoom: false, participants: [], gateOpen: false, level: 0, micMuted: false, deafened: false, inputDeviceId: null, cameraOn: false, screenOn: false, screenAudio: null, tiles: [] });
   }
 
   // ---------- Permission VIEW_VIDEO: who receives camera and screen
@@ -446,6 +463,7 @@ export class VoiceClient {
   // ---------- Camera and screen (M3)
 
   async setCameraEnabled(on: boolean, deviceId?: string | null, quality?: "360p" | "720p", blur?: number): Promise<void> {
+    if (on && this.state.afkRoom) return;
     const room = this.room;
     if (!room) return;
     if (deviceId !== undefined) this.camera.deviceId = deviceId;
@@ -531,6 +549,7 @@ export class VoiceClient {
 
   /** Share the screen; audio is always requested and published as its own track (PLAN 3.6). Whether it arrives is up to the browser. */
   async setScreenShareEnabled(on: boolean): Promise<void> {
+    if (on && this.state.afkRoom) return;
     const room = this.room;
     if (!room) return;
     try {
@@ -691,6 +710,7 @@ export class VoiceClient {
    * because an active microphone with the audio turned off makes no sense.
    */
   async setMuted(muted: boolean): Promise<void> {
+    if (this.state.afkRoom) return; // the AFK channel keeps microphone and audio off
     if (!muted && this.state.deafened) { this.micMutedByUser = false; await this.setDeafened(false); return; }
     this.micMutedByUser = muted;
     await this.applyMic();
@@ -701,6 +721,7 @@ export class VoiceClient {
    * the microphone stays muted only if it had been muted by hand before.
    */
   async setDeafened(on: boolean): Promise<void> {
+    if (this.state.afkRoom) return;
     this.patch({ deafened: on });
     for (const { element } of this.remoteAudio.values()) element.muted = on;
     this.applyUserVolumes(); // the boosted path (above 100 %) bypasses the elements and is silenced there

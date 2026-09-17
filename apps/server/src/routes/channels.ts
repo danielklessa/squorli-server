@@ -88,7 +88,8 @@ export async function registerChannelRoutes(app: FastifyInstance, db: Db, hub: H
     const gone = await db.delete(channels).where(eq(channels.id, req.params.id)).returning({ id: channels.id });
     if (!gone.length) return reply.code(404).send({ error: "not_found" });
     presence.clearChannel(req.params.id);
-    await broadcastStructure(db, hub, ["channels"]);
+    // "settings" too: deleting the AFK channel clears server_settings.afk_channel_id (FK set null).
+    await broadcastStructure(db, hub, ["channels", "settings"]);
     return { ok: true };
   });
 }

@@ -18,6 +18,7 @@ export async function loadSettings(db: Db): Promise<ServerSettings> {
     name: row.name, openJoin: row.openJoin, ownerId: row.ownerId,
     requireAccount: requireAccountForced ?? row.requireAccount, requireAccountLocked: requireAccountForced !== null,
     listed: row.listed, description: row.description, radioAutoStop: row.radioAutoStop,
+    afkChannelId: row.afkChannelId, afkMoveMinutes: row.afkMoveMinutes,
     iconUrl: row.iconMime && row.iconUpdatedAt ? `/api/server-icon?v=${row.iconUpdatedAt.getTime()}` : null,
   };
 }
@@ -79,6 +80,7 @@ export async function loadMembers(db: Db, hub: Hub): Promise<Member[]> {
     roleIds: byUser.get(r.userId) ?? [],
     joinedAt: r.joinedAt.toISOString(),
     online: hub.isOnline(r.userId),
+    afk: hub.isAfk(r.userId),
     streamBlocked: r.streamBlocked,
     handle: r.handle,
     isOwner: r.isOwner,

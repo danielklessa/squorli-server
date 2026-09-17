@@ -1,4 +1,4 @@
-import { bigint, bigserial, boolean, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, bigserial, boolean, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
 
 const ts = (name: string) => timestamp(name, { withTimezone: true });
 
@@ -46,6 +46,10 @@ export const serverSettings = pgTable("server_settings", {
   directoryPrivateKey: text("directory_private_key"),
   /** Web radio: turn a channel's radio off once the channel has been empty for two minutes (admin area > server). */
   radioAutoStop: boolean("radio_auto_stop").notNull().default(true),
+  /** AFK channel (admin area > server): absent members are moved here; no sending, no hearing, no radio in it. A deleted channel clears it. */
+  afkChannelId: uuid("afk_channel_id").references((): AnyPgColumn => channels.id, { onDelete: "set null" }),
+  /** Minutes without activity before a member in a voice channel is moved to the AFK channel (5/10/15/30/60). */
+  afkMoveMinutes: integer("afk_move_minutes").notNull().default(5),
 });
 
 /** Membership. Anyone missing here sees nothing and can do nothing. */

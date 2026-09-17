@@ -14,6 +14,12 @@ import { Iso, PublicKey, Signature, Uuid } from "./primitives";
 /** Version of the directory socket; the service rejects older clients with error `version`. */
 export const DIRECTORY_WS_VERSION = 1;
 
+/**
+ * AFK detection: no input (and no speaking) for this long = absent. The chat client measures it and reports it to its chat
+ * servers (`activity` in index.ts) and to the directory (`activity` below), so friends see it too.
+ */
+export const AFK_AFTER_MS = 5 * 60_000;
+
 /** Signature on connect: bound to the directory's host like every other signature. */
 export function directoryWsAuthMessage(directoryHost: string, nonce: string): string {
   return `community-directory-ws\n${directoryHost}\n${nonce}`;
@@ -32,6 +38,8 @@ export const Friend = z.object({
   since: Iso,
   /** Presence via the directory (user decision 2026-09-14): at least one socket connected; only for confirmed friends, otherwise false. */
   online: z.boolean().default(false),
+  /** Online but absent: every socket of the account has reported `activity` idle. Only for confirmed friends, otherwise false. */
+  afk: z.boolean().default(false),
 });
 export type Friend = z.infer<typeof Friend>;
 
@@ -76,7 +84,9 @@ export const DM_DELETE_BOTH_MS = 5 * 60_000;
 export const DmDeleteRequest = z.object({ type: z.literal("dm.delete"), peer: PublicKey, id: Uuid });
 /** Delete a whole conversation for me (the other side keeps its copy). */
 export const DmClearRequest = z.object({ type: z.literal("dm.clear"), peer: PublicKey });
-export const DirectoryClientEvent = z.discriminatedUnion("type", [DirectoryClientAuth, DirectoryClientPing, FriendRequest, DmSend, DmHistoryRequest, DmReadRequest, DmDeleteRequest, DmClearRequest])
+/** This socket's user is idle (AFK_AFTER_MS without activity) or back; a socket counts as active until it says otherwise. Only sent when the directory reports `features.afk`. */
+export const DirectoryClientActivity = z.object({ type: z.literal("activity"), idle: z.boolean() });
+export const DirectoryClientEvent = z.discriminatedUnion("type", [DirectoryClientAuth, DirectoryClientPing, DirectoryClientActivity, FriendRequest, DmSend, DmHistoryRequest, DmReadRequest, DmDeleteRequest, DmClearRequest])
   .or(FriendAction);
 export type DirectoryClientEvent = z.infer<typeof DirectoryClientEvent>;
 
@@ -94,8 +104,8 @@ export const DmReadEvent = z.object({ type: z.literal("dm.read"), peer: PublicKe
 /** Message gone: `both` = deleted at the peer as well (sender within the time limit), otherwise only for me (goes to my other devices). */
 export const DmDeletedEvent = z.object({ type: z.literal("dm.deleted"), peer: PublicKey, id: Uuid, both: z.boolean() });
 export const DmClearedEvent = z.object({ type: z.literal("dm.cleared"), peer: PublicKey });
-/** A confirmed friend has come online or gone. */
-export const FriendPresenceEvent = z.object({ type: z.literal("friends.presence"), publicKey: PublicKey, online: z.boolean() });
+/** A confirmed friend has come online, gone, or turned absent/active (`afk`, only ever true while online). */
+export const FriendPresenceEvent = z.object({ type: z.literal("friends.presence"), publicKey: PublicKey, online: z.boolean(), afk: z.boolean().default(false) });
 export const DirectoryErrorCode = z.enum(["version", "unauthorized", "bad_message", "unknown_account", "self", "not_friends", "blocked", "declined_recently", "rate_limited", "too_large", "duplicate", "not_found"]);
 export type DirectoryErrorCode = z.infer<typeof DirectoryErrorCode>;
 /** `ref` = id of the message (dm.send) or key (friends.*) the error refers to. */

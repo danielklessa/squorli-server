@@ -1,5 +1,5 @@
 import { Permission, UpdateSettingsRequest } from "@squorli/protocol";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import { mkdir, rename, rm } from "node:fs/promises";
@@ -9,17 +9,20 @@ import { requireMember } from "../auth/session";
 import { can } from "../authz";
 import type { Config } from "../config";
 import type { Db } from "../db";
-import { serverSettings } from "../db/schema";
+import { channels, serverSettings } from "../db/schema";
 import type { Hub } from "../hub";
-import { SETTINGS_ID, broadcastStructure, loadSettings, loadState } from "../state";
+import type { LivekitAdmin } from "../livekit/admin";
+import { SETTINGS_ID, actorOf, broadcastStructure, loadSettings, loadState } from "../state";
 import { compact } from "../util";
 import type { DirectoryClient } from "../directory";
+import type { VoicePresence } from "../voice/presence";
+import { RADIO_OFF } from "./radio";
 
 /** Server icon: raster images only (SVG could contain scripts and would be served same-origin), at most 2 MB. */
 const ICON_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const ICON_MAX_BYTES = 2 * 1024 * 1024;
 
-export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: Hub, config: Config, directory: DirectoryClient) {
+export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: Hub, config: Config, directory: DirectoryClient, voice: { presence: VoicePresence; lk: LivekitAdmin; onRadioChange: () => void }) {
   /** Directory (M6d): name, listing, description, open join and icon live at the directory; re-register after a change. */
   // Debounced (1.5 s): several changes in quick succession = one registration (the directory's registration limit is 10/min).
   let reregTimer: NodeJS.Timeout | null = null;
@@ -54,8 +57,28 @@ export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: 
     const body = UpdateSettingsRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
     // REQUIRE_ACCOUNT pinned by configuration: the admin area may not change it.
-    if (body.data.requireAccount !== undefined && (await loadSettings(db)).requireAccountLocked) return reply.code(409).send({ error: "locked_by_config" });
+    const before = await loadSettings(db);
+    if (body.data.requireAccount !== undefined && before.requireAccountLocked) return reply.code(409).send({ error: "locked_by_config" });
+    const afkChannelId = body.data.afkChannelId;
+    if (afkChannelId) {
+      const [ch] = await db.select({ kind: channels.kind }).from(channels).where(eq(channels.id, afkChannelId)).limit(1);
+      if (ch?.kind !== "voice") return reply.code(400).send({ error: "unknown_channel" });
+    }
     await db.update(serverSettings).set(compact(body.data)).where(eq(serverSettings.id, SETTINGS_ID));
+    const afkChanged = afkChannelId !== undefined && afkChannelId !== (before.afkChannelId ?? null);
+    // The new AFK channel loses its radio; LiveKit silences whoever sits in it and gives the old one's members their grants
+    // back. Current clients rejoin with a fresh token on the settings change anyway; this holds for all the others.
+    if (afkChanged && afkChannelId) {
+      const [off] = await db.update(channels).set(RADIO_OFF).where(and(eq(channels.id, afkChannelId), isNotNull(channels.radioStreamUrl))).returning({ id: channels.id });
+      if (off) { await broadcastStructure(db, hub, ["channels"]); voice.onRadioChange(); }
+      for (const vm of voice.presence.members(afkChannelId)) await voice.lk.silence(afkChannelId, vm.userId);
+    }
+    if (afkChanged && before.afkChannelId) {
+      for (const vm of voice.presence.members(before.afkChannelId)) {
+        const actor = await actorOf(db, vm.userId);
+        await voice.lk.setCanStream(before.afkChannelId, vm.userId, !!actor && can(actor, Permission.STREAM_VIDEO));
+      }
+    }
     await broadcastStructure(db, hub, ["settings"]);
     if (body.data.name !== undefined || body.data.listed !== undefined || body.data.description !== undefined || body.data.openJoin !== undefined) reregister();
     return { ok: true };

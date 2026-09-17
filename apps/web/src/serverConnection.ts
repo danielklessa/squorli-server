@@ -70,7 +70,7 @@ export type ConnectionHooks = {
   /** First welcome of a session (not after a reconnect): e.g. refresh the server list at the directory. */
   onConnected: () => void;
   /** Moderation (M3): moving to another voice channel (null = out) and stopping camera/screen. */
-  onVoiceMoved: (channelId: string | null, by: string) => void;
+  onVoiceMoved: (channelId: string | null, by: string, reason: "afk" | null) => void;
   onVoiceStop: (what: { camera: boolean; screen: boolean }, by: string) => void;
 };
 
@@ -102,6 +102,8 @@ export class ServerConnection {
   private liveLatest: ReadState = {};
   private lastReadSync = 0;
   private recountTimer: number | null = null;
+  /** AFK detection: what the user's activity tracker says (activity.ts); reported to servers that know the `activity` event. */
+  private idle = false;
 
   constructor(host: string, base: string, private readonly identity: () => Identity | null, private readonly hooks: ConnectionHooks) {
     this.api = new ServerApi(base);
@@ -224,6 +226,17 @@ export class ServerConnection {
     };
   }
 
+  /** The user turned idle or came back (store.ts). A server counts a fresh connection as active, so only `true` needs repeating after a welcome. */
+  setIdle(idle: boolean) {
+    if (idle === this.idle) return;
+    this.idle = idle;
+    this.reportIdle();
+  }
+  private reportIdle() {
+    // Servers from before the AFK detection do not send the setting and would answer the event with `bad_message`.
+    if (this.state.server?.settings.afkMoveMinutes !== undefined) this.send({ type: "activity", idle: this.idle });
+  }
+
   send(e: ClientEvent) {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
     const text = JSON.stringify(e);
@@ -244,6 +257,7 @@ export class ServerConnection {
         this.set({ server: e.state, userId: e.userId, connection: "connected", currentChannelId: current, error: null, radioTitles: {}, clockOffset: Date.parse(e.serverTime) - Date.now() }); // the server sends the known titles after the welcome
         this.read = pruneReadState(loadReadState(this.state.host, e.userId), e.state.channels.map((c) => c.id));
         void this.syncReadState();
+        if (this.idle) this.reportIdle();
         if (!wasReconnect) this.hooks.onConnected();
         if (this.pingTimer) clearInterval(this.pingTimer);
         this.pingTimer = window.setInterval(() => this.send({ type: "ping", t: Date.now() }), 20_000);
@@ -286,7 +300,7 @@ export class ServerConnection {
         this.set({ voice: { ...this.state.voice, [e.channelId]: e.members } });
         break;
       case "voice.moved":
-        this.hooks.onVoiceMoved(e.channelId, e.by);
+        this.hooks.onVoiceMoved(e.channelId, e.by, e.reason ?? null);
         break;
       case "voice.stop":
         this.hooks.onVoiceStop({ camera: e.camera, screen: e.screen }, e.by);

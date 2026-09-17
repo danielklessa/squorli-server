@@ -56,7 +56,8 @@ async function connectWs(token) {
   const waitFor = (pred, ms = 4000) => new Promise((resolve, reject) => {
     const hit = events.find(pred); if (hit) return resolve(hit);
     const w = { pred, resolve }; waiters.push(w);
-    setTimeout(() => { waiters.splice(waiters.indexOf(w), 1); reject(new Error("timeout waiting for event")); }, ms);
+    // Only a waiter that is still waiting times out: for one already served indexOf is -1, and splice(-1) would remove somebody else's.
+    setTimeout(() => { const i = waiters.indexOf(w); if (i < 0) return; waiters.splice(i, 1); reject(new Error("timeout waiting for event")); }, ms);
   });
   let isClosed = false, closeCode = null;
   ws.on("close", (code) => { isClosed = true; closeCode = code; });
@@ -554,7 +555,44 @@ check("stream unblock restores camera grant", grantOf(unblockedTok.token).canPub
 const [smv2] = await api("POST", `/api/members/${B.userId}/move`, { channelId: null }, owner.token);
 const evMovedOut = await wsB.waitFor((e) => e.type === "voice.moved" && e.channelId === null).catch(() => null);
 check("move out of voice -> voice.moved null", smv2 === 200 && !!evMovedOut);
+
+// ---------- AFK detection: status from the connections' activity reports, AFK channel (setting, silent token, no radio, move)
+const [saf0] = await api("PATCH", "/api/settings", { afkChannelId: voiceCh2.id }, B.token);
+const [saf1] = await api("PATCH", "/api/settings", { afkChannelId: textCh.id }, owner.token);
+const [saf2] = await api("PATCH", "/api/settings", { afkMoveMinutes: 7 }, owner.token);
+const [saf3] = await api("PATCH", "/api/settings", { afkChannelId: voiceCh2.id }, owner.token);
+const [, stAfk] = await api("GET", "/api/state", undefined, owner.token);
+check("afk channel: MANAGE_SERVER, a voice channel, one of the offered times; default 5 minutes", saf0 === 403 && saf1 === 400 && saf2 === 400 && saf3 === 200
+  && stAfk.settings.afkChannelId === voiceCh2.id && stAfk.settings.afkMoveMinutes === 5 && wsA.welcome.state.settings.afkChannelId === null, `${saf0} ${saf1} ${saf2} ${saf3}`);
+const [, afkTok] = await api("POST", "/api/rtc-token", { channelId: voiceCh2.id }, owner.token);
+const [srAfk, radioAfk] = await api("PUT", `/api/channels/${voiceCh2.id}/radio`, { url: streamUrl }, owner.token);
+check("afk channel: token without publish and subscribe grants, no radio", grantOf(afkTok.token).canPublish === false && grantOf(afkTok.token).canSubscribe === false && grantOf(afkTok.token).roomJoin === true
+  && srAfk === 409 && radioAfk.error === "afk_channel", `${JSON.stringify(grantOf(afkTok.token))} ${srAfk}`);
+const afkMoves = () => wsB.events.filter((e) => e.type === "voice.moved" && e.reason === "afk").length;
+const nextAfkMove = (n, ms) => wsB.waitFor((e) => e.type === "voice.moved" && e.reason === "afk" && afkMoves() > n, ms).catch(() => null);
+const afkStateOfB = (afk, from) => wsA.waitFor((e) => e.type === "structure" && e.members?.find((x) => x.userId === B.userId)?.afk === afk && wsA.events.indexOf(e) >= from).catch(() => null);
+wsB.send({ type: "voice.join", channelId: voiceCh.id });
+await wsB.waitFor((e) => e.type === "voice.state" && e.channelId === voiceCh.id && e.members.some((m) => m.userId === B.userId) && wsB.events.indexOf(e) >= wsB.events.length - 1).catch(() => null);
+let mark = wsA.events.length;
+wsB.send({ type: "activity", idle: true });
+const evAfkOn = await afkStateOfB(true, mark);
+const evAfkMove = await nextAfkMove(0, 7000);
+check("idle on every connection -> member afk for everyone, moved to the afk channel", !!evAfkOn && evAfkMove?.channelId === voiceCh2.id, JSON.stringify(evAfkMove));
+mark = wsA.events.length;
+wsB.send({ type: "activity", idle: false });
+const evAfkOff = await afkStateOfB(false, mark);
+// Nobody is moved out of a channel that shows a video; once it ends, the next sweep moves them.
+await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: "https://twitch.tv/squorli_test" }, owner.token);
+wsB.send({ type: "activity", idle: true });
+const evAfkVideo = await nextAfkMove(1, 1500);
+await api("DELETE", `/api/channels/${voiceCh.id}/radio`, undefined, owner.token);
+const evAfkAfterVideo = await nextAfkMove(1, 8000);
+check("activity ends the absence; a channel showing a video keeps its absent members until the video ends", !!evAfkOff && evAfkVideo === null && evAfkAfterVideo?.channelId === voiceCh2.id, `back ${!!evAfkOff}, moved during the video ${!!evAfkVideo}, moved after it ${!!evAfkAfterVideo}`);
+wsB.send({ type: "activity", idle: false });
+wsB.send({ type: "voice.leave" });
 await api("DELETE", `/api/channels/${voiceCh2.id}`, undefined, owner.token);
+const [, stAfkGone] = await api("GET", "/api/state", undefined, owner.token);
+check("deleting the afk channel clears the setting", stAfkGone.settings.afkChannelId === null, String(stAfkGone.settings.afkChannelId));
 
 // ---------- Kick / ban
 const keyC = await newKey();
