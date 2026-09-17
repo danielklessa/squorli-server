@@ -20,6 +20,8 @@ export type VoiceSettings = {
   outputDeviceId: string | null;
   /** Separate output device for screen share audio (null = same as voice). Chromium only (setSinkId). */
   screenOutputDeviceId: string | null;
+  /** Separate output device for the web radio (null = same as voice). Chromium only (setSinkId). */
+  radioOutputDeviceId: string | null;
   cameraDeviceId: string | null;
   /** Send resolution of the camera (simulcast supplies smaller layers automatically). */
   cameraQuality: "360p" | "720p";
@@ -44,6 +46,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   inputDeviceId: null,
   outputDeviceId: null,
   screenOutputDeviceId: null,
+  radioOutputDeviceId: null,
   cameraDeviceId: null,
   cameraQuality: "720p",
   cameraBlur: 0,

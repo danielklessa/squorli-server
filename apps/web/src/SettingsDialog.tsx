@@ -263,6 +263,16 @@ export function SettingsDialog({ api, me, displayName, directoryUrl, directoryAc
                   </select>
                   <span className="muted small">{t("settings.screenAudioHint")}</span>
                 </label>
+                <label className="stack">
+                  {t("settings.radioAudio")}
+                  {/* Only stored: App.tsx hands the choice to the radio player, which switches a running stream over at once. */}
+                  <select value={settings.radioOutputDeviceId ?? ""} disabled={devices.outputs.length === 0}
+                    onChange={(e) => update({ radioOutputDeviceId: e.target.value || null })}>
+                    <option value="">{t("settings.sameAsVoice")}</option>
+                    {devices.outputs.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId}</option>)}
+                  </select>
+                  <span className="muted small">{t("settings.radioAudioHint")}</span>
+                </label>
                 {!joined && <span className="muted small">{t("settings.deviceNamesHint")}</span>}
                 <span className="muted small">{t("settings.devicesLocal")}</span>
               </>

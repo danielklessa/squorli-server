@@ -150,11 +150,13 @@ export function App() {
     if (voiceChannel) void client.setAudioProfile({ bitrate: voiceChannel.audioBitrate, stereo: voiceChannel.audioStereo });
   }, [client, voiceChannel?.audioBitrate, voiceChannel?.audioStereo]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Web radio of the voice channel: played locally, only while connected there; follows deafen and the voice output device.
+  // Web radio of the voice channel: played locally, only while connected there; follows deafen.
   const radioUrl = voice.status === "connected" || voice.status === "reconnecting" ? voiceChannel?.radio?.streamUrl ?? null : null;
   useEffect(() => radio.setStream(radioUrl), [radio, radioUrl]);
   useEffect(() => radio.setDeafened(voice.deafened), [radio, voice.deafened]);
-  useEffect(() => radio.setOutputDevice(voiceSettings.outputDeviceId), [radio, voiceSettings.outputDeviceId]);
+  // Its own output device when one is chosen (settings > audio devices), otherwise where the voices play.
+  const radioSink = voiceSettings.radioOutputDeviceId ?? voiceSettings.outputDeviceId;
+  useEffect(() => radio.setOutputDevice(radioSink), [radio, radioSink]);
 
   // Permission VIEW_VIDEO: roles or members changed -> the running connection restricts its camera/screen to the members
   // who may watch (enforced by LiveKit), and stops receiving others' feeds when we lost the permission ourselves.

@@ -470,6 +470,8 @@ export const de = {
   "settings.screenAudio": "Bildschirm-Ton",
   "settings.sameAsVoice": "Wie Sprache",
   "settings.screenAudioHint": "Ton geteilter Bildschirme getrennt ausgeben, z. B. auf die Lautsprecher statt ins Headset.",
+  "settings.radioAudio": "Webradio",
+  "settings.radioAudioHint": "Das Radio eines Sprachkanals getrennt ausgeben, z. B. auf die Lautsprecher statt ins Headset.",
   "settings.deviceNamesHint": "Geräte-Namen erscheinen nach der ersten Mikrofonfreigabe.",
   "settings.device": "Gerät",
   "settings.cameraPreselect": "Vorauswahl. Beim Einschalten fragt der Client nach Kamera und Hintergrund.",

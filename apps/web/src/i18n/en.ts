@@ -469,6 +469,8 @@ export const en: Messages = {
   "settings.screenAudio": "Screen audio",
   "settings.sameAsVoice": "Same as voice",
   "settings.screenAudioHint": "Play the audio of shared screens separately, e.g. on the speakers instead of the headset.",
+  "settings.radioAudio": "Web radio",
+  "settings.radioAudioHint": "Play the radio of a voice channel separately, e.g. on the speakers instead of the headset.",
   "settings.deviceNamesHint": "Device names appear after the first microphone permission.",
   "settings.device": "Device",
   "settings.cameraPreselect": "Preselection. When turning on, the client asks for camera and background.",
