@@ -1,4 +1,4 @@
-import { BACKUP_MIN_PASSWORD, type InvitePreview } from "@squorli/protocol";
+import { BACKUP_MIN_PASSWORD, EmailAddress, type InvitePreview } from "@squorli/protocol";
 import { useEffect, useState } from "react";
 import * as api from "./api";
 import { askConfirm } from "./dialogs";
@@ -32,6 +32,9 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
   // Device key: register a handle, create a password backup
   const [handle, setHandle] = useState("");
   const [registering, setRegistering] = useState(false);
+  const [regEmail, setRegEmail] = useState("");
+  const [regCode, setRegCode] = useState("");
+  const [regSentTo, setRegSentTo] = useState<string | null>(null);
   const [backupPw, setBackupPw] = useState("");
   const [backupBusy, setBackupBusy] = useState(false);
   // Account: handle + password, plus a code when the authenticator is active (M6c)
@@ -102,9 +105,17 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
     } catch (err) { onLoginError(err); }
   }
 
+  // A directory that wants a confirmed e-mail address registers in two steps: the first mails a code, the second carries it.
+  const emailRequired = state.directoryEmailRequired;
+  const regEmailOk = EmailAddress.safeParse(regEmail).success;
   async function register() {
     setRegistering(true);
-    try { await store.registerHandle(handle.trim().replace(/^@/, "")); } finally { setRegistering(false); }
+    try {
+      const h = handle.trim().replace(/^@/, "");
+      if (!emailRequired) { await store.registerHandle(h); return; }
+      const r = await store.registerHandle(h, regEmail, regSentTo ? regCode : undefined);
+      if (typeof r === "object") { setRegSentTo(r.sentTo); setRegCode(""); }
+    } finally { setRegistering(false); }
   }
   async function backup() {
     setBackupBusy(true);
@@ -177,10 +188,32 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
             <div className="row">
               <span className="muted">@</span>
               <input value={handle} onChange={(e) => setHandle(e.target.value)} placeholder={t("login.handleExample")} maxLength={32}
-                onKeyDown={(e) => { if (e.key === "Enter") void register(); }} disabled={registering} />
-              <button className="secondary" onClick={() => void register()} disabled={registering || handle.trim().length < 3}>{registering ? t("login.registering") : t("login.registerHandle")}</button>
+                onKeyDown={(e) => { if (e.key === "Enter" && !emailRequired) void register(); }} disabled={registering || !!regSentTo} />
+              {!emailRequired && <button className="secondary" onClick={() => void register()} disabled={registering || handle.trim().length < 3}>{registering ? t("login.registering") : t("login.registerHandle")}</button>}
             </div>
             <span className="muted small">{t("login.handleRules")}</span>
+            {emailRequired && (
+              <>
+                <div className="row">
+                  <input type="email" value={regEmail} onChange={(e) => setRegEmail(e.target.value)} placeholder={t("login.registerEmail")} maxLength={254} autoComplete="email" disabled={registering || !!regSentTo}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !regSentTo && regEmailOk && handle.trim().length >= 3) void register(); }} />
+                  {!regSentTo && <button className="secondary" onClick={() => void register()} disabled={registering || handle.trim().length < 3 || !regEmailOk}>{registering ? t("login.emailCodeSending") : t("login.registerSendCode")}</button>}
+                </div>
+                {regSentTo ? (
+                  <>
+                    <div className="row">
+                      <input value={regCode} onChange={(e) => setRegCode(e.target.value.trim())} placeholder={t("login.registerCode")} inputMode="numeric" autoComplete="one-time-code" maxLength={8} autoFocus disabled={registering}
+                        onKeyDown={(e) => { if (e.key === "Enter" && /^\d{8}$/.test(regCode)) void register(); }} />
+                      <button className="secondary" onClick={() => void register()} disabled={registering || !/^\d{8}$/.test(regCode)}>{registering ? t("login.registering") : t("login.registerHandle")}</button>
+                      <button className="secondary" onClick={() => { setRegSentTo(null); setRegCode(""); }} disabled={registering}>{t("login.registerOtherEmail")}</button>
+                    </div>
+                    <span className="muted small">{t("login.registerCodeSent", { to: regSentTo })}</span>
+                  </>
+                ) : (
+                  <span className="muted small">{t("login.registerEmailHint")}</span>
+                )}
+              </>
+            )}
           </>
         ) : (
           <span className="muted small">{t("login.queryingDirectory")}</span>

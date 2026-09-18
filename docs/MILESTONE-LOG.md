@@ -4,6 +4,7 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 | Date | Change |
 |---|---|
+| 2026-09-18 | Directory with `REQUIRE_EMAIL` (user's request in the directory repo): protocol takes `email` + `emailCode` at registration and `features.emailRequired`; the login registers a handle in two steps (address, then the mailed code). No protocol version bump, server unchanged. |
 | 2026-09-18 | A language change no longer ends voice: the reload waits until the voice connection has ended (`store.reloadForLocale`, hint in Einstellungen > Ansicht). User's requirement. |
 | 2026-09-18 | Voice channel list survives a server restart: at the hello the server restores a member's presence from LiveKit's participant list (for clients that do not announce their channel again, desktop app up to 0.1.2), checked again in the heartbeat; no join sound on it (cues only follow LiveKit). User's report. |
 | 2026-09-18 | AFK and voice presence survive dead connections: server heartbeat (`ws/liveness.ts`: ping, terminate after 90 s, silent clients count as idle), client says its voice channel again after a reconnect and replaces a deaf socket (chat and directory connection; the directory service got the same heartbeat). User's report: not moved after 20 minutes, a member in two channels. |

@@ -44,6 +44,8 @@ export type State = {
   /** Account at the directory for your own key; undefined = not checked yet, null = not registered. */
   directoryAccount: DirectoryAccount | null | undefined;
   directoryError: string | null;
+  /** The directory wants a confirmed e-mail address for a new handle (its `features.emailRequired`); asked only while the key has no handle. */
+  directoryEmailRequired: boolean;
   /** Servers the handle has signed in on (directory, AccountStatus.servers): the server rail. null = unknown/no account. */
   accountServers: AccountServer[] | null;
   /** Last failure while saving the settings in the directory account (shown in the settings dialog); null = fine. */
@@ -124,7 +126,7 @@ export class Store {
     this.state = {
       identity: null, homeHost: this.homeHost, activeHost: this.homeHost, servers: home ? { [home.state.host]: home.state } : {},
       signedIn: false, localHosts: [], clientLogin: { busy: false, error: null }, joinInvites: {},
-      directoryUrl: null, directoryAccount: undefined, directoryError: null, accountServers: null, settingsSyncError: null, localeReloadPending: false,
+      directoryUrl: null, directoryAccount: undefined, directoryError: null, directoryEmailRequired: false, accountServers: null, settingsSyncError: null, localeReloadPending: false,
       directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null, friendsError: null,
     };
     subscribeVoiceSettings((_s, source) => { if (source === "user") this.scheduleSettingsPush(); });
@@ -389,7 +391,12 @@ export class Store {
     this.set({ directoryUrl, directoryError: null });
     const id = this.state.identity;
     if (!directoryUrl || !id) { this.set({ directoryAccount: null }); return; }
-    try { this.set({ directoryAccount: await api.directoryLookup(directoryUrl, id.publicKey) }); }
+    try {
+      const account = await api.directoryLookup(directoryUrl, id.publicKey);
+      // A key without a handle may register one: the login has to know whether the directory wants an e-mail address for that.
+      const emailRequired = account ? false : (await api.directoryHealth(directoryUrl)).features.emailRequired;
+      this.set({ directoryAccount: account, directoryEmailRequired: emailRequired });
+    }
     catch (err) { this.set({ directoryAccount: undefined, directoryError: api.explainDirectoryError(err) }); }
     const rail = this.refreshAccountServers();
     void this.connectDirectory();
@@ -640,18 +647,22 @@ export class Store {
     if (this.state.localeReloadPending) this.reloadForLocale();
   }
 
-  /** Register a handle at the directory (M6a). */
-  async registerHandle(handle: string): Promise<boolean> {
+  /**
+   * Register a handle at the directory (M6a). With `directoryEmailRequired` in two calls: with `email` the directory mails a
+   * code (result `{ sentTo }`, the masked address), with `email` and `emailCode` it creates the account.
+   */
+  async registerHandle(handle: string, email?: string, emailCode?: string): Promise<"done" | "failed" | { sentTo: string }> {
     const id = this.state.identity; const url = this.state.directoryUrl;
-    if (!id || !url) return false;
+    if (!id || !url) return "failed";
     this.set({ directoryError: null });
     try {
-      const account = await api.directoryRegister(url, id, handle);
-      this.set({ directoryAccount: account });
-      return true;
+      const res = await api.directoryRegister(url, id, handle, email, emailCode);
+      if ("emailPending" in res) return { sentTo: res.sentTo };
+      this.set({ directoryAccount: res });
+      return "done";
     } catch (err) {
       this.set({ directoryError: api.explainDirectoryError(err) });
-      return false;
+      return "failed";
     }
   }
 

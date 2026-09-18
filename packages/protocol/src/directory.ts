@@ -33,17 +33,38 @@ export const Handle = z
   .max(32)
   .regex(/^[a-z0-9](?:[a-z0-9_.]*[a-z0-9])?$/, "3-32 Zeichen: a-z, 0-9, Punkt, Unterstrich");
 
-/** Registration is bound to the service's host (like sign-in is to PUBLIC_DOMAIN) so signatures cannot be moved elsewhere. */
-export function directoryRegisterMessage(directoryHost: string, handle: string, nonce: string): string {
-  return `community-directory-register\n${directoryHost}\n${handle}\n${nonce}`;
+/** E-mail address of an account (lowercased). At most one account per address (18 September 2026). */
+export const EmailAddress = z.string().trim().toLowerCase().min(6).max(254).regex(/^[^\s@<>()]+@[^\s@<>()]+\.[^\s@<>()]+$/, "E-Mail-Adresse");
+/** E-mail code (confirmation of an address, or the second factor by e-mail): 8 digits, valid once for a few minutes. */
+export const EmailCode = z.string().trim().regex(/^\d{8}$/, "8 Ziffern");
+
+/**
+ * Registration is bound to the service's host (like sign-in is to PUBLIC_DOMAIN) so signatures cannot be moved elsewhere.
+ * With an e-mail address (see DirectoryRegisterRequest) the address is part of the message, so it cannot be swapped.
+ */
+export function directoryRegisterMessage(directoryHost: string, handle: string, nonce: string, email?: string): string {
+  return `community-directory-register\n${directoryHost}\n${handle}\n${nonce}${email === undefined ? "" : `\n${email}`}`;
 }
 
+/**
+ * Registration with a confirmed e-mail address (18 September 2026; mandatory when the service reports `features.emailRequired`,
+ * possible whenever it has SMTP): the first request carries `email`, creates nothing and answers 202 `DirectoryRegisterPending`
+ * after mailing an 8-digit code; the second one (fresh challenge, same handle and address) carries `emailCode` as well and
+ * creates the account with the address confirmed. 400 `email_required` without an address where one is mandatory,
+ * 401 `email_code_invalid` for a wrong, expired or never sent code, 409 `email_taken` only after the code was right (so nobody
+ * learns without access to the mailbox whether an address has an account: a taken address gets a notice instead of a code).
+ */
 export const DirectoryRegisterRequest = z.object({
   handle: Handle,
   publicKey: PublicKey,
   challengeId: Uuid,
   signature: Signature,
+  email: EmailAddress.optional(),
+  emailCode: EmailCode.optional(),
 });
+/** 202 of POST /api/register: the code was mailed; `sentTo` = the address, masked (d***@example.org). */
+export const DirectoryRegisterPending = z.object({ emailPending: z.literal(true), sentTo: z.string() });
+export type DirectoryRegisterPending = z.infer<typeof DirectoryRegisterPending>;
 
 /** Display name (chat server: per server, PLAN 3.2; directory: global and per server). Empty = handle or the short form of the key. */
 export const DisplayName = z.string().trim().min(1).max(32);
@@ -81,8 +102,6 @@ export function directoryBackupMessage(directoryHost: string, nonce: string, cip
 // ---- M6c: second factor. 6 digits = TOTP code, 8 digits = e-mail code (sent to the confirmed address), otherwise a recovery
 // code (xxxxx-xxxxx); the service decides by shape.
 export const SecondFactorCode = z.string().trim().min(6).max(20);
-/** E-mail code (confirmation of an address, or the second factor by e-mail): 8 digits, valid once for a few minutes. */
-export const EmailCode = z.string().trim().regex(/^\d{8}$/, "8 Ziffern");
 
 export const BackupUploadRequest = z.object({
   publicKey: PublicKey,
@@ -116,7 +135,10 @@ export const CodeActionRequest = SignedActionRequest.extend({ code: SecondFactor
 // confirms it. A confirmed address gets a notice on every key retrieval and serves as a fallback second factor: `email-code`
 // (signed, no payload) or POST /api/email/code with handle + auth key (i.e. after the correct password) mails a code that
 // counts like an authenticator code wherever `SecondFactorCode` is accepted.
-export const EmailAddress = z.string().trim().toLowerCase().min(6).max(254).regex(/^[^\s@<>()]+@[^\s@<>()]+\.[^\s@<>()]+$/, "E-Mail-Adresse");
+// An address belongs to at most one account (18 September 2026): `email-set` for an address another account has confirmed
+// mails a notice instead of a code, `email-verify` answers 409 `email_taken` if another account confirmed it in the meantime.
+// With `features.emailRequired` a confirmed address can be replaced but not removed (409 `email_required`).
+// `EmailAddress` and `EmailCode` are defined above the registration, which uses them too.
 export const EmailUpdateRequest = SignedActionRequest.extend({ email: EmailAddress.nullable() });
 export const EmailVerifyRequest = SignedActionRequest.extend({ code: EmailCode });
 /** Request an e-mail code with the password (sign-in without the authenticator): same proof as BackupFetchRequest. */
@@ -299,8 +321,8 @@ export const DirectoryHealth = z.object({
   service: z.literal("directory"),
   /** Host that registration signatures are bound to. */
   host: z.string(),
-  /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. `email`: SMTP configured (address, notices, e-mail code). `settings`: the account stores all client settings (action `settings`). `afk`: the socket takes `activity` and friends carry `afk` (AFK detection). */
-  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false), settings: z.boolean().default(false), afk: z.boolean().default(false) }),
+  /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. `email`: SMTP configured (address, notices, e-mail code). `settings`: the account stores all client settings (action `settings`). `afk`: the socket takes `activity` and friends carry `afk` (AFK detection). `emailRequired`: new handles need a confirmed e-mail address (REQUIRE_EMAIL; registration in two steps, see DirectoryRegisterRequest). */
+  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false), settings: z.boolean().default(false), afk: z.boolean().default(false), emailRequired: z.boolean().default(false) }),
   time: Iso,
 });
 

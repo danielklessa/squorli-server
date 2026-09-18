@@ -1,5 +1,5 @@
 import {
-  AccountStatus, Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, EmailCodeResponse, FriendSearchResponse, ServerLeaveResponse, ServerListResponse, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
+  AccountStatus, Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, DirectoryRegisterPending, EmailAddress, EmailCode, EmailCodeResponse, FriendSearchResponse, ServerLeaveResponse, ServerListResponse, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
   BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryActionMessage, directoryBackupMessage, directoryProfilePayload,
   directoryRegisterMessage, directorySoundSettingsPayload, openBackup, type AccountSettings, type SoundSettings,
   MuteState, ReadStateResponse, type Attachment, type Category, type Channel, type RadioStation, type Role,
@@ -175,13 +175,20 @@ export async function directoryLookup(dirUrl: string, publicKey: string): Promis
   try { return DirectoryAccount.parse(await directoryFetch(dirUrl, "GET", `/api/keys/${publicKey}`)); }
   catch (e) { if (e instanceof ApiError && e.status === 404) return null; throw e; }
 }
-/** Register a handle: proof of ownership via a signature over a challenge, bound to the service's host. */
-export async function directoryRegister(dirUrl: string, id: Identity, rawHandle: string): Promise<DirectoryAccount> {
+/**
+ * Register a handle: proof of ownership via a signature over a challenge, bound to the service's host. A directory that reports
+ * `features.emailRequired` wants a confirmed e-mail address: the call with `email` mails an 8-digit code and returns
+ * `{ sentTo }` (the masked address), the call with `email` and `emailCode` creates the account.
+ */
+export async function directoryRegister(dirUrl: string, id: Identity, rawHandle: string, rawEmail?: string, rawCode?: string): Promise<DirectoryAccount | DirectoryRegisterPending> {
   const handle = Handle.parse(rawHandle);
+  const email = rawEmail === undefined ? undefined : EmailAddress.parse(rawEmail);
+  const emailCode = rawCode === undefined ? undefined : EmailCode.parse(rawCode);
   const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
   const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
-  const signature = await sign(id, directoryRegisterMessage(health.host, handle, ch.nonce));
-  return DirectoryAccount.parse(await directoryFetch(dirUrl, "POST", "/api/register", { handle, publicKey: id.publicKey, challengeId: ch.challengeId, signature }));
+  const signature = await sign(id, directoryRegisterMessage(health.host, handle, ch.nonce, email));
+  const res = await directoryFetch<Record<string, unknown>>(dirUrl, "POST", "/api/register", { handle, publicKey: id.publicKey, challengeId: ch.challengeId, signature, ...(email ? { email } : {}), ...(emailCode ? { emailCode } : {}) });
+  return res.emailPending === true ? DirectoryRegisterPending.parse(res) : DirectoryAccount.parse(res);
 }
 /** M6b: store a password backup of your own key (ciphertext signed, the password stays in the client). */
 export async function directoryBackupUpload(dirUrl: string, id: Identity, password: string): Promise<void> {
@@ -261,6 +268,7 @@ export function explainDirectoryError(err: unknown): string {
       case "auth_invalid": case "no_backup": case "no_account": case "not_found": case "bad_handle": case "handle_taken": case "rate_limited":
       case "signature_invalid": case "challenge_invalid": case "totp_required": case "totp_invalid": case "totp_reused": case "server_unknown": case "totp_unavailable":
       case "founder": case "server_refused": case "email_unavailable": case "no_email": case "mail_failed": case "totp_disabled":
+      case "email_required": case "email_code_invalid": case "email_taken":
         return t(`dir.${err.code}`);
       case "key_registered": return t("dir.key_registered", { handle: String(err.body.handle ?? "?") });
       case "bad_request": return t("dir.bad_request", { detail: String(err.body.detail ?? t("dir.handleRules")) });

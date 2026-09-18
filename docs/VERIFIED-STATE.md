@@ -4,6 +4,8 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 Base check of the complete workflow: 14 September 2026, Windows 11, Node 25.2.1, pnpm 10.15.0, Docker 29, LiveKit 1.13.6.
 
+- **Directory: e-mail address required for new handles (18 September 2026):** `pnpm typecheck` 4/4, tests protocol 53 (`directory.test.ts` 4 new), server 47, web 217, desktop 18, `pnpm build` green; protocol copies in `../squorli-directory` synchronized (`diff -r`), its typecheck, tests and smoke test green (147 / 148 with `REQUIRE_EMAIL`). The login's handle registration driven in headless Chrome against a test server on :3001 and a `REQUIRE_EMAIL` directory on :3101 (docs/features/directory.md). Not checked: `pnpm smoke` here (server unchanged), desktop shell, Firefox.
+
 - **Language change while in voice (18 September 2026):** `pnpm typecheck` 4/4, web tests 217, `pnpm build` green; checked in headless Chrome against a test server on :3001 (docs/features/settings.md). Not checked: desktop shell, the account's language arriving while in voice.
 
 - **Voice presence after a server restart (18 September 2026):** `pnpm typecheck` 4/4, server tests 47 (`presence.test.ts` 5), web 217, `pnpm build` green; restart of a test server on :3001 under a client in voice, today's and a simulated old client (docs/features/voice-video.md). Not checked: several members, production.
