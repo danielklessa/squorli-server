@@ -1,11 +1,12 @@
 import { Avatar } from "./Avatar";
 import type { Channel } from "@squorli/protocol";
-import { useEffect, useRef, type MouseEvent } from "react";
+import { type MouseEvent } from "react";
 import type { MenuAnchor } from "./ContextMenu";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
 import type { VoiceClient, VoiceState } from "./voice/voiceClient";
 import { Icon } from "./Icon";
 import { t, tOr } from "./i18n";
+import { usePushToTalk } from "./usePushToTalk";
 
 type Props = {
   client: VoiceClient;
@@ -29,14 +30,9 @@ type Props = {
   afkReturn: { name: string | null; onReturn: () => void } | null;
 };
 
-const isTypingTarget = (t: EventTarget | null) =>
-  t instanceof HTMLElement && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
-
 /** Bottom area of the sidebar: voice status with mute and leave, below it your own name (mini profile) and the gear (settings). */
 export function VoiceDock({ client, voice, channel, serverName, displayName, onLeave, onOpenProfile, onOpenSettings, pttSuspended, onOpenStage, canStream, onToggleCamera, afkReturn }: Props) {
   const settings = useVoiceSettings();
-  const settingsRef = useRef(settings);
-  settingsRef.current = settings;
   const joined = voice.status !== "disconnected";
   const openProfile = (event: MouseEvent<HTMLButtonElement>) => {
     // Upwards from the name row, flush with the dock's box and as wide as it, with a clear gap (user's wish); the menu clamps itself into the viewport.
@@ -45,19 +41,7 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, onL
     onOpenProfile({ trigger: event.currentTarget, x: dock.left, y: row.top - 8, above: true, width: dock.width });
   };
 
-  // Push-to-talk: only while the tab has focus (a platform limit in the browser, PLAN 3.5).
-  useEffect(() => {
-    if (!joined || settings.mode !== "ptt") { client.setPttHeld(false); return; }
-    const down = (e: KeyboardEvent) => {
-      if (pttSuspended || isTypingTarget(e.target) || e.code !== settingsRef.current.pttKey) return;
-      e.preventDefault();
-      if (!e.repeat) client.setPttHeld(true);
-    };
-    const up = (e: KeyboardEvent) => { if (e.code === settingsRef.current.pttKey) client.setPttHeld(false); };
-    const release = () => client.setPttHeld(false);
-    window.addEventListener("keydown", down); window.addEventListener("keyup", up); window.addEventListener("blur", release);
-    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); window.removeEventListener("blur", release); release(); };
-  }, [joined, settings.mode, pttSuspended, client]);
+  usePushToTalk(window, client, joined, pttSuspended);
 
   const levelPct = Math.min(100, Math.round(voice.level * 400));
   const thresholdPct = Math.min(100, Math.round(settings.vadThreshold * 400));

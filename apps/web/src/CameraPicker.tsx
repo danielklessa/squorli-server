@@ -14,6 +14,8 @@ type Props = {
   initialBlur: number;
   onPick: (deviceId: string, blur: number) => void;
   onCancel: () => void;
+  /** The window the dialog is shown in (the stage's own window, StageWindow.tsx). */
+  win?: Window;
 };
 
 export const BLUR_OPTIONS: { value: number; label: string }[] = [
@@ -27,7 +29,7 @@ export const BLUR_OPTIONS: { value: number; label: string }[] = [
  * Own modal with a live preview; the preview is an unpublished LiveKit track so the blur
  * (BackgroundBlur processor) looks exactly as it later will in the channel. No browser dialog.
  */
-export function CameraPicker({ cameras, initial, initialBlur, onPick, onCancel }: Props) {
+export function CameraPicker({ cameras, initial, initialBlur, onPick, onCancel, win = window }: Props) {
   const [selected, setSelected] = useState(() => (initial && cameras.some((c) => c.deviceId === initial) ? initial : cameras[0]?.deviceId ?? ""));
   const [blur, setBlur] = useState(VoiceClient.supportsBlur() ? initialBlur : 0);
   const [err, setErr] = useState<string | null>(null);
@@ -80,8 +82,8 @@ export function CameraPicker({ cameras, initial, initialBlur, onPick, onCancel }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); if (e.key === "Enter" && selected) pick(); };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    win.addEventListener("keydown", onKey, true);
+    return () => win.removeEventListener("keydown", onKey, true);
   }); // deliberately without dependencies: always reads the current state
 
   return (

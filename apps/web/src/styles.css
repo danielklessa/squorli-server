@@ -734,6 +734,9 @@ button.icon.on { color: var(--brand); }
 .tile:fullscreen video { object-fit: contain; }
 .tile:fullscreen .tile-window-actions, .video-window:fullscreen .tile-window-actions { top: 1rem; right: 1rem; }
 .video-window-body { margin: 0; height: 100dvh; overflow: hidden; background: #000; }
+/* The whole stage in a window of its own (StageWindow.tsx): the stage fills it; no debug button to leave room for. */
+.stage-window-body { margin: 0; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; }
+.stage-window-body .chat-head { padding-right: 1rem; }
 .video-window { position: relative; width: 100%; height: 100%; background: #000; outline: none; }
 .video-window > video { display: block; width: 100%; height: 100%; object-fit: contain; }
 .video-window > video.mirror { transform: scaleX(-1); }

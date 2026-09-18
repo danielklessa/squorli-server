@@ -209,7 +209,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
               <>
                 <h3>{t("common.language")}</h3>
                 <select value={localePreference()} disabled={busy} onChange={(e) => void changeLocale(e.target.value as LocalePreference)}>
-                  <option value="auto">{t(platform.kind === "desktop" ? "lang.autoSystem" : "lang.auto")}</option>
+                  <option value="auto">{t("lang.auto")}</option>
                   {LOCALES.map((l) => <option key={l} value={l}>{t(`lang.${l}`)}</option>)}
                 </select>
                 <span className="muted small">{t("profile.languageHint")}</span>
@@ -243,6 +243,8 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
                 </label>
                 <span className="muted small">{t("settings.featureSelfHint")}</span>
                 <h3>{t("settings.idle")}</h3>
+                {/* The desktop app detects input in the whole system by itself (platform.systemIdle): an explanation, no switch. */}
+                {platform.systemIdle === "always" ? <span className="muted small">{t("settings.idleHintApp")}</span> : <>
                 <label className="check">
                   {/* The permission prompt only opens inside the click, so the switch asks right here. */}
                   <input type="checkbox" checked={idleDetect} disabled={!idleDetectionSupported()} onChange={(e) => { const on = e.target.checked; void setIdleDetection(activity, on).then((ok) => { setIdleDetect(ok); setIdleDenied(on && !ok); }); }} />
@@ -251,6 +253,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
                 <span className="muted small">{t("settings.idleHint")}</span>
                 {!idleDetectionSupported() && <span className="muted small">{t("settings.idleUnsupported")}</span>}
                 {idleDenied && <span className="error small">{t("settings.idleDenied")}</span>}
+                </>}
               </>
             )}
 

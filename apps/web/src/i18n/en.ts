@@ -16,7 +16,6 @@ export const en: Messages = {
   "common.dismiss": "Dismiss",
   "common.language": "Language",
   "lang.auto": "Browser language",
-  "lang.autoSystem": "System language",
   "lang.de": "Deutsch",
   "lang.en": "English",
 
@@ -521,6 +520,7 @@ export const en: Messages = {
   "settings.idle": "Away status",
   "settings.idleDetect": "Detect input anywhere in the system",
   "settings.idleHint": "After 10 minutes without input and without speaking you count as away: others see it in the member list and in the friends list, and in a voice channel the server moves you to the AFK channel. Without this option only input in the Squorli window counts. With it the browser also notices input in other programs and the screen lock; it asks for your permission once. Applies to this browser only.",
+  "settings.idleHintApp": "After 10 minutes without input on this computer and without speaking you count as away: others see it in the member list and in the friends list, and in a voice channel the server moves you to the AFK channel. For this the app also notices input in other programs and the screen lock; only whether you are active or away is sent.",
   "settings.idleUnsupported": "This browser cannot do that (only Chrome, Edge and other Chromium browsers). Input in the Squorli window and speaking count.",
   "settings.idleDenied": "The browser did not grant the permission. You can allow it in the browser's site settings.",
   "settings.featureSelfHint": "When off, the speaker view only shows others large, even while only you are speaking. The green speaking outline stays, and you can still enlarge your tile with a click.",
@@ -548,7 +548,7 @@ export const en: Messages = {
   "settings.key": "Key:",
   "settings.pressKey": "Press a key …",
   "settings.change": "change",
-  "settings.pttHint": "In the browser only while this tab has focus. Global hotkey: desktop client (M4).",
+  "settings.pttHint": "In the browser only while this tab has focus. A global hotkey is planned for the desktop app.",
   "settings.input": "Input",
   "settings.microphone": "Microphone",
   "settings.default": "Default",
@@ -578,6 +578,9 @@ export const en: Messages = {
   "stage.popupVideoHint": "Video. Double-click or press F for fullscreen.",
   "stage.popupVolume": "Volume",
   "stage.popout": "Open in a separate window",
+  "stage.popoutStage": "Open the stage in its own window",
+  "stage.restoreStage": "Bring the stage back into the main window",
+  "stage.playerInMain": "The player runs in the main window.",
   "stage.fullscreen": "Fullscreen",
   "stage.exitFullscreen": "Exit fullscreen",
   "stage.fullscreenUnavailable": "This browser does not support fullscreen here.",
@@ -769,6 +772,8 @@ export const en: Messages = {
 
   // ---- Voice core
   "voice.screenNoAudioChromium": "The screen is shared without audio. Audio is only included when the browser dialog selects a tab (\"Share tab audio\") or, on Windows, the entire screen with \"Share system audio\"; single windows carry no audio.",
+  "voice.screenNoAudioApp": "The screen is shared without audio. For audio, start the share again and tick \"Share system audio\" (screen) or \"Share this window's audio\" (window) in the picker.",
+  "voice.screenNoAudioAppOs": "The screen is shared without audio: the app can currently send a share's audio on Windows only.",
   "voice.screenNoAudioOther": "The screen is shared without audio: this browser delivers no audio with a screen share. Audio works in Chrome, Edge or Brave.",
   "voice.iceHint": "The media connection (ICE) did not come up or dropped. Check: 7882/udp and 7881/tcp on the router to the chat host, does LiveKit know its public IP (LIVEKIT_NODE_IP)? The dev stack (compose.dev.yml) offers 127.0.0.1 and is never reachable from outside.",
   "voice.disc.unknown": "unknown",

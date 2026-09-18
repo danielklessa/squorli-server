@@ -12,6 +12,7 @@ import type { RadioPlayer } from "./voice/radioPlayer";
 import { VoiceClient, explainScreenAudio, isChromium, type VideoTile, type VoiceParticipant, type VoiceState } from "./voice/voiceClient";
 import { Icon } from "./Icon";
 import { t } from "./i18n";
+import { platform } from "./platform";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
 
 type Props = {
@@ -35,9 +36,14 @@ type Props = {
   onToggleCamera: () => Promise<void>;
   onToggleBlur: () => Promise<void>;
   onLeave: () => Promise<void>;
-  onPopout: (tile: VideoTile) => void;
+  /** `opener`: the window the click happened in (a browser lets only that one open a window). */
+  onPopout: (tile: VideoTile, opener?: Window) => void;
   poppedIds: Set<string>;
   onRestore: (id: string) => void;
+  /** This stage is the one in a window of its own (StageWindow.tsx); the button in the head then brings it back. */
+  detached: boolean;
+  /** Move the whole stage into a window of its own, or back. May throw with a text for the user (window refused). */
+  onToggleWindow: () => void;
 };
 
 type Layout = "grid" | "focus";
@@ -50,7 +56,7 @@ type Item = { key: string; participant: VoiceParticipant; tile: VideoTile | null
  * "Speaker" follows the active speaker or the newest screen share without pinning.
  * Receive quality follows the tile size (adaptiveStream in the voice core); here the <video> only has to have the right size.
  */
-export function VoiceStage({ client, voice, channel, members, myPermissions, api, radio, radioStations, radioTitle, playerTile, playerPopped, onRestorePlayer, onToggleCamera, onToggleBlur, onLeave, onPopout, poppedIds, onRestore }: Props) {
+export function VoiceStage({ client, voice, channel, members, myPermissions, api, radio, radioStations, radioTitle, playerTile, playerPopped, onRestorePlayer, onToggleCamera, onToggleBlur, onLeave, onPopout, poppedIds, onRestore, detached, onToggleWindow }: Props) {
   // Names from the server's member list (arrives via WS immediately on every rename), not from the LiveKit token,
   // which is only created on joining. Unknown identities (bots, "external") keep the LiveKit name.
   const participants = voice.participants.map((p) => {
@@ -97,7 +103,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
     ?? null;
   const focus = items.find((i) => i.key === focusKey) ?? null;
   const rest = items.filter((i) => i.key !== focusKey);
-  const screenHint = explainScreenAudio(voice);
+  const screenHint = explainScreenAudio(voice, platform.kind === "desktop" ? { audioPossible: platform.os === "windows" } : undefined);
   const grid = useFittedGrid(items.length);
 
   // A share's audio plays only for who selected that share (clicked it large) or popped it out (VideoWindows.tsx); a share
@@ -134,6 +140,8 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
           <button className={layout === "focus" ? "active" : ""} title={t("stage.speakerHint")} onClick={() => setLayout("focus")}>{t("stage.speaker")}</button>
           <button className={layout === "grid" ? "active" : ""} title={t("stage.gridHint")} onClick={() => setLayout("grid")}>{t("stage.grid")}</button>
         </div>
+        <button className="icon" title={t(detached ? "stage.restoreStage" : "stage.popoutStage")} aria-label={t(detached ? "stage.restoreStage" : "stage.popoutStage")}
+          onClick={() => { try { onToggleWindow(); } catch (error) { client.setNotice(error instanceof Error ? error.message : t("stage.popupFailed")); } }}><Icon name={detached ? "undo-2" : "external-link"} /></button>
       </header>
 
       {voice.error && <p className="error small stage-hint">{voice.error}</p>}
@@ -148,17 +156,17 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
       ) : layout === "grid" || !focus ? (
         <div className="stage-grid" ref={grid.ref}>
           <div className="stage-grid-inner" style={{ gridTemplateColumns: `repeat(${grid.cols}, ${grid.tileWidth}px)` }}>
-            {items.map((i) => i.kind === "player" ? <PlayerTile key={i.key} popped={playerPopped} onRestore={onRestorePlayer} />
+            {items.map((i) => i.kind === "player" ? <PlayerTile key={i.key} popped={playerPopped} elsewhere={detached} onRestore={onRestorePlayer} />
               : <Tile key={i.key} item={i} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} onMenu={openMenu} pinned={false} onClick={() => focusOn(i.key)} />)}
           </div>
         </div>
       ) : (
         <div className="stage-focus">
-          <div className="stage-main">{focus.kind === "player" ? <PlayerTile big popped={playerPopped} onRestore={onRestorePlayer} />
+          <div className="stage-main">{focus.kind === "player" ? <PlayerTile big popped={playerPopped} elsewhere={detached} onRestore={onRestorePlayer} />
             : <Tile item={focus} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} onMenu={openMenu} big pinned={pinned === focus.key} onClick={unfocus} />}</div>
           {rest.length > 0 && (
             <div className="stage-strip">
-              {rest.map((i) => i.kind === "player" ? <PlayerTile key={i.key} popped={playerPopped} onRestore={onRestorePlayer} />
+              {rest.map((i) => i.kind === "player" ? <PlayerTile key={i.key} popped={playerPopped} elsewhere={detached} onRestore={onRestorePlayer} />
                 : <Tile key={i.key} item={i} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} onMenu={openMenu} pinned={false} onClick={() => focusOn(i.key)} />)}
             </div>
           )}
@@ -199,7 +207,8 @@ function useFittedGrid(n: number) {
     if (!el) return;
     const measure = () => setSize({ w: el.clientWidth, h: el.clientHeight });
     measure();
-    const ro = new ResizeObserver(measure);
+    // The observer of the window the stage lives in (it can be one of its own): another window's is not reliable.
+    const ro = new (el.ownerDocument.defaultView ?? window).ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, [el]);
@@ -224,16 +233,19 @@ function useFittedGrid(n: number) {
  * Twitch's or YouTube's player as a tile. The tile only reserves the room: the player (EmbedPlayer, mounted in App) lays itself over it
  * completely and brings its own controls; ours is the pop-out button it shows on hover. Enlarging works through the
  * "Sprecher" view, where this tile counts like a screen share.
+ * `elsewhere`: this stage is in a window of its own. The player is one iframe of the main window and moving it would
+ * reload it, so it stays there (floating, or in its own window) and the tile only says so.
  */
-function PlayerTile({ big, popped, onRestore }: { big?: boolean; popped: boolean; onRestore: () => void }) {
+function PlayerTile({ big, popped, elsewhere, onRestore }: { big?: boolean; popped: boolean; elsewhere: boolean; onRestore: () => void }) {
   return (
     <div className={`tile screen embed ${big ? "big" : ""}`}>
-      {popped ? <div className="tile-popped"><Icon name="external-link" /><span>{t("stage.poppedOut")}</span><button className="secondary small" onClick={onRestore}>{t("stage.restoreVideo")}</button></div> : <EmbedSlot />}
+      {elsewhere ? <div className="tile-popped"><Icon name="radio" /><span>{t(popped ? "stage.poppedOut" : "stage.playerInMain")}</span></div>
+        : popped ? <div className="tile-popped"><Icon name="external-link" /><span>{t("stage.poppedOut")}</span><button className="secondary small" onClick={onRestore}>{t("stage.restoreVideo")}</button></div> : <EmbedSlot />}
     </div>
   );
 }
 
-function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onRestore, onMenu }: { item: Extract<Item, { participant: VoiceParticipant }>; client: VoiceClient; big?: boolean; pinned: boolean; onClick: () => void; onPopout: (tile: VideoTile) => void; poppedIds: Set<string>; onRestore: (id: string) => void; onMenu: (item: Item, event: ReactMouseEvent<HTMLElement>) => void }) {
+function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onRestore, onMenu }: { item: Extract<Item, { participant: VoiceParticipant }>; client: VoiceClient; big?: boolean; pinned: boolean; onClick: () => void; onPopout: (tile: VideoTile, opener?: Window) => void; poppedIds: Set<string>; onRestore: (id: string) => void; onMenu: (item: Item, event: ReactMouseEvent<HTMLElement>) => void }) {
   const { participant: p, tile } = item;
   const ref = useRef<HTMLDivElement>(null);
   const target = useCallback(() => ref.current, []);
@@ -254,7 +266,7 @@ function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onResto
     <div ref={ref} className={cls} onClick={() => { if (!ref.current?.ownerDocument.fullscreenElement) onClick(); }} onContextMenu={(event) => onMenu(item, event)} title={big ? t("stage.backToGrid") : t("stage.enlarge")}>
       {popped ? <div className="tile-popped"><Icon name="external-link" /><span>{t("stage.poppedOut")}</span><button className="secondary small" onClick={(event) => { event.stopPropagation(); onRestore(tile!.id); }}>{t("stage.restoreVideo")}</button></div> : tile ? <TrackVideo tile={tile} /> : <Avatar name={p.name} size="large" />}
       {tile && !popped && <div className="tile-window-actions" onClick={(event) => event.stopPropagation()}>
-        <button className="icon" title={t("stage.popout")} aria-label={t("stage.popout")} onClick={() => { setError(""); try { onPopout(tile); } catch (error) { setError(error instanceof Error ? error.message : t("stage.popupFailed")); } }}><Icon name="external-link" /></button>
+        <button className="icon" title={t("stage.popout")} aria-label={t("stage.popout")} onClick={() => { setError(""); try { onPopout(tile, ref.current?.ownerDocument.defaultView ?? undefined); } catch (error) { setError(error instanceof Error ? error.message : t("stage.popupFailed")); } }}><Icon name="external-link" /></button>
         <FullscreenButton target={target} onError={setError} />
       </div>}
       {error && <div className="tile-window-error" role="alert" onClick={(event) => event.stopPropagation()}>{error}<button className="icon" title={t("common.dismiss")} onClick={() => setError("")}><Icon name="x" /></button></div>}

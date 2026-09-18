@@ -1,5 +1,7 @@
 import { de } from "./de";
 import { en } from "./en";
+import { appDe } from "./app.de";
+import { appEn } from "./app.en";
 
 /**
  * Client texts in German and English. The locale is fixed at page load: an explicit choice in localStorage wins,
@@ -14,6 +16,17 @@ export type LocalePreference = Locale | "auto";
 export const LOCALES: readonly Locale[] = ["de", "en"];
 const STORAGE_KEY = "chat.locale";
 const CATALOGS: Record<Locale, Messages> = { de, en };
+/**
+ * The desktop app words some texts differently ("this device" instead of "this browser"): `app.de.ts`, `app.en.ts` hold
+ * only those keys and win while the client runs in the app. Recognised like `platform/index.ts` does, by the bridge of the
+ * shell's preload script; not imported from there, because the platform modules use `t()` themselves.
+ */
+export const APP_TEXTS: Record<Locale, Partial<Record<MessageKey, string>>> = { de: appDe, en: appEn };
+const inApp = typeof window !== "undefined" && (window as { squorliDesktop?: unknown }).squorliDesktop !== undefined;
+/** Pure, tested: the app's wording first (when in the app), then the locale's catalog, then German. */
+export function lookupText(key: string, lang: Locale, app: boolean): string | undefined {
+  return (app ? (APP_TEXTS[lang] as Record<string, string>)[key] : undefined) ?? (CATALOGS[lang] as Record<string, string>)[key] ?? (de as Record<string, string>)[key];
+}
 
 const isLocale = (v: unknown): v is Locale => v === "de" || v === "en";
 
@@ -74,14 +87,13 @@ export const localeTag: string = browserLanguages().find((l) => l.toLowerCase().
 
 /** Text for `key`; {name} placeholders are replaced from `params`. Unknown keys fall back to German, then to the key itself. */
 export function t(key: MessageKey, params?: Record<string, string | number>): string {
-  const s: string = CATALOGS[locale][key] ?? de[key] ?? key;
+  const s: string = lookupText(key, locale, inApp) ?? key;
   return params ? s.replace(/\{(\w+)\}/g, (m, k: string) => (k in params ? String(params[k]) : m)) : s;
 }
 
 /** Like t() for keys built at runtime (e.g. `conn.${state}`); falls back to `fallback` (default: the key) when unknown. */
 export function tOr(key: string, fallback?: string): string {
-  const s = (CATALOGS[locale] as Record<string, string>)[key] ?? (de as Record<string, string>)[key];
-  return s ?? fallback ?? key;
+  return lookupText(key, locale, inApp) ?? fallback ?? key;
 }
 
 export const fmtDateTime = (iso: string) => new Date(iso).toLocaleString(localeTag, { dateStyle: "medium", timeStyle: "short" });

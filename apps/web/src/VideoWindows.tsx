@@ -42,9 +42,30 @@ export function FullscreenButton({ target, onError }: { target: () => HTMLElemen
     onClick={(event) => { event.stopPropagation(); void toggle(); }}><Icon name={active ? "minimize" : "maximize"} /></button>;
 }
 
-type Entry = { id: string; window: Window; document: Document };
-function isOpen(entry: Entry) {
+export type Entry = { id: string; window: Window; document: Document };
+export function isOpen(entry: Entry) {
   try { return !entry.window.closed && entry.window.document === entry.document; } catch { return false; }
+}
+
+/**
+ * A window of the client's own for a part of it (one video, or the whole stage: StageWindow.tsx): an empty page that gets
+ * the client's styles, React renders into its body through a portal. Must run synchronously inside the user's click,
+ * before any asynchronous work. `opener` = the window that click happened in: a browser lets only that one open a window.
+ */
+export function openPopoutWindow(size: { width: number; height: number }, bodyClass: string, opener: Window = window): Window {
+  const popup = opener.open("about:blank", "_blank", platform.window.popoutFeatures(size));
+  if (!popup) throw new Error(t("stage.popupBlocked"));
+  try {
+    const base = popup.document.createElement("base"); base.href = document.baseURI; popup.document.head.appendChild(base);
+    popup.document.documentElement.lang = document.documentElement.lang;
+    for (const source of document.querySelectorAll('link[rel="stylesheet"], style')) {
+      const copy = source.cloneNode(true) as HTMLElement;
+      if (source instanceof HTMLLinkElement) (copy as HTMLLinkElement).href = source.href;
+      popup.document.head.appendChild(copy);
+    }
+    popup.document.body.className = bodyClass;
+    return popup;
+  } catch { popup.close(); throw new Error(t("stage.popupFailed")); }
 }
 
 /** Lives at App level so windows survive switching between the stage and text channels. */
@@ -67,29 +88,19 @@ export function useVideoWindows(tiles: VideoTile[], client: VoiceClient) {
     for (const entry of removed) entry.window.close();
     if (removed.length) setEntries((old) => old.filter((entry) => !removed.includes(entry)));
   }, [tiles]);
-  const open = (tile: VideoTile) => {
+  /** `opener`: the window the click happened in, when that is not the main one (the stage in a window of its own). */
+  const open = (tile: VideoTile, opener: Window = window) => {
     const existing = entriesRef.current.find((entry) => entry.id === tile.id && isOpen(entry));
     if (existing) { existing.window.focus(); return; }
     // Must be synchronous inside the user's click, before any asynchronous work.
     const settings = tile.track.mediaStreamTrack.getSettings();
-    const video = Array.from(document.querySelectorAll("video")).find((element) =>
+    const video = Array.from(opener.document.querySelectorAll("video")).find((element) =>
       element.srcObject instanceof MediaStream && element.srcObject.getVideoTracks().includes(tile.track.mediaStreamTrack));
     const ratio = video?.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight
       : settings.width && settings.height ? settings.width / settings.height : 16 / 9;
     const size = fitVideoWindow(ratio, 960, window.screen.availWidth, Math.max(1, window.screen.availHeight - 120));
-    const popup = window.open("about:blank", "_blank", platform.window.popoutFeatures(size));
-    if (!popup) throw new Error(t("stage.popupBlocked"));
-    try {
-      const base = popup.document.createElement("base"); base.href = document.baseURI; popup.document.head.appendChild(base);
-      popup.document.documentElement.lang = document.documentElement.lang;
-      for (const source of document.querySelectorAll('link[rel="stylesheet"], style')) {
-        const copy = source.cloneNode(true) as HTMLElement;
-        if (source instanceof HTMLLinkElement) (copy as HTMLLinkElement).href = source.href;
-        popup.document.head.appendChild(copy);
-      }
-      popup.document.body.className = "video-window-body";
-      setEntries((old) => [...old.filter((entry) => entry.id !== tile.id), { id: tile.id, window: popup, document: popup.document }]);
-    } catch { popup.close(); throw new Error(t("stage.popupFailed")); }
+    const popup = openPopoutWindow(size, "video-window-body", opener);
+    setEntries((old) => [...old.filter((entry) => entry.id !== tile.id), { id: tile.id, window: popup, document: popup.document }]);
   };
   const restore = (id: string) => {
     entriesRef.current.find((entry) => entry.id === id)?.window.close();

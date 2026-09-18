@@ -17,7 +17,6 @@ export const de = {
   "common.dismiss": "Ausblenden",
   "common.language": "Sprache",
   "lang.auto": "Browsersprache",
-  "lang.autoSystem": "Systemsprache",
   "lang.de": "Deutsch",
   "lang.en": "English",
 
@@ -522,6 +521,7 @@ export const de = {
   "settings.idle": "Abwesenheit",
   "settings.idleDetect": "Eingaben im ganzen System erkennen",
   "settings.idleHint": "Nach 10 Minuten ohne Eingaben und ohne Sprechen giltst du als abwesend: andere sehen das in der Mitgliederliste und in der Freundesliste, und in einem Sprachkanal verschiebt dich der Server in den AFK-Kanal. Ohne diese Option zählen nur Eingaben im Squorli-Fenster. Mit ihr erkennt der Browser auch Eingaben in anderen Programmen und die Bildschirmsperre; er fragt dich dafür einmal um Erlaubnis. Gilt nur für diesen Browser.",
+  "settings.idleHintApp": "Nach 10 Minuten ohne Eingaben am Computer und ohne Sprechen giltst du als abwesend: andere sehen das in der Mitgliederliste und in der Freundesliste, und in einem Sprachkanal verschiebt dich der Server in den AFK-Kanal. Die App erkennt dafür auch Eingaben in anderen Programmen und die Bildschirmsperre; übertragen wird nur, ob du aktiv oder abwesend bist.",
   "settings.idleUnsupported": "Dieser Browser kann das nicht (nur Chrome, Edge und andere Chromium-Browser). Es zählen Eingaben im Squorli-Fenster und Sprechen.",
   "settings.idleDenied": "Der Browser hat die Erlaubnis nicht erteilt. Du kannst sie in den Website-Einstellungen des Browsers freigeben.",
   "settings.featureSelfHint": "Ausgeschaltet zeigt die Sprecher-Ansicht nur andere groß, auch wenn gerade nur du sprichst. Der grüne Sprechrahmen bleibt, und per Klick kannst du deine Kachel weiterhin groß anzeigen.",
@@ -549,7 +549,7 @@ export const de = {
   "settings.key": "Taste:",
   "settings.pressKey": "Taste drücken …",
   "settings.change": "ändern",
-  "settings.pttHint": "Im Browser nur, solange dieser Tab den Fokus hat. Globales Tastenkürzel: Desktop-Client (M4).",
+  "settings.pttHint": "Im Browser nur, solange dieser Tab den Fokus hat. Ein globales Tastenkürzel ist für die Desktop-App geplant.",
   "settings.input": "Eingabe",
   "settings.microphone": "Mikrofon",
   "settings.default": "Standard",
@@ -579,6 +579,9 @@ export const de = {
   "stage.popupVideoHint": "Video. Doppelklick oder F für Vollbild.",
   "stage.popupVolume": "Lautstärke",
   "stage.popout": "In eigenem Fenster öffnen",
+  "stage.popoutStage": "Bühne in eigenem Fenster öffnen",
+  "stage.restoreStage": "Bühne zurück ins Hauptfenster holen",
+  "stage.playerInMain": "Der Player läuft im Hauptfenster.",
   "stage.fullscreen": "Vollbild",
   "stage.exitFullscreen": "Vollbild verlassen",
   "stage.fullscreenUnavailable": "Dieser Browser unterstützt hier kein Vollbild.",
@@ -770,6 +773,8 @@ export const de = {
 
   // ---- Voice core
   "voice.screenNoAudioChromium": "Bildschirm wird ohne Ton geteilt. Ton kommt nur mit, wenn im Browser-Dialog ein Tab (\"Tab-Audio teilen\") oder unter Windows der ganze Bildschirm mit \"Systemaudio teilen\" gewählt wird; einzelne Fenster liefern keinen Ton.",
+  "voice.screenNoAudioApp": "Bildschirm wird ohne Ton geteilt. Für Ton die Freigabe neu starten und in der Auswahl \"Systemton mitteilen\" (Bildschirm) oder \"Ton dieses Fensters mitteilen\" (Fenster) ankreuzen.",
+  "voice.screenNoAudioAppOs": "Bildschirm wird ohne Ton geteilt: den Ton einer Freigabe kann die App derzeit nur unter Windows übertragen.",
   "voice.screenNoAudioOther": "Bildschirm wird ohne Ton geteilt: dieser Browser liefert bei der Bildschirmfreigabe keinen Ton. Mit Ton geht es in Chrome, Edge oder Brave.",
   "voice.iceHint": "Die Medienverbindung (ICE) kam nicht zustande oder brach ab. Prüfen: 7882/udp und 7881/tcp am Router zum Chat-Host, LiveKit kennt seine öffentliche IP (LIVEKIT_NODE_IP)? Der Dev-Stack (compose.dev.yml) bietet 127.0.0.1 an und ist von außen nie erreichbar.",
   "voice.disc.unknown": "unbekannt",

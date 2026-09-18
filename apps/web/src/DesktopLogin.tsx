@@ -100,7 +100,7 @@ export function DesktopLogin({ store, state }: { store: Store; state: State }) {
         <img src="/brand/squorli-icon-small.svg" alt="" width="18" height="18" />
         <span>{t("desktopLogin.app")}{platform.app ? ` · ${t("login.version", { v: platform.app.version })}` : ""}</span>
         <select className="lang-select" aria-label={t("common.language")} value={localePreference()} onChange={(e) => setLocalePreference(e.target.value as LocalePreference)}>
-          <option value="auto">{t("lang.autoSystem")}</option>
+          <option value="auto">{t("lang.auto")}</option>
           {LOCALES.map((l) => <option key={l} value={l}>{t(`lang.${l}`)}</option>)}
         </select>
       </footer>

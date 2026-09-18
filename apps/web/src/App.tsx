@@ -1,5 +1,7 @@
 import { useVideoWindows } from "./VideoWindows";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useStageWindow } from "./StageWindow";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { AdminPanel } from "./AdminPanel";
 import { ChatView } from "./ChatView";
 import { DebugPanel } from "./DebugPanel";
@@ -67,13 +69,19 @@ export function App() {
   /** Camera picker open (list of cameras) when there is more than one at switch-on time. */
   const [cameraPick, setCameraPick] = useState<MediaDeviceInfo[] | null>(null);
   /**
+   * The stage's own window (StageWindow.tsx) when the camera or screen dialog was asked for from there: the dialog is
+   * shown in that window instead of in the main one, which may be on another monitor. `stageFocus` is filled further down.
+   */
+  const [pickWindow, setPickWindow] = useState<Window | null>(null);
+  const stageFocus = useRef<() => Window | null>(() => null);
+  /**
    * Server the voice connection belongs to (multi-server client): it survives switching the displayed server;
    * only joining a voice channel on another server ends it (as the user specified).
    */
   /** Desktop app: the shell asks which screen or window to share (ScreenPicker.tsx); a browser has its own picker. */
   const [screenPick, setScreenPick] = useState<{ sources: ScreenSource[]; resolve: (pick: ScreenPick | null) => void } | null>(null);
   useEffect(() => {
-    platform.screen.setPicker((sources) => new Promise((resolve) => setScreenPick((open) => { open?.resolve(null); return { sources, resolve }; })));
+    platform.screen.setPicker((sources) => new Promise((resolve) => { setPickWindow(stageFocus.current()); setScreenPick((open) => { open?.resolve(null); return { sources, resolve }; }); }));
     return () => platform.screen.setPicker(null);
   }, []);
   // Desktop app: a `squorli://` link from a browser. The store shows the server (or keeps the link until after the login).
@@ -86,7 +94,7 @@ export function App() {
 
   // AFK detection: input in this window, speaking (open gate of an unmuted microphone) and, where the user allowed it,
   // input anywhere in the system keep the user present (activity.ts); the store reports the state to servers and directory.
-  useEffect(() => { void resumeIdleDetection(activity); return watchActivity(activity); }, []);
+  useEffect(() => { void resumeIdleDetection(activity, platform.systemIdle === "always"); return watchActivity(activity); }, []);
   useEffect(() => client.subscribe((s) => { if (s.gateOpen && !s.micMuted) activity.touch(); }), [client]);
 
   // Camera on/off. With several cameras always ask first (as the user specified), with one switch on directly.
@@ -94,7 +102,7 @@ export function App() {
     if (voice.cameraOn) { await client.setCameraEnabled(false); return; }
     const { cameras } = await VoiceClient.listDevices(true).catch(() => ({ cameras: [] as MediaDeviceInfo[] }));
     // Dialog as soon as there is something to choose: several cameras or a selectable background.
-    if (cameras.length > 1 || (cameras.length === 1 && VoiceClient.supportsBlur())) setCameraPick(cameras);
+    if (cameras.length > 1 || (cameras.length === 1 && VoiceClient.supportsBlur())) { setPickWindow(stageFocus.current()); setCameraPick(cameras); }
     else await client.setCameraEnabled(true, cameras[0]?.deviceId ?? null, voiceSettings.cameraQuality, voiceSettings.cameraBlur);
   }, [client, voice.cameraOn, voiceSettings.cameraQuality, voiceSettings.cameraBlur]);
 
@@ -180,6 +188,15 @@ export function App() {
     return member ? { ...tile, name: displayNameOf(member) } : tile;
   }), client);
   const voiceChannel = voiceServer?.server?.channels.find((c) => c.id === voice.channelId) ?? null;
+  // The whole stage in a window of its own; the main window then shows no stage (`showStage` below).
+  const stageWindow = useStageWindow(client, voiceChannel !== null, `${voiceChannel?.name ?? ""} | Squorli`);
+  stageFocus.current = stageWindow.focusedWindow;
+  // That window went while a dialog was open in it: the dialog goes with it.
+  useEffect(() => {
+    if (stageWindow.popped || !pickWindow) return;
+    setPickWindow(null); setCameraPick(null);
+    setScreenPick((open) => { open?.resolve(null); return null; });
+  }, [stageWindow.popped, pickWindow]);
 
   // The channel's voice profile changed (admin) -> switch the microphone over live.
   useEffect(() => {
@@ -280,7 +297,17 @@ export function App() {
   const homeAvailable = state.friends !== null || state.directoryLink !== "idle";
   const homeOpen = homeAvailable && state.homeOpen;
   // The stage belongs to the voice connection's server; on another server or in the home view the dock shows "view" and switches there.
-  const showStage = stageOpen && voiceChannel !== null && voiceHost === activeHost && !homeOpen;
+  const showStage = stageOpen && voiceChannel !== null && voiceHost === activeHost && !homeOpen && !stageWindow.popped;
+  // The stage shows the voice connection's server, which in its own window need not be the one on screen.
+  const voiceApi = voiceHost ? store.connection(voiceHost)?.api ?? null : null;
+  const stage = (detached: boolean) => voiceChannel && voiceServer?.server && voiceApi ? (
+    <VoiceStage client={client} voice={voice} channel={voiceChannel} members={voiceServer.server.members} myPermissions={voiceServer.server.myPermissions}
+      api={voiceApi} radio={radio} radioStations={voiceServer.server.radioStations} radioTitle={voiceServer.radioTitles[voiceChannel.id] ?? null} playerTile={embedKeyOf(embedSource)} playerPopped={playerWindow.win !== null} onRestorePlayer={playerWindow.restore}
+      onToggleCamera={toggleCamera} onToggleBlur={toggleBlur} onLeave={leaveVoice} onPopout={videoWindows.open} poppedIds={videoWindows.poppedIds} onRestore={videoWindows.restore}
+      detached={detached} onToggleWindow={detached ? stageWindow.close : stageWindow.open} />
+  ) : null;
+  /** A dialog the stage asked for from its own window is shown there. */
+  const inPickWindow = (dialog: ReactNode) => pickWindow && stageWindow.popped ? createPortal(dialog, pickWindow.document.body) : dialog;
   const homeBadge = (state.friends ?? []).filter((f) => f.state === "pending_in").length + Object.values(state.conversations).reduce((n, c) => n + c.unread, 0);
   const friendsMenu = homeAvailable ? {
     stateOf: (pk: string) => store.friendState(pk) ?? null,
@@ -335,6 +362,7 @@ export function App() {
       <ColumnHandle column="left" width={layout.left} label={t("layout.resizeLeft")} onChange={(w) => resizeColumn("left", w, false)} onCommit={(w) => resizeColumn("left", w, true)} />
       {!homeOpen && view && <ColumnHandle column="members" width={layout.members} label={t("layout.resizeMembers")} onChange={(w) => resizeColumn("members", w, false)} onCommit={(w) => resizeColumn("members", w, true)} />}
       {videoWindows.windows}
+      {stageWindow.render(stage(true))}
       {embedSource && channelRadio && <EmbedPlayer source={embedSource} name={channelRadio.name} volume={radioState.volume} muted={voice.deafened} popout={playerWindow} sync={embedSync} onNotice={(text) => client.setNotice(text)} />}
       <button className="mobile-navigation secondary" aria-expanded={navigationOpen} aria-controls="app-navigation" onClick={() => setNavigationOpen((open) => !open)}><Icon name={navigationOpen ? "x" : "hash"} />{t("app.navigation")}</button>
       {showRail && <ServerRail servers={railServers} serverState={railState} activeKey={homeOpen ? null : activeHost} onAdd={homeless ? () => { void addServer(); } : null}
@@ -354,7 +382,7 @@ export function App() {
         /> : <nav className="sidebar"><header className="server-head"><img className="brand-mark" src="/brand/squorli-icon-small.svg" alt="" width="22" height="22" /><strong>{active?.serverName ?? active?.host ?? "Squorli"}</strong></header></nav>}
         <VoiceDock client={client} voice={voice} channel={voiceChannel} serverName={voiceHost && voiceHost !== activeHost ? voiceServer?.server?.settings.name ?? voiceHost : null}
           displayName={me?.displayName ?? active?.me?.displayName ?? home?.me?.displayName ?? state.directoryAccount?.displayName ?? (state.directoryAccount ? `@${state.directoryAccount.handle}` : "…")} onLeave={leaveVoice} onOpenProfile={setMiniProfile} onOpenSettings={() => setSettingsTab("profile")} pttSuspended={capturingPttKey}
-          onOpenStage={voiceChannel && !showStage && voiceHost ? () => { store.openServer(voiceHost === state.homeHost ? homeDirHost : voiceHost); setStageOpen(true); } : null}
+          onOpenStage={stageWindow.popped ? stageWindow.focus : voiceChannel && !showStage && voiceHost ? () => { store.openServer(voiceHost === state.homeHost ? homeDirHost : voiceHost); setStageOpen(true); } : null}
           canStream={!!voiceServer?.server && hasPermission(voiceServer.server.myPermissions, Permission.STREAM_VIDEO)} onToggleCamera={toggleCamera}
           afkReturn={afkReturn && voice.afkRoom ? { name: afkReturnChannel?.name ?? null, onReturn: () => { void joinVoice(afkReturn.host, afkReturn.channelId).catch(() => {}); } } : null} />
       </div>
@@ -368,9 +396,7 @@ export function App() {
           <ServerStatus s={active} onRetry={(invite) => store.retryServer(active.host, invite)} onClose={() => store.closeServer(active.host)}
             join={homeless && !active.me ? state.joinInvites[active.host] ?? "" : null} />
         ) : showStage && voiceChannel ? (
-          <VoiceStage client={client} voice={voice} channel={voiceChannel} members={view.server.members} myPermissions={view.server.myPermissions}
-            api={view.conn.api} radio={radio} radioStations={view.server.radioStations} radioTitle={view.active.radioTitles[voiceChannel.id] ?? null} playerTile={embedKeyOf(embedSource)} playerPopped={playerWindow.win !== null} onRestorePlayer={playerWindow.restore}
-            onToggleCamera={toggleCamera} onToggleBlur={toggleBlur} onLeave={leaveVoice} onPopout={videoWindows.open} poppedIds={videoWindows.poppedIds} onRestore={videoWindows.restore} />
+          stage(false)
         ) : current ? (
           <ChatView
             channel={current} messages={view.active.messages[current.id] ?? { list: [], hasMore: true, loaded: false, loading: false }}
@@ -388,9 +414,9 @@ export function App() {
         voice={view.active.voice} channels={view.server.channels} friends={friendsMenu} client={client} />}
 
       {showAdmin && view && <AdminPanel api={view.conn.api} server={view.server} myUserId={view.active.userId!} directoryUrl={view.active.directoryUrl} onClose={() => setShowAdmin(false)} />}
-      {screenPick && <ScreenPicker sources={screenPick.sources}
-        onPick={(pick) => { screenPick.resolve(pick); setScreenPick(null); }} onCancel={() => { screenPick.resolve(null); setScreenPick(null); }} />}
-      {cameraPick && <CameraPicker cameras={cameraPick} initial={voiceSettings.cameraDeviceId} initialBlur={voiceSettings.cameraBlur} onPick={(id, b) => { void pickCamera(id, b); }} onCancel={() => setCameraPick(null)} />}
+      {screenPick && inPickWindow(<ScreenPicker sources={screenPick.sources} win={pickWindow ?? window}
+        onPick={(pick) => { screenPick.resolve(pick); setScreenPick(null); }} onCancel={() => { screenPick.resolve(null); setScreenPick(null); }} />)}
+      {cameraPick && inPickWindow(<CameraPicker cameras={cameraPick} initial={voiceSettings.cameraDeviceId} initialBlur={voiceSettings.cameraBlur} win={pickWindow ?? window} onPick={(id, b) => { void pickCamera(id, b); }} onCancel={() => setCameraPick(null)} />)}
       {miniProfile && active?.me && (
         <MiniProfile anchor={miniProfile} displayName={me?.displayName ?? active.me.displayName ?? "…"} storedName={active.me.displayName} handle={active.me.handle}
           serverName={server?.settings.name ?? active.serverName} withDirectory={!!state.directoryAccount && !!active.serverDomain}

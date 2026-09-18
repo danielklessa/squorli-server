@@ -148,8 +148,10 @@ export type AudioStats = {
 export const isChromium = () => typeof (window as { chrome?: unknown }).chrome !== "undefined";
 
 /** Explains why a screen share is running without audio; empty when audio is included or no share is active. */
-export function explainScreenAudio(state: Pick<VoiceState, "screenOn" | "screenAudio">): string {
+/** `app`: the desktop app, where audio is a choice in the app's own picker (ScreenPicker.tsx) and exists on Windows only; omitted = a browser. */
+export function explainScreenAudio(state: Pick<VoiceState, "screenOn" | "screenAudio">, app?: { audioPossible: boolean }): string {
   if (!state.screenOn || state.screenAudio !== false) return "";
+  if (app) return t(app.audioPossible ? "voice.screenNoAudioApp" : "voice.screenNoAudioAppOs");
   return isChromium() ? t("voice.screenNoAudioChromium") : t("voice.screenNoAudioOther");
 }
 

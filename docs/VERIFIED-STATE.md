@@ -4,6 +4,12 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 Base check of the complete workflow: 14 September 2026, Windows 11, Node 25.2.1, pnpm 10.15.0, Docker 29, LiveKit 1.13.6.
 
+- **Desktop app wording (18 September 2026):** `pnpm typecheck` 4/4, web tests 217 (`i18n/index.test.ts` 2 new), `pnpm build` green; texts looked at in the dev shell.
+
+- **Desktop app: AFK detection without a switch (18 September 2026):** `pnpm typecheck` 4/4, web tests 215, `pnpm build` green; dev shell with a fresh profile: detector started at load, settings section without a checkbox.
+
+- **Stage in a window of its own (18 September 2026):** `pnpm typecheck` 4/4, `pnpm test` protocol 49 / server 42 / web 215 (`usePushToTalk.test.ts`, `voice/screenAudioHint.test.ts` new; the second one with the desktop hint text that followed) / desktop 18, `pnpm build` green. Behaviour in headless Chrome and in the dev desktop shell against an own server on :3001 with LiveKit (list in `docs/features/voice-video.md`). **Not checked:** Firefox, a second participant, push-to-talk in that window by hand. No smoke test (no protocol or server change).
+
 - **Desktop app P4 (18 September 2026):** `pnpm typecheck` 4/4, `pnpm test` protocol 49 / server 42 / web 211 / desktop 18 (`updateMode` new), `pnpm build` green; release workflow green on GitHub for a test build and for the tag `desktop-v0.1.0` (six files, published by the user). Local update test with a packaged 0.1.0 test app against a local manifest with absolute addresses: checking -> downloading -> ready, restart offered; nothing installed. Website: `pnpm check`, `pnpm build` (12 pages), `pnpm test` (11 routes incl. feed consistency, 8 recaptured screenshots), `pnpm brand:check` green. **Not checked:** installing an update, the deployed feed, AppImage/deb.
 
 - **Tray, scrollbars, opt-in share audio (18 September 2026):** `pnpm typecheck` 4/4, `pnpm test` protocol 49 / server 42 / web 211 (`videoAudio.test.ts` 1 new, 1 adapted) / desktop 17, `pnpm build` green. App over the DevTools protocol: tray reported, `closeToTray` stored and validated, close button hides the window while the page lives on; rail rounded with mica (through the settings dialog); scrollbar thumb style computed. **Not checked:** the tray icon's look, share audio with a real second participant, the dock message in a real disconnect.

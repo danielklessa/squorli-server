@@ -40,6 +40,11 @@ export interface Platform {
   readonly home: PlatformHome | null;
   /** Directory to use when there is no home server to name one. */
   readonly defaultDirectoryUrl: string | null;
+  /**
+   * AFK detection across the whole system (idleDetection.ts). "permission": a browser grants it only inside a click, so it is
+   * a switch in the settings; "always": the desktop shell grants it by itself, it simply runs and there is no switch.
+   */
+  readonly systemIdle: "permission" | "always";
   readonly media: PlatformMedia;
   readonly links: {
     /** Open an address outside the client (desktop: the system's browser). */

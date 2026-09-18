@@ -9,7 +9,7 @@ import type { ScreenPick, ScreenSource } from "./platform";
  * default: for a window it is what that window's application plays, for a screen what the computer plays (`source.audio`
  * says whether the shell can deliver it; Windows only).
  */
-export function ScreenPicker({ sources, onPick, onCancel }: { sources: ScreenSource[]; onPick: (pick: ScreenPick) => void; onCancel: () => void }) {
+export function ScreenPicker({ sources, onPick, onCancel, win = window }: { sources: ScreenSource[]; onPick: (pick: ScreenPick) => void; onCancel: () => void; /** The window the dialog is shown in (the stage's own window, StageWindow.tsx). */ win?: Window }) {
   const screens = sources.filter((s) => s.kind === "screen");
   const windows = sources.filter((s) => s.kind === "window");
   const [selected, setSelected] = useState<string | null>(screens.length === 1 ? screens[0]!.id : null);
@@ -20,8 +20,8 @@ export function ScreenPicker({ sources, onPick, onCancel }: { sources: ScreenSou
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } if (e.key === "Enter" && selected) pick(); };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    win.addEventListener("keydown", onKey, true);
+    return () => win.removeEventListener("keydown", onKey, true);
   }); // deliberately without dependencies: always reads the current state
 
   const group = (title: string, list: ScreenSource[]) => list.length > 0 && (

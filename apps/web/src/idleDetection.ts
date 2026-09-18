@@ -6,7 +6,8 @@ import type { ActivityTracker } from "./activity";
  * in the system and whether the screen is locked. The browser asks the user for the permission, and only inside a click,
  * so it is a switch in the settings (Ansicht) and stored per device (`chat.idleDetection.v1`): the permission belongs to
  * this browser, not to the account. Without it (Firefox, Safari, switch off, permission denied) the tracker works from
- * input in the Squorli window and speaking alone.
+ * input in the Squorli window and speaking alone. The desktop app needs no switch: its shell grants the permission by
+ * itself (`platform.systemIdle === "always"`, checked in the shell on 18 September 2026), so detection simply runs there.
  */
 const KEY = "chat.idleDetection.v1";
 
@@ -41,9 +42,14 @@ async function start(tracker: ActivityTracker): Promise<boolean> {
   }
 }
 
-/** At page load: resume when the user switched it on earlier and the permission still stands (no prompt possible here). */
-export async function resumeIdleDetection(tracker: ActivityTracker): Promise<void> {
-  if (!idleDetectionSupported() || !idleDetectionWanted()) return;
+/**
+ * At page load: resume when the user switched it on earlier and the permission still stands (no prompt possible here).
+ * `always` (desktop app): there is no switch, it runs whenever it can.
+ */
+export async function resumeIdleDetection(tracker: ActivityTracker, always = false): Promise<void> {
+  if (!idleDetectionSupported()) return;
+  if (always) { await start(tracker); return; }
+  if (!idleDetectionWanted()) return;
   const state = await navigator.permissions.query({ name: "idle-detection" as PermissionName }).then((p) => p.state, () => "denied");
   if (state === "granted") await start(tracker);
 }

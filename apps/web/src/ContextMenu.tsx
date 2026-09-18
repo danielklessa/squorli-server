@@ -12,7 +12,7 @@ function navigate(event: KeyboardEvent<HTMLElement>) {
   // data-menu-item: controls that are no buttons (the volume slider) but belong to the arrow-key order.
   const items = [...panel.querySelectorAll<HTMLButtonElement | HTMLInputElement>('[role^="menuitem"], [data-menu-item]')]
     .filter((item) => !item.disabled && item.closest('[role="menu"]') === panel);
-  const index = items.indexOf(document.activeElement as HTMLButtonElement);
+  const index = items.indexOf(panel.ownerDocument.activeElement as HTMLButtonElement);
   let next: number;
   switch (event.key) {
     case "ArrowDown": next = (index + 1) % items.length; break;
@@ -24,7 +24,10 @@ function navigate(event: KeyboardEvent<HTMLElement>) {
   event.preventDefault(); event.stopPropagation(); items[next]?.focus();
 }
 
-/** A body portal keeps the menu outside the member column's scrolling/clipping area. */
+/**
+ * A body portal keeps the menu outside the member column's scrolling/clipping area. The body is the one of the window the
+ * trigger lives in: the voice stage can be in a window of its own (StageWindow.tsx).
+ */
 export function ContextMenu({ anchor, label, onClose, children }: {
   anchor: MenuAnchor; label: string; onClose: () => void; children: ReactNode;
 }) {
@@ -32,17 +35,19 @@ export function ContextMenu({ anchor, label, onClose, children }: {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   const [position, setPosition] = useState({ left: anchor.x, top: anchor.y });
+  const doc = anchor.trigger.ownerDocument;
+  const win: Window & typeof globalThis = doc.defaultView ?? window;
   useLayoutEffect(() => {
     const menu = ref.current!;
     const place = () => {
       const box = menu.getBoundingClientRect();
-      setPosition(menuPosition(anchor, box, { width: window.innerWidth, height: window.innerHeight }));
+      setPosition(menuPosition(anchor, box, { width: win.innerWidth, height: win.innerHeight }));
     };
     place();
     (menu.querySelector<HTMLElement>('[role^="menuitem"]') ?? menu).focus();
-    const observer = new ResizeObserver(place); observer.observe(menu);
+    const observer = new win.ResizeObserver(place); observer.observe(menu);
     return () => observer.disconnect();
-  }, [anchor]);
+  }, [anchor, win]);
   useEffect(() => {
     const close = () => closeRef.current();
     const outside = (event: Event) => { if (!ref.current?.contains(event.target as Node)) close(); };
@@ -50,21 +55,21 @@ export function ContextMenu({ anchor, label, onClose, children }: {
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); anchor.trigger.focus(); close(); }
       if (event.key === "Tab") { anchor.trigger.focus(); close(); }
     };
-    window.addEventListener("pointerdown", outside);
-    window.addEventListener("focusin", outside);
-    window.addEventListener("scroll", outside, true);
-    window.addEventListener("resize", close);
-    window.addEventListener("keydown", key);
+    win.addEventListener("pointerdown", outside);
+    win.addEventListener("focusin", outside);
+    win.addEventListener("scroll", outside, true);
+    win.addEventListener("resize", close);
+    win.addEventListener("keydown", key);
     return () => {
-      window.removeEventListener("pointerdown", outside); window.removeEventListener("focusin", outside);
-      window.removeEventListener("scroll", outside, true); window.removeEventListener("resize", close); window.removeEventListener("keydown", key);
+      win.removeEventListener("pointerdown", outside); win.removeEventListener("focusin", outside);
+      win.removeEventListener("scroll", outside, true); win.removeEventListener("resize", close); win.removeEventListener("keydown", key);
     };
-  }, [anchor]);
+  }, [anchor, win]);
   return createPortal(
     <div ref={ref} className="user-context-menu" role="menu" aria-label={label} tabIndex={-1} style={anchor.width ? { ...position, width: anchor.width } : position}
       onKeyDown={navigate} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}>
       {children}
-    </div>, document.body,
+    </div>, doc.body,
   );
 }
 
@@ -79,7 +84,8 @@ export function ContextSubmenu({ label, children }: { label: string; children: R
     if (!open) return;
     const box = trigger.current!.getBoundingClientRect();
     const menu = panel.current!.getBoundingClientRect();
-    setPosition(submenuPosition(box, menu, { width: window.innerWidth, height: window.innerHeight }));
+    const view = trigger.current!.ownerDocument.defaultView ?? window;
+    setPosition(submenuPosition(box, menu, { width: view.innerWidth, height: view.innerHeight }));
     if (focusOnOpen.current) { panel.current!.querySelector<HTMLElement>('[role^="menuitem"]')?.focus(); focusOnOpen.current = false; }
   }, [open]);
   useEffect(() => {

@@ -58,6 +58,7 @@
 .ic-square::before { content: "\e167"; }
 .ic-trash-2::before { content: "\e18e"; }
 .ic-trophy::before { content: "\e377"; }
+.ic-undo-2::before { content: "\e2a1"; }
 .ic-user::before { content: "\e19f"; }
 .ic-user-plus::before { content: "\e1a2"; }
 .ic-user-x::before { content: "\e1a3"; }

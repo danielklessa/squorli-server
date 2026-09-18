@@ -133,7 +133,8 @@ function useFits(title: string | null, name: string | null) {
       setFits(fitsInstead({ wanted: m.getBoundingClientRect().width, shown: l.getBoundingClientRect().width, truncated: l.scrollWidth - l.clientWidth > 1, free: spacer?.getBoundingClientRect().width ?? 0, max: (Number.isFinite(limit) ? limit : Infinity) - chrome }));
     };
     check();
-    const observer = new ResizeObserver(check);
+    // The window the head lives in (the stage can be in a window of its own): an observer of another window is not reliable.
+    const observer = new (head.ownerDocument.defaultView ?? window).ResizeObserver(check);
     observer.observe(head); observer.observe(button.current);
     return () => observer.disconnect();
   }, [title, name]);
