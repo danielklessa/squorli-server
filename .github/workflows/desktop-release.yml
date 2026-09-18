@@ -7,17 +7,20 @@ name: Desktop release
 on:
   push:
     tags: ["desktop-v*"]
+  # By hand: with a tag = build and release that existing tag; without = a test build of the chosen branch (artifacts only,
+  # no release), to try the workflow without spending a version.
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing tag to build (desktop-v<version>)
-        required: true
+        description: Existing tag to build and release (desktop-v<version>); empty = test build of the chosen branch, no release
+        required: false
 
 permissions:
   contents: read
 
 env:
-  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  # Empty for a test build.
+  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || (github.ref_type == 'tag' && github.ref_name || '') }}
 
 jobs:
   build:
@@ -29,21 +32,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ env.TAG || github.ref }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
       - name: Tag must match the app's version
+        if: env.TAG != ''
         shell: bash
         run: |
           version=$(node -p "require('./apps/desktop/package.json').version")
           if [ "desktop-v$version" != "$TAG" ]; then echo "tag $TAG does not match apps/desktop/package.json ($version)"; exit 1; fi
       - run: pnpm install --frozen-lockfile
       # Electron's binary is not needed for packaging (electron-builder downloads its own copy), but harmless.
-      - run: pnpm icons
-      - run: pnpm licenses
+      # `pnpm run`, not `pnpm licenses`: pnpm has a built-in command of that name, which hides the script.
+      - run: pnpm run icons
+      - run: pnpm run licenses
       - run: pnpm --filter "@squorli/desktop..." build
       # Windows: the native audio capture helper (MSVC is part of the runner image); a no-op elsewhere.
       - run: pnpm --filter @squorli/desktop native
@@ -63,6 +68,7 @@ jobs:
 
   release:
     needs: build
+    if: github.ref_type == 'tag' || inputs.tag != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write

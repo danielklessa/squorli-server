@@ -28,6 +28,8 @@ P0 platform interface (done, below) · P1 client without a home server, last vie
 
 ## Entries
 
+**First run of the release workflow (18 September 2026, tag `desktop-v0.1.0`, run 35331584196):** both build jobs failed in step "pnpm licenses": `ERR_PNPM_LICENCES_NO_SUBCOMMAND`, because pnpm's own `licenses` command hides the root script of that name (`pnpm icons` has no such namesake and passed). The workflow now calls `pnpm run icons` / `pnpm run licenses`; the documented command was wrong all along and is corrected (root `AGENTS.md`, `apps/web`, `tools`, the generated notice's header). Also new: started by hand without a tag, the workflow makes a test build of the chosen branch (artifacts, no release), so it can be tried until it is green without spending a version. The server image jobs behaved as intended for the desktop tag (`image` skipped). Not yet seen: the steps after it (native helper, packaging on both runners).
+
 **"Systemsprache" instead of "Browsersprache" (18 September 2026, user's wish):** in the app the automatic choice of the language select reads "Systemsprache" / "System language" (`lang.autoSystem`; the app's login and Einstellungen > Ansicht through `platform.kind`). The behaviour is the same: Electron's `navigator.languages` is the system's language. Checked: typecheck, tests (both catalogs carry the key), build.
 
 **Second look by the user (18 September 2026): tray, and what it confirmed.** Confirmed by the user on their machine: the looks ("gefällt es mir optisch jetzt gut"), dragging and the remembered window place, the task bar icon, and that a window's audio can be chosen and is transmitted. New wishes:

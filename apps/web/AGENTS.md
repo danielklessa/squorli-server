@@ -2,7 +2,7 @@
 
 Part of the project description. The entry point is the root [AGENTS.md](../../AGENTS.md) (commands, definition of done, cross-cutting conventions, the map of all documentation in its section 0). Whoever adds, removes or repurposes a file of the client, or changes a convention or pitfall, updates this file in the same step.
 
-**After every client change:** `pnpm build` from the repo root and tell the user to reload (root `AGENTS.md` section 4, item 7); after a new `<Icon name>` run `pnpm icons`; after a dependency change `pnpm licenses`.
+**After every client change:** `pnpm build` from the repo root and tell the user to reload (root `AGENTS.md` section 4, item 7); after a new `<Icon name>` run `pnpm icons`; after a dependency change `pnpm run licenses`.
 
 ## Feature notes: read before touching these files
 
