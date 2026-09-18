@@ -10,6 +10,7 @@ import {
   ScreenSharePresets,
   Track,
   VideoPresets,
+  type AudioCaptureOptions,
   type LocalTrackPublication,
   type Participant as LkParticipant,
   type RemoteTrack,
@@ -565,10 +566,12 @@ export class VoiceClient {
       // No simulcast for the screen: with small tiles adaptiveStream would fetch the coarse layer and only scale up
       // seconds after enlarging; text needs the full layer. contentHint "detail" keeps the
       // resolution and sacrifices frames per second instead when bandwidth is tight.
+      // The own tab can be shared too (selfBrowserSurface). restrictOwnAudio (Chromium 141+, ignored elsewhere) keeps this
+      // tab's playback out of the captured audio, otherwise the others would hear their own voices back as screen audio.
       await room.localParticipant.setScreenShareEnabled(on, on ? {
-        audio: true,
+        audio: { restrictOwnAudio: true } as AudioCaptureOptions,
         systemAudio: "include",
-        selfBrowserSurface: "exclude",
+        selfBrowserSurface: "include",
         surfaceSwitching: "include",
         contentHint: "detail",
         resolution: ScreenSharePresets.h1080fps30.resolution,

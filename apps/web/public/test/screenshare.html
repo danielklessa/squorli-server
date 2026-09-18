@@ -76,7 +76,7 @@ jeweils das Ergebnis unten sammeln und die Zeilen in <code>docs/PLAN.md</code> A
     try {
       // Chromium options are ignored by other browsers; audio: true is the actual test.
       stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true, audio: true, systemAudio: "include", selfBrowserSurface: "exclude", surfaceSwitching: "include",
+        video: true, audio: { restrictOwnAudio: true }, systemAudio: "include", selfBrowserSurface: "include", surfaceSwitching: "include",
       });
       $("preview").srcObject = stream; $("stop").disabled = false;
       const v = stream.getVideoTracks()[0]; const a = stream.getAudioTracks()[0];

@@ -4,6 +4,8 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 Base check of the complete workflow: 14 September 2026, Windows 11, Node 25.2.1, pnpm 10.15.0, Docker 29, LiveKit 1.13.6.
 
+- **Own tab in the screen share (18 September 2026):** `pnpm typecheck` 3/3, `pnpm test` protocol 47 / server 42 / web 187, `pnpm build` green. Client only, no smoke test. Headless Chrome 153 reports `restrictOwnAudio` in `getSupportedConstraints()`. **Not checked:** a real share of the own tab with a second listener (picker and two people needed).
+
 - **"Starting videoinput failed" on Firefox (18 September 2026):** `pnpm typecheck` 3/3, `pnpm test` protocol 47 / server 42 / web 187 (cameraRetry.test.ts 3 new), `pnpm build` green. Client only, no smoke test. **Not checked:** a real Firefox with a camera (none available here).
 
 - **Pop-out froze on Firefox, black tile after camera off (18 September 2026):** `pnpm typecheck` 3/3, `pnpm test` protocol 47 / server 42 / web 184 (videoDisplay.test.ts 2 new), `pnpm build` green. Client only, no smoke test. Firefox nightly 158 (zip in the scratchpad, headless) and headless Chrome 152 with a real `RemoteVideoTrack` in a pop-out: before, Firefox reported the view invisible after 100 ms (LiveKit pauses the track), after the fix it stays visible; Chrome fine both ways (`docs/features/voice-video.md`). **Not checked:** a real LiveKit session in Firefox; the black tile only by reading LiveKit's `setTrackEnabled` (mute, not unpublish).
