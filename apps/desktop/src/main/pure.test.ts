@@ -5,6 +5,7 @@ import { appearanceState, normalizeAppearance, supportedMaterials } from "./appe
 import { hwndOfHandle, hwndOfSource } from "./captureSource";
 import { findDeepLink } from "./deepLinkArgs";
 import { isAllowedExternal, windowOpenDecision } from "./navigation";
+import { updateMode } from "./updateMode";
 import { desktopUserAgent } from "./userAgent";
 import { restoreWindowState } from "./windowState";
 
@@ -90,6 +91,16 @@ describe("restoreWindowState", () => {
   it("clamps the size to the display and survives rubbish", () => {
     expect(restoreWindowState({ bounds: { x: 0, y: 0, width: 5000, height: 100 } }, [main])).toEqual({ bounds: { x: 0, y: 0, width: 1920, height: 480 }, maximized: false });
     for (const v of [null, undefined, 3, "x", {}, { bounds: { x: "1", y: 0, width: 1, height: 1 } }, { bounds: { x: NaN, y: 0, width: 800, height: 600 } }]) expect(restoreWindowState(v, [main])).toBeNull();
+  });
+});
+
+describe("updateMode", () => {
+  it("updates itself on Windows and as an AppImage, by hand as a deb, never unpackaged", () => {
+    expect(updateMode({ packaged: true, platform: "win32", appImage: false })).toBe("self");
+    expect(updateMode({ packaged: true, platform: "linux", appImage: true })).toBe("self");
+    expect(updateMode({ packaged: true, platform: "linux", appImage: false })).toBe("manual");
+    expect(updateMode({ packaged: true, platform: "darwin", appImage: false })).toBe("none");
+    expect(updateMode({ packaged: false, platform: "win32", appImage: false })).toBe("none");
   });
 });
 

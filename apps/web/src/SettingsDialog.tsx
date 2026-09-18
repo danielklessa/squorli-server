@@ -9,13 +9,14 @@ import { LicensesTab } from "./LicensesTab";
 import { LOCALES, fmtDateTime, localePreference, t, type LocalePreference } from "./i18n";
 import { activity } from "./activity";
 import { platform, type WindowAppearance } from "./platform";
+import { DOWNLOAD_URL, describeUpdate, useUpdateState } from "./appUpdates";
 import { idleDetectionSupported, idleDetectionWanted, setIdleDetection } from "./idleDetection";
 import { saveVoiceSettings, type VoiceSettings } from "./voice/settings";
 import { SOUND_CUES, type SoundCue, type SoundSettings } from "./voice/sounds";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 
-export type SettingsTab = "profile" | "view" | "voice" | "audio" | "camera" | "sounds" | "sessions" | "account" | "licenses";
+export type SettingsTab = "profile" | "view" | "voice" | "audio" | "camera" | "sounds" | "sessions" | "account" | "app" | "licenses";
 const TABS: { id: SettingsTab; label: string; icon: string }[] = [
   { id: "profile", label: t("settings.tab.profile"), icon: "user" },
   { id: "view", label: t("settings.tab.view"), icon: "languages" },
@@ -25,6 +26,7 @@ const TABS: { id: SettingsTab; label: string; icon: string }[] = [
   { id: "sounds", label: t("settings.tab.sounds"), icon: "bell" },
   { id: "sessions", label: t("settings.tab.sessions"), icon: "monitor-smartphone" },
   { id: "account", label: t("settings.tab.account"), icon: "key-round" },
+  { id: "app", label: t("settings.tab.app"), icon: "download" },
   { id: "licenses", label: t("settings.tab.licenses"), icon: "scale" },
 ];
 /** Categories whose content follows the directory account (everything except the device selection, sessions and the account itself). */
@@ -70,7 +72,9 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const onServer = !!api && !!me;
-  const tabs = TABS.filter((entry) => onServer || (entry.id !== "profile" && entry.id !== "sessions"));
+  // "App" (version, updates) exists in the desktop app only; profile and sessions belong to a server.
+  const tabs = TABS.filter((entry) => (entry.id !== "app" || platform.app !== null) && (onServer || (entry.id !== "profile" && entry.id !== "sessions")));
+  const appUpdate = useUpdateState();
   const [tab, setTab] = useState<SettingsTab>(() => { const wanted = initialTab ?? "profile"; return tabs.some((entry) => entry.id === wanted) ? wanted : "view"; });
   const [name, setName] = useState(me?.displayName ?? "");
   const handle = me?.handle ?? directoryAccount?.handle ?? null;
@@ -427,6 +431,20 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
               </>
             )}
 
+            {tab === "app" && platform.app && (
+              <>
+                <h3>{t("desktopLogin.app")}</h3>
+                <p>{t("login.version", { v: platform.app.version })} <span className="muted small">· Electron {platform.app.electron} · Chromium {platform.app.chrome}</span></p>
+                <h3>{t("update.title")}</h3>
+                <p role="status">{describeUpdate(appUpdate ?? { status: "unsupported" })}</p>
+                <div className="row">
+                  {platform.updates && appUpdate && (appUpdate.status === "idle" || appUpdate.status === "error") && <button className="secondary" onClick={() => platform.updates?.check()}>{t("update.check")}</button>}
+                  {appUpdate?.status === "ready" && <button onClick={() => platform.updates?.restartAndInstall()}>{t("update.restart")}</button>}
+                  {(appUpdate?.status === "available" || !platform.updates) && <button className="secondary" onClick={() => platform.links.openExternal(DOWNLOAD_URL)}>{t("update.downloadPage")}</button>}
+                </div>
+                <span className="muted small">{t("update.hint")}</span>
+              </>
+            )}
             {tab === "licenses" && <LicensesTab version={clientVersion} />}
 
             {SYNCED.includes(tab) && (

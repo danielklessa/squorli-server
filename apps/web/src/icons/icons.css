@@ -14,6 +14,7 @@
 .ic-compass::before { content: "\e09b"; }
 .ic-copy::before { content: "\e09e"; }
 .ic-crown::before { content: "\e1d6"; }
+.ic-download::before { content: "\e0b2"; }
 .ic-external-link::before { content: "\e0b9"; }
 .ic-flag::before { content: "\e0d1"; }
 .ic-grip-vertical::before { content: "\e0eb"; }

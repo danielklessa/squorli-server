@@ -4,6 +4,9 @@ import * as api from "./api";
 import { askConfirm } from "./dialogs";
 import { homeState, type State, type Store } from "./store";
 import { LOCALES, localePreference, setLocalePreference, t, type LocalePreference } from "./i18n";
+import { DOWNLOAD_URL } from "./appUpdates";
+import { platform } from "./platform";
+import { formatDeepLink, parseDeepLink } from "./platform/deepLink";
 
 /** Invite code from /invite/<code> or ?invite=<code>. */
 export function inviteFromUrl(): string | null {
@@ -107,6 +110,18 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
     setBackupBusy(true);
     try { if (await store.createBackup(backupPw)) setBackupPw(""); } finally { setBackupBusy(false); }
   }
+
+  // "Open in the desktop app": a plain link the user clicks (never a redirect: without the app nothing would happen), always
+  // next to the download. Offered where the app exists (Windows, Linux). The link goes through the parser, so it is only
+  // shown when the app will accept it.
+  const appLink = (() => {
+    if (platform.kind !== "web" || (platform.os !== "windows" && platform.os !== "linux")) return null;
+    const host = home.serverDomain ?? window.location.host;
+    const code = invite.trim();
+    const raw = /^[A-Za-z0-9_-]{6,32}$/.test(code) ? `squorli://invite/${host}/${code}` : `squorli://server/${host}`;
+    const link = parseDeepLink(raw);
+    return link ? formatDeepLink(link) : null;
+  })();
 
   const accountBox = showAccount && (
     <div className="stack handle-box">
@@ -220,6 +235,7 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
           {showDevice && <button className="secondary" onClick={() => void store.forgetIdentity()} disabled={busy}>{t("login.forgetIdentity")}</button>}
         </div>
       </div>
+      {appLink && <p className="login-app muted small">{t("login.appHint")} <a href={appLink}>{t("login.openInApp")}</a> · <a href={DOWNLOAD_URL} target="_blank" rel="noreferrer">{t("login.getApp")}</a></p>}
       <footer className="login-foot">
         <img src="/brand/squorli-icon-small.svg" alt="" width="18" height="18" />
         <span>{t("login.poweredBy")}{home.serverVersion ? ` · ${t("login.version", { v: home.serverVersion })}` : ""}</span>

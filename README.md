@@ -2,7 +2,7 @@
 
 Homepage: **https://squorli.com**
 
-Self-hosted, open-source community chat with text, voice and video channels, similar to Discord. Every server belongs to the person who runs it. Squorli Server includes the browser client; a desktop client is planned.
+Self-hosted, open-source community chat with text, voice and video channels, similar to Discord. Every server belongs to the person who runs it. Squorli Server includes the browser client. A desktop app for Windows and Linux (the same client in its own window, `apps/desktop`) is available as an early version: https://squorli.com/en/download/.
 
 Official repository: [Squorli Server on GitHub](https://github.com/danielklessa/squorli-server). Licensed under the [Apache License 2.0](LICENSE). A server can optionally connect to the [Squorli Directory](https://directory.squorli.com), a separately operated service that gives users a global handle, lets them find friends across servers and exchange end-to-end encrypted direct messages. Without a directory, a server works completely on its own.
 
@@ -19,7 +19,7 @@ This README explains how to run your own Squorli server. Working on the code: [d
 - Categories, roles with permissions and hierarchy, invite links, kick and ban, admin panel in the browser.
 - Optional connection to a Squorli Directory for global handles, friends and end-to-end encrypted direct messages.
 
-Not yet: desktop client, reactions, audit log. Current status of the implementation: [AGENTS.md](AGENTS.md).
+Not yet: a desktop app for macOS, reactions, audit log. Current status of the implementation: [AGENTS.md](AGENTS.md).
 
 Third-party software, fonts and data inside the client are listed with their licenses in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) and in the client under Settings > Licenses; see also [NOTICE](NOTICE).
 

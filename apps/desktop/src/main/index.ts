@@ -11,6 +11,7 @@ import { handleDisplayMedia } from "./displayMedia";
 import { registerAppScheme, serveApp } from "./scheme";
 import { applyPermissions, letPlayersEmbed, lockDownContents, openExternal } from "./security";
 import { createTray } from "./tray";
+import { handleUpdates } from "./updates";
 import { desktopUserAgent } from "./userAgent";
 import { helperPath, ScreenAudioCapture } from "./windowAudio";
 import { DEFAULT_SIZE, MIN_SIZE, restoreWindowState } from "./windowState";
@@ -54,7 +55,8 @@ function applyAppearance(win: BrowserWindow): void {
   win.setBackgroundColor(look.effective === "mica" ? "#00000000" : SOLID);
 }
 const frameOf = (win: BrowserWindow): WindowFrameState => ({ maximized: win.isMaximized(), focused: win.isFocused(), fullscreen: win.isFullScreen() });
-const update: UpdateState = { status: "unsupported" };
+/** App updates (updates.ts); set up once the app is ready. */
+let updateState: () => UpdateState = () => ({ status: "unsupported" });
 
 let mainWindow: BrowserWindow | null = null;
 // Tray icon; with `closeToTray` the window's close button only hides the window. Quitting then goes through the tray's menu.
@@ -70,7 +72,7 @@ const isClientFrame = (event: IpcMainEvent | IpcMainInvokeEvent): boolean => {
 };
 
 function createWindow(): BrowserWindow {
-  const info: DesktopInfo = { version: app.getVersion(), electron: process.versions.electron ?? "", chrome: process.versions.chrome ?? "", os, directoryUrl, materials, nativeScreenAudio: helperPath() !== null, appearance: look, frame: { maximized: false, focused: true, fullscreen: false }, tray: tray ? { closeToTray } : null, update };
+  const info: DesktopInfo = { version: app.getVersion(), electron: process.versions.electron ?? "", chrome: process.versions.chrome ?? "", os, directoryUrl, materials, nativeScreenAudio: helperPath() !== null, appearance: look, frame: { maximized: false, focused: true, fullscreen: false }, tray: tray ? { closeToTray } : null, update: updateState() };
   // The window reopens where it was closed, as long as that place still lies on a display (windowState.ts).
   const userData = app.getPath("userData");
   const state = restoreWindowState(loadConfig(userData).window, screen.getAllDisplays().map((d) => d.workArea));
@@ -156,6 +158,7 @@ else {
     });
     ipcMain.on(IPC.openExternal, (event, url: unknown) => { if (isClientFrame(event) && typeof url === "string") openExternal(url); });
     tray = createTray(() => mainWindow, () => { quitting = true; app.quit(); });
+    updateState = handleUpdates(() => mainWindow, isClientFrame, () => { quitting = true; screenAudio.stop(); }).state;
     mainWindow = createWindow();
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow(); });
   });

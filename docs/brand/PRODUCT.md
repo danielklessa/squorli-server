@@ -18,7 +18,7 @@ The official published server container is `ghcr.io/danielklessa/squorli-server:
 
 Always link the open-source Squorli Server to https://github.com/danielklessa/squorli-server in public copy, documentation and installation examples. Clone using the same URL with `.git`; link individual files using GitHub's `/blob/main/` path. Development remotes and container registries are separate configuration and do not determine the public source address.
 
-Squorli gives gaming, creator and other communities a place for text, voice, video and screen sharing on a server they operate themselves. Roles, invitations and moderation belong to each server. The browser client is implemented; a desktop client is planned.
+Squorli gives gaming, creator and other communities a place for text, voice, video and screen sharing on a server they operate themselves. Roles, invitations and moderation belong to each server. The browser client is implemented; a desktop app for Windows and Linux (the same client in its own window) is available as an early version from https://squorli.com, macOS is planned.
 
 Connecting Squorli Directory adds global handles, password-encrypted key backup, authenticator support, public server discovery, friends and end-to-end encrypted direct messages between friends. The Directory is optional for basic server operation. Do not describe it as self-hosted open-source software or imply that an optional connection makes its dependent features available offline.
 

@@ -58,6 +58,8 @@ html[data-desktop] .login { flex: 1; min-height: 0; overflow-y: auto; }
 .titlebar-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .titlebar.inactive .titlebar-mark, .titlebar.inactive .titlebar-title { opacity: 0.55; }
 .titlebar-buttons { display: flex; height: 100%; flex: none; -webkit-app-region: no-drag; }
+button.titlebar-update { -webkit-app-region: no-drag; height: 1.5rem; padding: 0 0.625rem; margin-right: 0.25rem; border-radius: 999px; font-size: 0.75rem; display: flex; align-items: center; gap: 0.375rem; background: var(--accent); color: var(--on-dark); }
+button.titlebar-update:hover { background: var(--accent-hover); }
 button.titlebar-btn { width: 2.75rem; height: 100%; padding: 0; border-radius: 0; background: transparent; color: var(--muted); display: grid; place-items: center; font-size: 0.95rem; }
 button.titlebar-btn:hover { background: var(--bg4); color: var(--text); }
 button.titlebar-btn.close:hover { background: var(--danger); color: var(--on-light); }
@@ -122,6 +124,7 @@ h4 { font-size: 0.875rem; font-weight: 600; color: var(--muted); padding: 0 0.5r
 .login-icon { width: 72px; height: 72px; border-radius: 20px; object-fit: cover; }
 .login-foot { display: flex; align-items: center; gap: 0.4rem; color: var(--muted); font-size: 0.8125rem; }
 .login-foot img { opacity: 0.8; }
+.login-app { margin: 0; text-align: center; }
 .login-foot .lang-select { margin-left: auto; font-size: 0.8125rem; padding: 0.15rem 0.4rem; }
 .invite-preview { background: var(--bg); padding: 0.6rem 0.9rem; border-radius: var(--r); }
 
