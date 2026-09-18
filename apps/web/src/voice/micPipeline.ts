@@ -1,7 +1,10 @@
 import { VoiceGate, rmsLevel } from "./gate";
+import { AutoGain, DEFAULT_MIC_BOOST, SOFT_CLIP_RANGE, clampBoost, softClipCurve, type MicBoostSettings } from "./micBoost";
 
 /**
- * Microphone pipeline: getUserMedia -> AudioContext -> [analyser for the level] + [gain as the gate] -> output track.
+ * Microphone pipeline: getUserMedia -> AudioContext -> boost (gain + clipping guard, micBoost.ts) -> [analyser for the level]
+ * + [gain as the gate] -> output track. Level meter, voice activation and the published track all sit behind the boost, so
+ * the threshold means what the others hear. Stereo channels run without the browser's processing but WITH the boost (see start()).
  *
  * The gate (voice activation or push-to-talk) works locally through the gain; the published track stays
  * published and "unmuted" throughout. That way there is no signalling on every word and
@@ -40,10 +43,31 @@ export async function openMic(
   }
 }
 
+/** The automatic boost's last gain per microphone, so a quiet microphone is not quiet again for the first seconds of every join. */
+const BOOST_KEY = "chat.micBoost.v1";
+function rememberedBoost(key: string): number {
+  try { return clampBoost((JSON.parse(localStorage.getItem(BOOST_KEY) ?? "{}") as Record<string, unknown>)[key]); } catch { return 1; }
+}
+function rememberBoost(key: string, gain: number): void {
+  try {
+    const all = JSON.parse(localStorage.getItem(BOOST_KEY) ?? "{}") as Record<string, number>;
+    localStorage.setItem(BOOST_KEY, JSON.stringify({ ...all, [key]: Math.round(gain * 100) / 100 }));
+  } catch { /* private mode or similar: then it learns again next time */ }
+}
+
 export class MicPipeline {
   private ctx: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
+  /** Level of the raw input, for the automatic boost (the `analyser` below sits behind the boost). */
+  private inputAnalyser: AnalyserNode | null = null;
+  private pre: GainNode | null = null;
+  private shaper: WaveShaperNode | null = null;
+  private boost: MicBoostSettings = { ...DEFAULT_MIC_BOOST };
+  private autoGain: AutoGain | null = null;
+  private rememberedGain = 1;
+  /** Under which name the learned gain is remembered: the microphone, plus "|stereo" for the capture without processing. */
+  private boostKey = "default";
   private analyser: AnalyserNode | null = null;
   private gain: GainNode | null = null;
   private dest: MediaStreamAudioDestinationNode | null = null;
@@ -53,9 +77,9 @@ export class MicPipeline {
   private mode: GateMode = "vad";
   private pttHeld = false;
   private forcedOpen = false;
-  /** Current level (0..1) and whether the gate is open; for the display. */
-  readonly state = { level: 0, open: false };
-  onState: ((s: { level: number; open: boolean }) => void) | null = null;
+  /** Current level (0..1, behind the boost), whether the gate is open, and the boost applied right now (1 = none); for the display. */
+  readonly state = { level: 0, open: false, boost: 1 };
+  onState: ((s: { level: number; open: boolean; boost: number }) => void) | null = null;
   /** The last start() used the default microphone because the chosen device was gone. */
   deviceFallback = false;
 
@@ -90,8 +114,24 @@ export class MicPipeline {
     this.dest = this.ctx.createMediaStreamDestination();
     this.dest.channelCount = stereo ? 2 : 1;
     this.dest.channelCountMode = "explicit";
-    this.source.connect(this.analyser);
-    this.source.connect(this.gain);
+    // The boost runs in stereo channels too, and matters most there: they capture without the browser's processing, so
+    // without its gain control, and a microphone arrives at its raw level (user's report, 18 September 2026: level bar
+    // low, threshold at the far left, everyone quiet, in a stereo channel). Gain and clipping guard keep both channels
+    // as they are; the raw level differs a lot between the two capture modes, so the learned gain is kept per mode.
+    this.inputAnalyser = this.ctx.createAnalyser();
+    this.inputAnalyser.fftSize = 1024;
+    this.pre = this.ctx.createGain();
+    this.shaper = this.ctx.createWaveShaper();
+    this.shaper.curve = softClipCurve();
+    this.source.connect(this.inputAnalyser);
+    this.source.connect(this.pre);
+    this.pre.connect(this.shaper);
+    this.shaper.connect(this.analyser);
+    this.shaper.connect(this.gain);
+    this.boostKey = `${this.activeDeviceId() ?? "default"}${stereo ? "|stereo" : ""}`;
+    this.rememberedGain = rememberedBoost(this.boostKey);
+    this.autoGain = new AutoGain(this.rememberedGain);
+    this.applyBoost(true);
     this.gain.connect(this.dest);
 
     this.gate.reset();
@@ -113,8 +153,26 @@ export class MicPipeline {
   /** Keep the gate permanently open (e.g. a microphone test). */
   setForcedOpen(v: boolean) { this.forcedOpen = v; this.apply(); }
 
+  /** Boost settings (Einstellungen > Sprechen); takes effect at once. */
+  setBoost(b: MicBoostSettings) { this.boost = { auto: b.auto, gain: clampBoost(b.gain) }; this.applyBoost(true); }
+
+  /** Sets the boost's gain: learned (automatic) or by hand. The node gets gain / SOFT_CLIP_RANGE, see micBoost.ts. */
+  private applyBoost(immediately = false) {
+    if (!this.pre || !this.ctx) return;
+    const g = this.boost.auto ? this.autoGain?.gain ?? 1 : this.boost.gain;
+    this.state.boost = g;
+    if (immediately) this.pre.gain.value = g / SOFT_CLIP_RANGE;
+    else this.pre.gain.setTargetAtTime(g / SOFT_CLIP_RANGE, this.ctx.currentTime, 0.1);
+  }
+
   private tick() {
     if (!this.analyser) return;
+    if (this.inputAnalyser && this.autoGain && this.boost.auto) {
+      this.inputAnalyser.getFloatTimeDomainData(this.samples);
+      const g = this.autoGain.update(rmsLevel(this.samples));
+      if (g !== this.state.boost) this.applyBoost();
+      if (Math.abs(g - this.rememberedGain) >= 0.1) { this.rememberedGain = g; rememberBoost(this.boostKey, g); }
+    }
     this.analyser.getFloatTimeDomainData(this.samples);
     this.state.level = rmsLevel(this.samples);
     if (this.mode === "vad") this.gate.update(this.state.level, performance.now());
@@ -130,14 +188,15 @@ export class MicPipeline {
       this.gain.gain.setTargetAtTime(open ? 1 : 0, t, 0.01);
     }
     if (open !== this.state.open) this.state.open = open;
-    this.onState?.({ level: this.state.level, open });
+    this.onState?.({ level: this.state.level, open, boost: this.state.boost });
   }
 
   private async stopCapture() {
     if (this.timer !== null) { clearInterval(this.timer); this.timer = null; }
-    this.source?.disconnect(); this.analyser?.disconnect(); this.gain?.disconnect();
+    this.source?.disconnect(); this.inputAnalyser?.disconnect(); this.pre?.disconnect(); this.shaper?.disconnect(); this.analyser?.disconnect(); this.gain?.disconnect();
     this.stream?.getTracks().forEach((t) => t.stop());
-    this.source = this.analyser = this.gain = this.dest = null;
+    this.source = this.inputAnalyser = this.pre = this.shaper = this.analyser = this.gain = this.dest = null;
+    this.autoGain = null;
     this.stream = null;
     this.state.level = 0; this.state.open = false;
   }

@@ -11,6 +11,7 @@ import { activity } from "./activity";
 import { platform, type WindowAppearance } from "./platform";
 import { DOWNLOAD_URL, describeUpdate, useUpdateState } from "./appUpdates";
 import { idleDetectionSupported, idleDetectionWanted, setIdleDetection } from "./idleDetection";
+import { MIC_BOOST_MAX } from "./voice/micBoost";
 import { saveVoiceSettings, type VoiceSettings } from "./voice/settings";
 import { SOUND_CUES, type SoundCue, type SoundSettings } from "./voice/sounds";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
@@ -291,6 +292,17 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
                     <span className="muted small">{t("settings.pttHint")}</span>
                   </div>
                 )}
+                <h3>{t("settings.micBoost")}</h3>
+                <label className="check"><input type="checkbox" checked={settings.micBoost.auto} onChange={(e) => update({ micBoost: { ...settings.micBoost, auto: e.target.checked } })} /> {t("settings.micBoostAuto")}</label>
+                {!settings.micBoost.auto && (
+                  <label className="stack">
+                    {t("settings.micBoostGain", { pct: Math.round(settings.micBoost.gain * 100) })}
+                    <input type="range" min={1} max={MIC_BOOST_MAX} step={0.25} value={settings.micBoost.gain} onChange={(e) => update({ micBoost: { ...settings.micBoost, gain: Number(e.target.value) } })} />
+                  </label>
+                )}
+                <span className="muted small">
+                  {joined && settings.micBoost.auto && !voice.afkRoom ? `${t("settings.micBoostNow", { pct: Math.round(voice.micBoost * 100) })} ` : ""}{t("settings.micBoostHint", { max: MIC_BOOST_MAX * 100 })}
+                </span>
               </>
             )}
 

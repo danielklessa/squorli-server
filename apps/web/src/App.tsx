@@ -129,6 +129,7 @@ export function App() {
   useEffect(() => client.setMode(voiceSettings.mode), [client, voiceSettings.mode]);
   useEffect(() => client.setThreshold(voiceSettings.vadThreshold), [client, voiceSettings.vadThreshold]);
   useEffect(() => client.setHangover(voiceSettings.vadHangoverMs), [client, voiceSettings.vadHangoverMs]);
+  useEffect(() => client.setMicBoost(voiceSettings.micBoost), [client, voiceSettings.micBoost]);
   useEffect(() => {
     // A kick, ban or session loss on the voice connection's server ends it.
     store.voiceActive = () => client.state.status !== "disconnected";

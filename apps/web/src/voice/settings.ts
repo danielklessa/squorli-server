@@ -4,6 +4,7 @@
  * follows the directory account (store.ts): a change here is reported to subscribers with its source, so the store can
  * push user changes to the directory and apply the account's settings without echoing them back.
  */
+import { DEFAULT_MIC_BOOST, normalizeMicBoost, type MicBoostSettings } from "./micBoost";
 import { DEFAULT_SOUND_SETTINGS, normalizeSoundSettings, type SoundSettings } from "./sounds";
 
 export type VoiceMode = "vad" | "ptt";
@@ -17,6 +18,11 @@ export type VoiceSettings = {
   /** Hangover time in ms so that word endings are not cut off. */
   vadHangoverMs: number;
   inputDeviceId: string | null;
+  /**
+   * Microphone boost (micBoost.ts): automatic by default. Per device like the device selection and NOT part of the directory
+   * account: how quiet a microphone is belongs to this computer, not to the person.
+   */
+  micBoost: MicBoostSettings;
   outputDeviceId: string | null;
   /** Separate output device for screen share audio (null = same as voice). Chromium only (setSinkId). */
   screenOutputDeviceId: string | null;
@@ -44,6 +50,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   vadThreshold: 0.04,
   vadHangoverMs: 400,
   inputDeviceId: null,
+  micBoost: { ...DEFAULT_MIC_BOOST },
   outputDeviceId: null,
   screenOutputDeviceId: null,
   radioOutputDeviceId: null,
@@ -60,7 +67,7 @@ function readStored(): VoiceSettings {
     if (!raw) return { ...DEFAULT_VOICE_SETTINGS };
     const stored = JSON.parse(raw) as Partial<VoiceSettings>;
     // `sounds` is nested, so it needs its own merge: settings stored before the cues existed have no such field.
-    return { ...DEFAULT_VOICE_SETTINGS, ...stored, sounds: normalizeSoundSettings(stored.sounds) };
+    return { ...DEFAULT_VOICE_SETTINGS, ...stored, sounds: normalizeSoundSettings(stored.sounds), micBoost: normalizeMicBoost(stored.micBoost) };
   } catch {
     return { ...DEFAULT_VOICE_SETTINGS };
   }

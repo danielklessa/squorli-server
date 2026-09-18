@@ -175,7 +175,7 @@ async function main() {
   await registerUserRoutes(app, db, directory, hub, presence);
   await registerSettingsRoutes(app, db, hub, config, directory, { presence, lk, onRadioChange: syncRadioMeta });
   await registerChannelRoutes(app, db, hub, presence);
-  await registerRoleRoutes(app, db, hub);
+  await registerRoleRoutes(app, db, hub, presence, lk);
   await registerMemberRoutes(app, db, hub, presence, lk);
   await registerInviteRoutes(app, db);
   await registerMessageRoutes(app, db, hub);

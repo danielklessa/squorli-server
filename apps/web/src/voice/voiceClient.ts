@@ -18,6 +18,7 @@ import {
 } from "livekit-client";
 import { BackgroundBlur, supportsBackgroundProcessors, type BackgroundProcessorWrapper } from "@livekit/track-processors";
 import { VoiceGate, rmsLevel } from "./gate";
+import type { MicBoostSettings } from "./micBoost";
 import { MicPipeline, type GateMode } from "./micPipeline";
 import { isCameraBusy, retryCameraBusy } from "./cameraRetry";
 import type { VoiceSettings } from "./settings";
@@ -76,6 +77,8 @@ export type VoiceState = {
   /** Voice activation / PTT gate open (local only). */
   gateOpen: boolean;
   level: number;
+  /** Microphone boost applied right now (1 = none; micBoost.ts), for the settings and the debug view. */
+  micBoost: number;
   /** false = the browser blocks autoplay; the user has to click once. */
   canPlayback: boolean;
   /** State of the Web Audio context (microphone gate, level metering): "running" is mandatory, "suspended" = the browser blocks until a user gesture. */
@@ -166,7 +169,7 @@ export class VoiceClient {
   private readonly screenListening = new Map<string, Set<string>>();
   private readonly listeners = new Set<(s: VoiceState) => void>();
   state: VoiceState = {
-    status: "disconnected", channelId: null, afkRoom: false, participants: [], micMuted: false, deafened: false, gateOpen: false, level: 0,
+    status: "disconnected", channelId: null, afkRoom: false, participants: [], micMuted: false, deafened: false, gateOpen: false, level: 0, micBoost: 1,
     canPlayback: true, audioContext: "none", inputDeviceId: null, cameraOn: false, cameraBlur: 0, screenOn: false, screenAudio: null, tiles: [], notice: null, screenSink: { deviceId: null, tracks: 0, error: null }, audioProfile: null, rtcUrl: null, events: [], error: null,
   };
   private audioProfile: AudioProfile = DEFAULT_AUDIO_PROFILE;
@@ -382,10 +385,11 @@ export class VoiceClient {
       this.mic = mic;
       mic.onState = (s) => {
         const changed = s.open !== this.state.gateOpen;
-        this.patch({ level: s.level, gateOpen: s.open });
+        this.patch({ level: s.level, gateOpen: s.open, micBoost: s.boost });
         if (changed) this.refreshParticipants(); // own speaker highlight immediately, not only once LiveKit reports it
       };
       mic.setMode(settings.mode);
+      mic.setBoost(settings.micBoost);
       const track = await mic.start(settings.inputDeviceId, this.audioProfile.stereo).catch((err) => { micFailed = true; throw err; });
       if (mic.deviceFallback) this.log("gewaehltes mikrofon nicht gefunden, nutze das standardmikrofon");
       this.publication = await room.localParticipant.publishTrack(track, this.micPublishOptions());
@@ -431,7 +435,7 @@ export class VoiceClient {
     this.screenListening.clear();
     this.audioHost.replaceChildren();
     this.micMutedByUser = false;
-    this.patch({ status: "disconnected", channelId: null, afkRoom: false, participants: [], gateOpen: false, level: 0, micMuted: false, deafened: false, inputDeviceId: null, cameraOn: false, screenOn: false, screenAudio: null, tiles: [] });
+    this.patch({ status: "disconnected", channelId: null, afkRoom: false, participants: [], gateOpen: false, level: 0, micBoost: 1, micMuted: false, deafened: false, inputDeviceId: null, cameraOn: false, screenOn: false, screenAudio: null, tiles: [] });
   }
 
   // ---------- Permission VIEW_VIDEO: who receives camera and screen
@@ -777,6 +781,7 @@ export class VoiceClient {
   setMode(mode: GateMode) { this.mic?.setMode(mode); }
   setThreshold(t: number) { this.mic?.setThreshold(t); }
   setHangover(ms: number) { this.mic?.setHangover(ms); }
+  setMicBoost(b: MicBoostSettings) { this.mic?.setBoost(b); }
   setPttHeld(held: boolean) { this.mic?.setPttHeld(held); }
 
   async setInputDevice(deviceId: string | null): Promise<void> {

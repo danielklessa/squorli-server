@@ -81,6 +81,13 @@ export class VoicePresence<Conn = unknown> {
     return undefined;
   }
 
+  /** Everyone sitting in a voice channel, once per user (first connection, like channelOfUser). */
+  seated(): { userId: string; channelId: string }[] {
+    const seen = new Map<string, string>();
+    for (const { channelId, member } of this.byConn.values()) if (!seen.has(member.userId)) seen.set(member.userId, channelId);
+    return [...seen].map(([userId, channelId]) => ({ userId, channelId }));
+  }
+
   /** Members of a channel, once per user, in join order. */
   members(channelId: string): VoiceMember[] {
     const seen = new Map<string, VoiceMember>();

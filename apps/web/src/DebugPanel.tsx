@@ -59,7 +59,7 @@ export function DebugPanel({ log, client, voice }: { log: RawLogEntry[]; client:
           <tr><td>LiveKit-URL</td><td>{voice.rtcUrl ?? "–"}</td></tr>
           <tr><td>{t("debug.audio")}</td><td title={t("debug.audioHint")}>{t("debug.audioRow", { ctx: voice.audioContext, playback: voice.canPlayback ? t("debug.free") : t("debug.blocked") })}</td></tr>
           <tr><td>{t("debug.icePath")}</td><td title={t("debug.iceHint")}>{t("debug.iceRow", { pub: stats.path.publisher ?? "–", sub: stats.path.subscriber ?? "–" })}</td></tr>
-          <tr><td>{t("debug.levelGate")}</td><td>{voice.level.toFixed(3)} / {voice.gateOpen ? t("debug.open") : t("debug.closed")}</td></tr>
+          <tr><td>{t("debug.levelGate")}</td><td>{voice.level.toFixed(3)} / {voice.gateOpen ? t("debug.open") : t("debug.closed")} · x{voice.micBoost.toFixed(2)}</td></tr>
           <tr><td>{t("debug.microphone")}</td><td>{voice.inputDeviceId ?? "–"}</td></tr>
           <tr><td>{t("debug.screenOut")}</td><td>{voice.screenSink.deviceId ? t("debug.device", { id: voice.screenSink.deviceId.slice(0, 12) }) : t("debug.sameAsVoice")} · {t("debug.tracks", { n: voice.screenSink.tracks })}{voice.screenSink.error ? ` · ${t("debug.error", { err: voice.screenSink.error })}` : ""}</td></tr>
           <tr><td>{t("debug.camScreen")}</td><td>{voice.cameraOn ? t("debug.on") : t("debug.off")} / {voice.screenOn ? (voice.screenAudio ? t("debug.onWithAudio") : t("debug.onNoAudio")) : t("debug.off")}</td></tr>

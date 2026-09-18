@@ -7,6 +7,7 @@ import type { Db } from "../db";
 import { bans, channels, memberRoles, members, roles, users } from "../db/schema";
 import type { Hub } from "../hub";
 import type { LivekitAdmin } from "../livekit/admin";
+import { syncStreamGrantsOf } from "../livekit/sync";
 import { actorOf, broadcastStructure, loadSettings } from "../state";
 import type { VoicePresence } from "../voice/presence";
 
@@ -39,6 +40,7 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     if (!body.data.owner && settings.ownerId === target.userId) return reply.code(403).send({ error: "founder" });
     await db.update(members).set({ isOwner: body.data.owner }).where(eq(members.userId, target.userId));
     req.log.info({ by: m.userId, target: target.userId, owner: body.data.owner }, "Eigentuemerstatus geaendert");
+    await syncStreamGrantsOf(db, presence, lk, [target.userId]);
     await broadcastStructure(db, hub, ["members"]);
     return { ok: true };
   });
@@ -65,6 +67,8 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     await db.delete(memberRoles).where(eq(memberRoles.userId, target.userId));
     const toInsert = wanted.filter((r) => !r.isDefault).map((r) => ({ userId: target.userId, roleId: r.id }));
     if (toInsert.length) await db.insert(memberRoles).values(toInsert);
+    // A member sitting in a voice channel: their LiveKit grants follow the new roles (camera/screen), see livekit/sync.ts.
+    await syncStreamGrantsOf(db, presence, lk, [target.userId]);
     await broadcastStructure(db, hub, ["members"]);
     return { ok: true };
   });
