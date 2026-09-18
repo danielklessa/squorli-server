@@ -1,0 +1,69 @@
+# Packaging of the desktop app (docs/features/desktop.md, apps/desktop/AGENTS.md). Run through `pnpm --filter @squorli/desktop dist`
+# after `pnpm build` (root): the app ships the web client's build as `resources/renderer`.
+appId: com.squorli.desktop
+productName: Squorli
+copyright: Copyright 2026 Daniel Klessa
+directories:
+  output: release
+  buildResources: build
+
+# The two bundles contain everything except Electron itself: no node_modules in the package.
+files:
+  - out/**
+  - package.json
+  - "!node_modules"
+npmRebuild: false
+asar: true
+
+extraResources:
+  - from: ../web/dist
+    to: renderer
+    filter:
+      - "**/*"
+      - "!**/*.map"
+  - from: ../../LICENSE
+    to: LICENSE.txt
+  - from: ../../NOTICE
+    to: NOTICE.txt
+  - from: ../../THIRD-PARTY-NOTICES.md
+    to: THIRD-PARTY-NOTICES.md
+
+# `squorli://server/<host>` and `squorli://invite/<host>/<code>` open the app (handled from P5 on).
+protocols:
+  - name: Squorli
+    schemes: [squorli]
+
+# Artifact names without spaces: the update feed points at GitHub Releases, which rewrites spaces, and the differential
+# update derives the old file's address from the new one.
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  deleteAppDataOnUninstall: false
+  artifactName: Squorli-Setup-${version}.${ext}
+  uninstallDisplayName: Squorli
+
+linux:
+  target: [AppImage, deb]
+  category: Network
+  synopsis: Self-hosted community chat with voice and video
+  # OPEN (user's decision): a deb package must name a maintainer with an e-mail address, which becomes public with the package.
+  # Until one is entered here (`maintainer: Name <address>`), the deb target fails; AppImage and the Windows installer do not need it.
+  executableName: squorli
+  artifactName: Squorli-${version}-${arch}.${ext}
+
+# The app asks only squorli.com for updates; the feed there points at the GitHub Releases files (squorli-website).
+publish:
+  - provider: generic
+    url: https://squorli.com/updates/stable
+
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableCookieEncryption: true
+  onlyLoadAppFromAsar: true

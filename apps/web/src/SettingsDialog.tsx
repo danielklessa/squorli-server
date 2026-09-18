@@ -8,6 +8,7 @@ import { Icon } from "./Icon";
 import { LicensesTab } from "./LicensesTab";
 import { LOCALES, fmtDateTime, localePreference, t, type LocalePreference } from "./i18n";
 import { activity } from "./activity";
+import { platform, type WindowAppearance } from "./platform";
 import { idleDetectionSupported, idleDetectionWanted, setIdleDetection } from "./idleDetection";
 import { saveVoiceSettings, type VoiceSettings } from "./voice/settings";
 import { SOUND_CUES, type SoundCue, type SoundSettings } from "./voice/sounds";
@@ -46,8 +47,10 @@ const fmt = fmtDateTime;
  * the directory's account page, sign out, discard identity) and licenses (our own and the third-party notices, LicensesTab.tsx). With a directory account everything except the device selection
  * is stored there (store.ts pushes every change); sessions and the name on this server belong to the server shown.
  */
-export function SettingsDialog({ api, me, displayName, directoryUrl, directoryAccount, serverDomain, clientVersion, syncError, client, voice, initialTab, onSaveServerName, onSaveGlobalName, onSetLocale, onCapturingKey, onClose, onLogout, onForget }: {
-  api: ServerApi; me: Me;
+export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, directoryAccount, serverDomain, clientVersion, syncError, client, voice, initialTab, onSaveServerName, onSaveGlobalName, onSetLocale, onCapturingKey, onClose, onLogout, onForget }: {
+  /** The server on screen and who you are there; null = none is shown (client without a home server): the dialog then has
+   *  no profile and no sessions, which belong to a server, and the account page names the directory account and `publicKey`. */
+  api: ServerApi | null; me: Me | null; publicKey: string | null;
   /** Your name as the server shows it right now (member list); the preview falls back to it. */
   displayName: string;
   directoryUrl: string | null; directoryAccount: DirectoryAccount | null | undefined; serverDomain: string | null;
@@ -66,8 +69,15 @@ export function SettingsDialog({ api, me, displayName, directoryUrl, directoryAc
   const settings = useVoiceSettings();
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
-  const [tab, setTab] = useState<SettingsTab>(initialTab ?? "profile");
-  const [name, setName] = useState(me.displayName ?? "");
+  const onServer = !!api && !!me;
+  const tabs = TABS.filter((entry) => onServer || (entry.id !== "profile" && entry.id !== "sessions"));
+  const [tab, setTab] = useState<SettingsTab>(() => { const wanted = initialTab ?? "profile"; return tabs.some((entry) => entry.id === wanted) ? wanted : "view"; });
+  const [name, setName] = useState(me?.displayName ?? "");
+  const handle = me?.handle ?? directoryAccount?.handle ?? null;
+  // Desktop app: window background (mica/acrylic + opacity); null in the browser and where the system offers no material.
+  const windowLook = platform.window.appearance;
+  const [look, setLook] = useState<WindowAppearance | null>(() => windowLook?.get() ?? null);
+  const changeLook = (next: WindowAppearance) => { setLook(next); void windowLook?.set(next).then(() => setLook(windowLook.get())); };
   const [globalName, setGlobalName] = useState(directoryAccount?.displayName ?? "");
   // The global name arrives with the signed account status, possibly after the dialog opened: follow it until the user edits the field
   // (an empty field saved over a name that had not arrived yet would delete it).
@@ -113,6 +123,7 @@ export function SettingsDialog({ api, me, displayName, directoryUrl, directoryAc
   }, [capturingKey]);
 
   const loadSessions = useCallback(async () => {
+    if (!api) return;
     try { setSessions(await api.getSessions()); setErr(null); } catch (e) { setErr(String(e)); }
   }, [api]);
   useEffect(() => { if (tab === "sessions") void loadSessions(); }, [tab, loadSessions]);
@@ -137,13 +148,13 @@ export function SettingsDialog({ api, me, displayName, directoryUrl, directoryAc
     const ok = await askConfirm({ title: t("profile.revokeDeviceTitle"), text: t("profile.revokeDeviceText", { label: s.label ?? t("profile.thisDevice"), date: fmt(s.createdAt) }), confirmLabel: t("profile.signOut"), danger: true });
     if (!ok) return;
     setBusy(true);
-    try { await api.revokeSession(s.id); await loadSessions(); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+    try { await api?.revokeSession(s.id); await loadSessions(); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }
   async function revokeOthers() {
     const ok = await askConfirm({ title: t("profile.revokeOthersTitle"), text: t("profile.revokeOthersText"), confirmLabel: t("profile.signOutAll"), danger: true });
     if (!ok) return;
     setBusy(true);
-    try { await api.revokeOtherSessions(); await loadSessions(); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+    try { await api?.revokeOtherSessions(); await loadSessions(); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   }
   async function forget() {
     const ok = await askConfirm({ title: t("profile.forgetTitle"), text: t("profile.forgetText"), confirmLabel: t("profile.forget"), danger: true });
@@ -165,14 +176,14 @@ export function SettingsDialog({ api, me, displayName, directoryUrl, directoryAc
         </header>
         <div className="settings-layout">
           <nav className="settings-nav">
-            {TABS.map((t) => <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)}><Icon name={t.icon} /> {t.label}</button>)}
+            {tabs.map((t) => <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)}><Icon name={t.icon} /> {t.label}</button>)}
           </nav>
           <div className="settings-body stack">
             {err && <p className="error">{err}</p>}
 
-            {tab === "profile" && (
+            {tab === "profile" && onServer && (
               <>
-                <div className="profile-preview"><Avatar name={shownName || "?"} size="large" /><div><strong>{shownName}</strong>{me.handle && <div className="muted small">@{me.handle}</div>}</div></div>
+                <div className="profile-preview"><Avatar name={shownName || "?"} size="large" /><div><strong>{shownName}</strong>{handle && <div className="muted small">@{handle}</div>}</div></div>
                 <h3>{t("profile.nameHere")}</h3>
                 <input value={name} maxLength={32} autoFocus onChange={(e) => { setName(e.target.value); setSaved(false); }} onKeyDown={(e) => { if (e.key === "Enter") void saveNames(); }} />
                 <span className="muted small">{withDirectory ? t("profile.nameHereHintDir") : t("profile.nameHereHint")}</span>
@@ -195,6 +206,21 @@ export function SettingsDialog({ api, me, displayName, directoryUrl, directoryAc
                   {LOCALES.map((l) => <option key={l} value={l}>{t(`lang.${l}`)}</option>)}
                 </select>
                 <span className="muted small">{t("profile.languageHint")}</span>
+                {windowLook && look && (
+                  <>
+                    <h3>{t("settings.window")}</h3>
+                    <label className="stack">{t("settings.windowMaterial")}
+                      <select value={look.material} onChange={(e) => changeLook({ ...look, material: e.target.value as WindowAppearance["material"] })}>
+                        <option value="none">{t("settings.windowMaterial.none")}</option>
+                        {windowLook.materials.map((m) => <option key={m} value={m}>{t(`settings.windowMaterial.${m}`)}</option>)}
+                      </select>
+                    </label>
+                    <label className="stack">{t("settings.windowOpacity", { n: Math.round(look.opacity * 100) })}
+                      <input type="range" min={40} max={100} step={5} value={Math.round(look.opacity * 100)} disabled={look.material === "none"} onChange={(e) => changeLook({ ...look, opacity: Number(e.target.value) / 100 })} />
+                    </label>
+                    <span className="muted small">{t("settings.windowHint")}</span>
+                  </>
+                )}
                 <h3>{t("settings.speakerView")}</h3>
                 <label className="check">
                   <input type="checkbox" checked={settings.featureSelfInSpeakerView} onChange={(e) => update({ featureSelfInSpeakerView: e.target.checked })} />
@@ -375,12 +401,12 @@ export function SettingsDialog({ api, me, displayName, directoryUrl, directoryAc
             {tab === "account" && (
               <>
                 <h3>{t("profile.identity")}</h3>
-                {me.handle ? <p>{t("login.handle")}: <strong>@{me.handle}</strong>{dirHost ? <span className="muted small"> {t("login.verifiedAt", { host: dirHost })}</span> : null}</p> : <p className="muted small">{t("profile.noHandle")}</p>}
+                {handle ? <p>{t("login.handle")}: <strong>@{handle}</strong>{dirHost ? <span className="muted small"> {t("login.verifiedAt", { host: dirHost })}</span> : null}</p> : <p className="muted small">{t("profile.noHandle")}</p>}
                 <span className="muted small">{t("profile.publicKey")}</span>
-                <code className="key">{me.publicKey}</code>
+                <code className="key">{me?.publicKey ?? publicKey ?? "…"}</code>
                 {directoryUrl && (
                   <p className="muted small">
-                    <a href={`${directoryUrl}/?handle=${encodeURIComponent(me.handle ?? "")}`} target="_blank" rel="noreferrer">{t("profile.manageAt", { host: dirHost ?? "" })}</a>{t("profile.manageHint")}
+                    <a href={`${directoryUrl}/?handle=${encodeURIComponent(handle ?? "")}`} target="_blank" rel="noreferrer">{t("profile.manageAt", { host: dirHost ?? "" })}</a>{t("profile.manageHint")}
                   </p>
                 )}
                 <div className="row">

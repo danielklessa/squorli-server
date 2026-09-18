@@ -29,6 +29,19 @@
   --r-panel: var(--sq-radius-panel, 20px);
   --u: var(--sq-space-unit, 4px);
 }
+/* Desktop app with a window material (mica/acrylic, platform/desktop.ts sets data-material and --win-alpha): the page lets the
+   system's material through. The big surfaces take the chosen opacity, panels keep more of it so text stays readable; everything
+   that floats (dialogs, menus) and every raised surface (--bg4) stays opaque. Contrast over a material is the user's choice:
+   the brand's measured pairs hold for opaque colors only (docs/brand/AGENTS.md). */
+html[data-material] body { background: transparent; }
+html[data-material] .app, html[data-material] .login {
+  --bg: color-mix(in srgb, var(--sq-night, #0C1424) calc(var(--win-alpha, 1) * 100%), transparent);
+  --bg3: color-mix(in srgb, var(--sq-night, #0C1424) calc(var(--win-alpha, 1) * 100%), transparent);
+  --bg2: color-mix(in srgb, var(--sq-surface, #162238) calc((var(--win-alpha, 1) * 0.5 + 0.5) * 100%), transparent);
+}
+html[data-material] .modal-backdrop, html[data-material] .rail-menu, html[data-material] .login-card {
+  --bg: var(--sq-night, #0C1424); --bg2: var(--sq-surface, #162238); --bg3: var(--sq-night, #0C1424);
+}
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); }
@@ -478,6 +491,17 @@ button.icon.on { color: var(--brand); }
 .camera-list { list-style: none; margin: 0.6rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
 .camera-option { width: 100%; text-align: left; background: var(--bg4); color: var(--text); display: flex; align-items: center; gap: 0.6rem; }
 .camera-picker h3 { margin: 0.7rem 0 0.3rem; }
+/* Screen picker of the desktop app (a browser brings its own) */
+.screen-picker { width: min(46rem, 100%); }
+.screen-picker-body { max-height: min(60vh, 32rem); overflow-y: auto; margin: 0.4rem 0 0.6rem; padding-right: 0.25rem; }
+.screen-picker h3 { margin: 0.7rem 0 0.4rem; }
+.screen-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: 0.5rem; }
+.screen-option { width: 100%; padding: 0.4rem; background: var(--bg4); color: var(--text); display: flex; flex-direction: column; gap: 0.35rem; border: 2px solid transparent; text-align: left; }
+.screen-option.active { border-color: var(--brand); }
+.screen-thumb { aspect-ratio: 16 / 9; background: #000; border-radius: calc(var(--r) - 4px); overflow: hidden; display: grid; place-items: center; color: var(--muted); font-size: 1.6rem; }
+.screen-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.screen-name { display: flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.screen-name img { flex: none; }
 /* Twitch as the radio's source: ONE iframe (TwitchPlayer) laid over whichever slot is on screen. Below menus and dialogs, above the page. */
 .embed-player { position: fixed; z-index: 4; overflow: hidden; border-radius: calc(var(--r-panel) - 2px); background: #000; }
 .embed-player iframe { width: 100%; height: 100%; border: 0; display: block; }

@@ -4,6 +4,10 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
+  "exports": {
+    "./platform/bridge": "./src/platform/bridge.ts",
+    "./platform/deepLink": "./src/platform/deepLink.ts"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

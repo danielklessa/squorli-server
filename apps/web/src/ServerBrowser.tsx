@@ -8,8 +8,9 @@ import { t } from "./i18n";
 /**
  * Server directory (M6d): public list from the directory service (GET /api/servers, only servers that opt into listing).
  * Joining via link: the server is opened in its own origin; open = can be entered without an invite.
+ * `onOpen` (client without a home server: the desktop app) shows the server inside the client instead.
  */
-export function ServerBrowser({ directoryUrl, currentHost, onClose }: { directoryUrl: string; currentHost: string | null; onClose: () => void }) {
+export function ServerBrowser({ directoryUrl, currentHost, onClose, onOpen }: { directoryUrl: string; currentHost: string | null; onClose: () => void; onOpen: ((host: string) => void) | null }) {
   const [servers, setServers] = useState<DirectoryServer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dirHost = new URL(directoryUrl).host;
@@ -49,7 +50,7 @@ export function ServerBrowser({ directoryUrl, currentHost, onClose }: { director
                     </p>
                     {s.description && <p className="small">{s.description}</p>}
                   </div>
-                  {current ? <span className="muted small">{t("browser.thisServer")}</span> : <a className="link-btn" href={directoryServerUrl(s.host)}>{t("common.open")}</a>}
+                  {current ? <span className="muted small">{t("browser.thisServer")}</span> : onOpen ? <button onClick={() => onOpen(s.host)}>{t("common.open")}</button> : <a className="link-btn" href={directoryServerUrl(s.host)}>{t("common.open")}</a>}
                 </li>
               );
             })}

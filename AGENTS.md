@@ -14,6 +14,7 @@ Read the file of every area a task touches before changing it. Agents that load 
 | Area | File | Holds |
 |---|---|---|
 | App server `apps/server/` | `apps/server/AGENTS.md` | files, routes, schema, server conventions (permissions, owners, only with account, directory client, sessions, account deletion, database), server pitfalls |
+| Desktop app `apps/desktop/` (Electron shell around the web client's build) | `apps/desktop/AGENTS.md` | files, security baseline, the fixed origin `app://squorli`, pitfalls (ELECTRON_RUN_AS_NODE, Electron's binary, embedded players, driving the app from a script) |
 | Web client `apps/web/` | `apps/web/AGENTS.md` | files, UI conventions (i18n, icons, modals, no browser dialogs, settings, multi-server client), which feature notes belong to which file |
 | Voice, camera, screen share `apps/web/src/voice/` and the media components | `apps/web/src/voice/AGENTS.md` | mute/deafen, codec, audio unlock, speech gate, `VIEW_VIDEO`, video, browser pitfalls |
 | Protocol `packages/protocol/` | `packages/protocol/AGENTS.md` | files, `PROTOCOL_VERSION` rule, adding and ordering permissions, key backup |
@@ -35,6 +36,7 @@ Feature notes (dated entries: wishes, decisions, consequences, what was checked)
 | Admin panel (role and channel ordering), context menus, UI refresh | `docs/features/ui-admin.md` |
 | Third-party licenses | `docs/features/licenses.md` |
 | Directory integration: M6 phases, second factor, e-mail, account page | `docs/features/directory.md` |
+| Desktop app (M4): decisions, phases, platform interface (`apps/web/src/platform/`), client without a home server, the Electron shell `apps/desktop/` | `docs/features/desktop.md` |
 
 History: `docs/VERIFIED-STATE.md` (what was run and checked per change, newest first; add an entry after every complete test run) and `docs/MILESTONE-LOG.md` (one row per change, newest first). Product plan: `docs/PLAN.md`. Developer guide: `docs/DEVELOPMENT.md`.
 
@@ -54,7 +56,7 @@ Product plan, architecture decisions and milestones: [docs/PLAN.md](docs/PLAN.md
 **Directory service (M6 brought forward, user's decision, 14 September 2026; M7 friends and direct messages):** lives in its own, unpublished repo `../squorli-directory`, operated on a dedicated host with its own subdomain; this repo only knows `DIRECTORY_URL`. Sync rules for the shared protocol part and the brand package: section 2a. Phases M6a-M6d, second factor, e-mail and the account page: `docs/features/directory.md`.
 **Voice channel moderation** (permission `MODERATE_VOICE`, 13 September 2026): `docs/features/voice-video.md`.
 **Roles (user's decision, 13 September 2026):** the default role is "Gast" (guest) and may only see channels and join voice channels. "Mitglied" (member: write, attach, invite, camera/screen) is assigned manually by admins; migration 0004 automatically turned existing members into "Mitglied".
-Decisions from PLAN 9 for M2 (preliminary, made by Claude on 13 September 2026, not confirmed by the user): text chat = channel messages with edit/delete, no reactions/threads (direct messages came with M7 on 14 September 2026, user's decision: 1:1 only, between friends, end-to-end encrypted via the directory); moderation = role permissions + kick/ban, no audit log, no report function; permissions apply server-wide, no channel overrides. Not available: desktop client (M4), TURN acceptance.
+Decisions from PLAN 9 for M2 (preliminary, made by Claude on 13 September 2026, not confirmed by the user): text chat = channel messages with edit/delete, no reactions/threads (direct messages came with M7 on 14 September 2026, user's decision: 1:1 only, between friends, end-to-end encrypted via the directory); moderation = role permissions + kick/ban, no audit log, no report function; permissions apply server-wide, no channel overrides. In progress: desktop client (M4; runs unpackaged, no installers yet, `docs/features/desktop.md`). Not available: TURN acceptance.
 
 ## 2. Repository structure
 
@@ -62,7 +64,8 @@ Top level only; the files of each area are listed in its `AGENTS.md` (section 0)
 
 ```
 apps/server/           App server: Fastify 5, Drizzle ORM + postgres-js, LiveKit server SDK. Serves the built web client. -> apps/server/AGENTS.md
-apps/web/              Web client: Vite 5 + React 18 + livekit-client. Later the basis for the Electron shell. -> apps/web/AGENTS.md
+apps/web/              Web client: Vite 5 + React 18 + livekit-client. Its build is also what the desktop app shows. -> apps/web/AGENTS.md
+apps/desktop/          Desktop app (M4): Electron shell that serves apps/web/dist from app://squorli; no renderer code of its own. -> apps/desktop/AGENTS.md
 packages/protocol/     @squorli/protocol: zod schemas for REST and WebSocket, PROTOCOL_VERSION. Single source of truth for the client/server contract. -> packages/protocol/AGENTS.md
 deploy/                Compose files (prod, dev, Portainer), Caddy, LiveKit config, proxy overlays. -> deploy/AGENTS.md
 tools/                 Dev start with cleanup, generators (icons, emoji, licenses), copy-web, load-test bots. -> tools/AGENTS.md
@@ -79,7 +82,7 @@ Dockerfile             Multi-stage build, target `app` (web + server); `pnpm dep
 ```
 
 Workspace: pnpm 10 (`packageManager` in package.json, `corepack enable`), Node >= 24 (LTS, tested with Node 24.21.0).
-Package names: `@squorli/server`, `@squorli/web`, `@squorli/protocol` (the directory service `@squorli/directory` lives in `../squorli-directory`). The protocol package is consumed as TypeScript source (no build step). `packages/protocol/src/permissions.ts` = permission bitmask (append new bits at the end) and `PERMISSION_GROUPS` = display order and grouping in the role editor (sort every new permission in by meaning and re-check the arrangement, `packages/protocol/AGENTS.md`).
+Package names: `@squorli/server`, `@squorli/web`, `@squorli/desktop`, `@squorli/protocol` (the directory service `@squorli/directory` lives in `../squorli-directory`). The protocol package is consumed as TypeScript source (no build step). `packages/protocol/src/permissions.ts` = permission bitmask (append new bits at the end) and `PERMISSION_GROUPS` = display order and grouping in the role editor (sort every new permission in by meaning and re-check the arrangement, `packages/protocol/AGENTS.md`).
 
 ## 2a. Sibling repo `../squorli-directory` (not published) and synchronized copies
 
@@ -106,6 +109,7 @@ All from the repo root:
 | `cp .env.development apps/server/.env` | Provide the dev configuration (once) |
 | `pnpm dev` | **Normal development start** (`tools/dev.mjs`): starts Postgres + LiveKit via Compose, then the server (`tsx watch`, :3000) and the web client (Vite, :5173, proxies `/api` including WS to :3000). The directory service is started in `../squorli-directory` (`pnpm dev` there, :3100). On exit (Ctrl+C, crash of an app) the containers are stopped automatically (`compose stop`, data is kept). Options: `--no-docker` (leave the containers alone), `--down` (`compose down` on exit). |
 | `pnpm dev:apps` | Only server + web client in parallel, without container management |
+| `pnpm dev:desktop` | The desktop app against the running Vite server (:5173), with its own user data folder (`Squorli-dev`). `pnpm --filter @squorli/desktop start` shows the built client (`pnpm build` first) from `app://squorli` |
 | `pnpm docker:dev` / `pnpm docker:dev:down` | Start / remove Postgres (5432) + LiveKit in dev mode (7880/7881/7882) manually |
 | `pnpm typecheck` | `tsc --noEmit` in all packages |
 | `pnpm test` | Vitest in all packages (`--passWithNoTests`) |

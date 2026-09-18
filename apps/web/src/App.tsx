@@ -4,6 +4,7 @@ import { AdminPanel } from "./AdminPanel";
 import { ChatView } from "./ChatView";
 import { DebugPanel } from "./DebugPanel";
 import { HomeMain, HomeSidebar } from "./Home";
+import { DesktopLogin } from "./DesktopLogin";
 import { LoginScreen } from "./LoginScreen";
 import { MemberList } from "./MemberList";
 import { Sidebar } from "./Sidebar";
@@ -11,17 +12,20 @@ import { VoiceDock } from "./VoiceDock";
 import { VoiceStage } from "./VoiceStage";
 import { CameraPicker } from "./CameraPicker";
 import { Icon } from "./Icon";
-import { askConfirm } from "./dialogs";
+import { askConfirm, askInput } from "./dialogs";
 import type { MenuAnchor } from "./ContextMenu";
 import { MiniProfile } from "./MiniProfile";
 import { SettingsDialog, type SettingsTab } from "./SettingsDialog";
 import { applyBranding } from "./branding";
 import { ServerBrowser } from "./ServerBrowser";
-import { ServerRail, type RailServer } from "./ServerRail";
+import { ServerRail } from "./ServerRail";
+import { buildRailServers } from "./railServers";
+import { NoServers } from "./NoServers";
+import { ScreenPicker } from "./ScreenPicker";
 import { loadVoiceSettings, saveVoiceSettings } from "./voice/settings";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
 import { Permission, directoryServerIconUrl, directoryServerUrl, displayNameOf, hasPermission, type Member } from "@squorli/protocol";
-import { Store, activeState, homeState, type State } from "./store";
+import { Store, activeState, homeState, type ServerConnState, type State } from "./store";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 import { RadioPlayer, type RadioState } from "./voice/radioPlayer";
 import { EmbedPlayer, embedKeyOf, usePlayerWindow, type EmbedSource } from "./EmbedPlayer";
@@ -29,12 +33,15 @@ import { videoAccessOf } from "./voice/videoAccess";
 import { activity, watchActivity } from "./activity";
 import { resumeIdleDetection } from "./idleDetection";
 import { t } from "./i18n";
+import { platform, type ScreenPick, type ScreenSource } from "./platform";
+import { formatDeepLink } from "./platform/deepLink";
 
 const peerKeysOf = (members: Member[]): Record<string, string> => Object.fromEntries(members.map((m) => [m.userId, m.publicKey]));
 
 export function App() {
-  const store = useMemo(() => new Store(), []);
-  const client = useMemo(() => new VoiceClient(), []);
+  // The browser has a home server (the one serving the page); the desktop app has none and starts from the directory account.
+  const store = useMemo(() => new Store({ home: platform.home, defaultDirectoryUrl: platform.defaultDirectoryUrl }), []);
+  const client = useMemo(() => new VoiceClient(undefined, platform.media), []);
   const radio = useMemo(() => new RadioPlayer(), []);
   const [state, setState] = useState<State>(store.state);
   const [voice, setVoice] = useState<VoiceState>(client.state);
@@ -57,6 +64,14 @@ export function App() {
    * Server the voice connection belongs to (multi-server client): it survives switching the displayed server;
    * only joining a voice channel on another server ends it (as the user specified).
    */
+  /** Desktop app: the shell asks which screen or window to share (ScreenPicker.tsx); a browser has its own picker. */
+  const [screenPick, setScreenPick] = useState<{ sources: ScreenSource[]; canShareAudio: boolean; resolve: (pick: ScreenPick | null) => void } | null>(null);
+  useEffect(() => {
+    platform.screen.setPicker((sources, canShareAudio) => new Promise((resolve) => setScreenPick((open) => { open?.resolve(null); return { sources, canShareAudio, resolve }; })));
+    return () => platform.screen.setPicker(null);
+  }, []);
+  // Desktop app: a `squorli://` link from a browser. The store shows the server (or keeps the link until after the login).
+  useEffect(() => platform.links.onDeepLink((link) => { setStageOpen(false); setShowBrowser(false); store.openLink(formatDeepLink(link)); }), [store]);
   const [voiceHost, setVoiceHost] = useState<string | null>(null);
   const voiceHostRef = useRef<string | null>(null);
   voiceHostRef.current = voiceHost;
@@ -241,15 +256,19 @@ export function App() {
   const conn = store.connection(activeHost) ?? store.home;
 
   // Page title = name of the displayed server, favicon = its icon (admin) or the Squorli mark; also applies to the login screen.
-  const title = active.server?.settings.name ?? active.serverName ?? "Squorli";
-  const iconUrl = active.server ? (active.server.settings.iconUrl ? conn.api.abs(active.server.settings.iconUrl) : null) : active.iconUrl;
+  const title = active?.server?.settings.name ?? active?.serverName ?? "Squorli";
+  const iconUrl = active?.server && conn ? (active.server.settings.iconUrl ? conn.api.abs(active.server.settings.iconUrl) : null) : active?.iconUrl ?? null;
   useEffect(() => applyBranding(title, iconUrl), [title, iconUrl]);
 
-  if (!home.server || !home.me || !home.userId) return <LoginScreen store={store} state={state} />;
+  // With a home server the client hangs off the session there; without one (desktop app) it has a login of its own.
+  const homeless = state.homeHost === null;
+  if (homeless ? !state.signedIn : !home?.server || !home.me || !home.userId) return homeless ? <DesktopLogin store={store} state={state} /> : <LoginScreen store={store} state={state} />;
 
-  const server = active.server;
-  const current = server?.channels.find((c) => c.id === active.currentChannelId && c.kind === "text") ?? null;
-  const me = server?.members.find((m) => m.userId === active.userId);
+  const server = active?.server ?? null;
+  /** The server on screen with its connection; null = none is shown (connecting, join view, or no server at all). */
+  const view = active && conn && server ? { active, conn, server } : null;
+  const current = view?.server.channels.find((c) => c.id === view.active.currentChannelId && c.kind === "text") ?? null;
+  const me = view?.server.members.find((m) => m.userId === view.active.userId);
   const canStream = !!server && hasPermission(server.myPermissions, Permission.STREAM_VIDEO);
   // M7: home view with friends and direct messages as soon as the directory socket exists (an account at the directory).
   const homeAvailable = state.friends !== null || state.directoryLink !== "idle";
@@ -264,14 +283,25 @@ export function App() {
   } : null;
 
   // Server rail: own server first, then the account's servers from the directory (without duplicating our own).
-  const railServers: RailServer[] = [];
-  const homeDirHost = home.serverDomain ?? window.location.hostname;
-  railServers.push({ key: state.homeHost, host: homeDirHost, name: home.server.settings.name, sub: null, iconUrl: home.server.settings.iconUrl });
-  for (const s of (state.accountServers ?? []).slice().sort((a, b) => (b.lastSeenAt < a.lastSeenAt ? -1 : b.lastSeenAt > a.lastSeenAt ? 1 : 0))) {
-    const key = store.hostFor(s.host);
-    if (key === state.homeHost) continue;
-    railServers.push({ key, host: s.host, name: s.name ?? s.host, sub: s.displayName ? t("app.asName", { name: s.displayName }) : null, iconUrl: state.directoryUrl ? directoryServerIconUrl(state.directoryUrl, s.host, s.iconUpdatedAt) : null });
-  }
+  // Without a home server: the account's servers, then the ones added by address, and the one being looked at before joining.
+  const homeDirHost = home?.serverDomain ?? window.location.hostname;
+  const nameOf = (host: string) => state.servers[host]?.server?.settings.name ?? state.servers[host]?.serverName ?? null;
+  const railServers = buildRailServers({
+    home: home?.server && state.homeHost !== null ? { key: state.homeHost, host: homeDirHost, name: home.server.settings.name, sub: null, iconUrl: home.server.settings.iconUrl } : null,
+    accountServers: state.accountServers ?? [],
+    localHosts: homeless ? [...state.localHosts, ...(activeHost !== null ? [activeHost] : [])].map((host) => ({ host, name: nameOf(host) })) : [],
+    keyOf: (host) => store.hostFor(host),
+    iconOf: (s) => (state.directoryUrl ? directoryServerIconUrl(state.directoryUrl, s.host, s.iconUpdatedAt) : null),
+    subOf: (name) => t("app.asName", { name }),
+  });
+  const showRail = !!state.directoryUrl || homeless;
+  const addServer = async (initial = "") => {
+    const input = await askInput({ title: t("add.title"), text: t("add.text"), label: t("add.label"), placeholder: t("add.placeholder"), initial, maxLength: 400, confirmLabel: t("add.confirm") });
+    if (input === null) return;
+    const error = await store.addServer(input);
+    if (error) { await askConfirm({ title: t("add.title"), text: error, confirmLabel: t("common.ok") }); void addServer(input); return; }
+    setStageOpen(false);
+  };
   const railState = Object.fromEntries(Object.entries(state.servers).map(([k, s]) => [k, {
     // Muted channels and a muted server give no unread mark; mentions always count.
     unread: !s.serverMuted && Object.entries(s.unread).some(([id, u]) => u && !s.muted[id]), muted: s.serverMuted, canMute: s.readSync && s.connection === "connected", mentions: Object.values(s.mentions).reduce((n, c) => n + c, 0), voice: k === voiceHost && voice.status !== "disconnected", connection: s.connection,
@@ -289,26 +319,27 @@ export function App() {
   };
 
   return (
-    <div className={`app ${state.directoryUrl ? "with-rail" : ""} ${homeOpen ? "home" : ""} ${navigationOpen ? "navigation-open" : ""}`}>
+    <div className={`app ${showRail ? "with-rail" : ""} ${homeOpen ? "home" : ""} ${navigationOpen ? "navigation-open" : ""}`}>
       {videoWindows.windows}
       {embedSource && channelRadio && <EmbedPlayer source={embedSource} name={channelRadio.name} volume={radioState.volume} muted={voice.deafened} popout={playerWindow} sync={embedSync} onNotice={(text) => client.setNotice(text)} />}
       <button className="mobile-navigation secondary" aria-expanded={navigationOpen} aria-controls="app-navigation" onClick={() => setNavigationOpen((open) => !open)}><Icon name={navigationOpen ? "x" : "hash"} />{t("app.navigation")}</button>
-      {state.directoryUrl && <ServerRail servers={railServers} serverState={railState} activeKey={homeOpen ? null : activeHost}
+      {showRail && <ServerRail servers={railServers} serverState={railState} activeKey={homeOpen ? null : activeHost} onAdd={homeless ? () => { void addServer(); } : null}
         onSelect={(key, host) => { if (key === state.homeHost) { store.openServer(homeDirHost); } else store.openServer(host); setStageOpen(key === voiceHost && stageOpen); }}
-        onDiscover={() => setShowBrowser(true)} onLeave={(host, name) => { void leaveServer(host, name); }}
+        onDiscover={state.directoryUrl ? () => setShowBrowser(true) : null} onLeave={(host, name) => { void leaveServer(host, name); }}
         onMute={(key, muted) => { void store.connection(key)?.setServerMuted(muted).catch(() => {}); }}
         home={homeAvailable ? { open: homeOpen, badge: homeBadge, onToggle: () => store.openHome(!homeOpen) } : null} />}
-      {showBrowser && state.directoryUrl && <ServerBrowser directoryUrl={state.directoryUrl} currentHost={home.serverDomain} onClose={() => setShowBrowser(false)} />}
+      {showBrowser && state.directoryUrl && <ServerBrowser directoryUrl={state.directoryUrl} currentHost={homeless ? active?.serverDomain ?? null : home?.serverDomain ?? null} onClose={() => setShowBrowser(false)}
+        onOpen={homeless ? (host) => { setShowBrowser(false); setStageOpen(false); void store.addServer(host); } : null} />}
       <div className="left" id="app-navigation">
-        {homeOpen ? <HomeSidebar state={state} store={store} members={server?.members ?? []} /> : server ? <Sidebar
-          server={server} api={conn.api} currentChannelId={showStage && voiceChannel ? voiceChannel.id : active.currentChannelId} voice={active.voice}
-          voiceState={voiceHost === activeHost ? voice : null} client={client} radioTitles={active.radioTitles} unread={active.unread} mentions={active.mentions} muted={active.muted} canMute={active.readSync}
-          onMuteChannel={(id, muted) => { void conn.setChannelMuted(id, muted).catch(() => {}); }}
-          connection={active.connection} onSelect={(id) => { conn.selectChannel(id); setStageOpen(false); setNavigationOpen(false); }}
-          onJoinVoice={(id) => { void joinVoice(activeHost, id).catch(() => {}); }} onOpenAdmin={() => setShowAdmin(true)} myUserId={active.userId ?? ""}
-        /> : <nav className="sidebar"><header className="server-head"><img className="brand-mark" src="/brand/squorli-icon-small.svg" alt="" width="22" height="22" /><strong>{active.serverName ?? active.host}</strong></header></nav>}
+        {homeOpen ? <HomeSidebar state={state} store={store} members={server?.members ?? []} /> : view ? <Sidebar
+          server={view.server} api={view.conn.api} currentChannelId={showStage && voiceChannel ? voiceChannel.id : view.active.currentChannelId} voice={view.active.voice}
+          voiceState={voiceHost === activeHost ? voice : null} client={client} radioTitles={view.active.radioTitles} unread={view.active.unread} mentions={view.active.mentions} muted={view.active.muted} canMute={view.active.readSync}
+          onMuteChannel={(id, muted) => { void view.conn.setChannelMuted(id, muted).catch(() => {}); }}
+          connection={view.active.connection} onSelect={(id) => { view.conn.selectChannel(id); setStageOpen(false); setNavigationOpen(false); }}
+          onJoinVoice={(id) => { void joinVoice(view.active.host, id).catch(() => {}); }} onOpenAdmin={() => setShowAdmin(true)} myUserId={view.active.userId ?? ""}
+        /> : <nav className="sidebar"><header className="server-head"><img className="brand-mark" src="/brand/squorli-icon-small.svg" alt="" width="22" height="22" /><strong>{active?.serverName ?? active?.host ?? "Squorli"}</strong></header></nav>}
         <VoiceDock client={client} voice={voice} channel={voiceChannel} serverName={voiceHost && voiceHost !== activeHost ? voiceServer?.server?.settings.name ?? voiceHost : null}
-          displayName={me?.displayName ?? home.me.displayName ?? "…"} onLeave={leaveVoice} onOpenProfile={setMiniProfile} onOpenSettings={() => setSettingsTab("profile")} pttSuspended={capturingPttKey}
+          displayName={me?.displayName ?? active?.me?.displayName ?? home?.me?.displayName ?? state.directoryAccount?.displayName ?? (state.directoryAccount ? `@${state.directoryAccount.handle}` : "…")} onLeave={leaveVoice} onOpenProfile={setMiniProfile} onOpenSettings={() => setSettingsTab("profile")} pttSuspended={capturingPttKey}
           onOpenStage={voiceChannel && !showStage && voiceHost ? () => { store.openServer(voiceHost === state.homeHost ? homeDirHost : voiceHost); setStageOpen(true); } : null}
           canStream={!!voiceServer?.server && hasPermission(voiceServer.server.myPermissions, Permission.STREAM_VIDEO)} onToggleCamera={toggleCamera}
           afkReturn={afkReturn && voice.afkRoom ? { name: afkReturnChannel?.name ?? null, onReturn: () => { void joinVoice(afkReturn.host, afkReturn.channelId).catch(() => {}); } } : null} />
@@ -317,38 +348,43 @@ export function App() {
       <main className="main">
         {homeOpen ? (
           <HomeMain state={state} store={store} />
-        ) : !server ? (
-          <ServerStatus s={active} onRetry={() => store.retryServer(activeHost)} onClose={() => store.closeServer(activeHost)} />
+        ) : !active ? (
+          <NoServers directoryUrl={state.directoryUrl} account={state.directoryAccount ?? null} onDiscover={() => setShowBrowser(true)} onAdd={() => { void addServer(); }} onLogout={() => { void client.leave(); store.logout(); }} />
+        ) : !view ? (
+          <ServerStatus s={active} onRetry={(invite) => store.retryServer(active.host, invite)} onClose={() => store.closeServer(active.host)}
+            join={homeless && !active.me ? state.joinInvites[active.host] ?? "" : null} />
         ) : showStage && voiceChannel ? (
-          <VoiceStage client={client} voice={voice} channel={voiceChannel} members={server.members} myPermissions={server.myPermissions}
-            api={conn.api} radio={radio} radioStations={server.radioStations} radioTitle={active.radioTitles[voiceChannel.id] ?? null} playerTile={embedKeyOf(embedSource)} playerPopped={playerWindow.win !== null} onRestorePlayer={playerWindow.restore}
+          <VoiceStage client={client} voice={voice} channel={voiceChannel} members={view.server.members} myPermissions={view.server.myPermissions}
+            api={view.conn.api} radio={radio} radioStations={view.server.radioStations} radioTitle={view.active.radioTitles[voiceChannel.id] ?? null} playerTile={embedKeyOf(embedSource)} playerPopped={playerWindow.win !== null} onRestorePlayer={playerWindow.restore}
             onToggleCamera={toggleCamera} onToggleBlur={toggleBlur} onLeave={leaveVoice} onPopout={videoWindows.open} poppedIds={videoWindows.poppedIds} onRestore={videoWindows.restore} />
         ) : current ? (
           <ChatView
-            channel={current} messages={active.messages[current.id] ?? { list: [], hasMore: true, loaded: false, loading: false }}
-            members={server.members} myUserId={active.userId!} myPermissions={server.myPermissions}
-            typing={active.typing[current.id] ?? {}} conn={conn}
+            channel={current} messages={view.active.messages[current.id] ?? { list: [], hasMore: true, loaded: false, loading: false }}
+            members={view.server.members} myUserId={view.active.userId!} myPermissions={view.server.myPermissions}
+            typing={view.active.typing[current.id] ?? {}} conn={view.conn}
           />
         ) : (
           <section className="chat empty"><p className="muted">{t("app.noTextChannel")}</p></section>
         )}
-        {showDebug && <DebugPanel log={active.log} client={client} voice={voice} />}
+        {showDebug && <DebugPanel log={active?.log ?? []} client={client} voice={voice} />}
         <button className="debug-toggle icon" title={t("app.debug")} onClick={() => setShowDebug((v) => !v)}><Icon name="bug" /></button>
       </main>
 
-      {!homeOpen && server && <MemberList api={conn.api} members={server.members} roles={server.roles} myUserId={active.userId!} myPermissions={server.myPermissions} ownerId={server.settings.ownerId}
-        voice={active.voice} channels={server.channels} friends={friendsMenu} client={client} />}
+      {!homeOpen && view && <MemberList api={view.conn.api} members={view.server.members} roles={view.server.roles} myUserId={view.active.userId!} myPermissions={view.server.myPermissions} ownerId={view.server.settings.ownerId}
+        voice={view.active.voice} channels={view.server.channels} friends={friendsMenu} client={client} />}
 
-      {showAdmin && server && <AdminPanel api={conn.api} server={server} myUserId={active.userId!} directoryUrl={active.directoryUrl} onClose={() => setShowAdmin(false)} />}
+      {showAdmin && view && <AdminPanel api={view.conn.api} server={view.server} myUserId={view.active.userId!} directoryUrl={view.active.directoryUrl} onClose={() => setShowAdmin(false)} />}
+      {screenPick && <ScreenPicker sources={screenPick.sources} canShareAudio={screenPick.canShareAudio}
+        onPick={(pick) => { screenPick.resolve(pick); setScreenPick(null); }} onCancel={() => { screenPick.resolve(null); setScreenPick(null); }} />}
       {cameraPick && <CameraPicker cameras={cameraPick} initial={voiceSettings.cameraDeviceId} initialBlur={voiceSettings.cameraBlur} onPick={(id, b) => { void pickCamera(id, b); }} onCancel={() => setCameraPick(null)} />}
-      {miniProfile && active.me && (
+      {miniProfile && active?.me && (
         <MiniProfile anchor={miniProfile} displayName={me?.displayName ?? active.me.displayName ?? "…"} storedName={active.me.displayName} handle={active.me.handle}
           serverName={server?.settings.name ?? active.serverName} withDirectory={!!state.directoryAccount && !!active.serverDomain}
           onSave={(n) => store.setServerDisplayName(n)} onOpenSettings={() => setSettingsTab("profile")} onClose={() => setMiniProfile(null)} />
       )}
-      {settingsTab && active.me && (
-        <SettingsDialog api={conn.api} me={active.me} displayName={me?.displayName ?? active.me.displayName ?? "…"} directoryUrl={state.directoryUrl} directoryAccount={state.directoryAccount}
-          serverDomain={active.serverDomain} clientVersion={home.serverVersion} syncError={state.settingsSyncError} client={client} voice={voice} initialTab={settingsTab}
+      {settingsTab && (homeless || (active?.me && conn)) && (
+        <SettingsDialog api={active?.me && conn ? conn.api : null} me={active?.me ?? null} publicKey={state.identity?.publicKey ?? null} displayName={me?.displayName ?? active?.me?.displayName ?? state.directoryAccount?.displayName ?? "…"} directoryUrl={state.directoryUrl} directoryAccount={state.directoryAccount}
+          serverDomain={active?.serverDomain ?? null} clientVersion={platform.app?.version ?? home?.serverVersion ?? null} syncError={state.settingsSyncError} client={client} voice={voice} initialTab={settingsTab}
           onSaveServerName={(n) => store.setServerDisplayName(n)} onSaveGlobalName={(n) => store.setDirectoryName(null, n)} onSetLocale={(pref) => store.setLocale(pref)}
           onCapturingKey={setCapturingPttKey} onClose={() => setSettingsTab(null)}
           onLogout={() => { setSettingsTab(null); void client.leave(); store.logout(); }}
@@ -359,9 +395,16 @@ export function App() {
 }
 
 /** Main area for a foreign server that has no state (yet): connecting, error, removed. */
-function ServerStatus({ s, onRetry, onClose }: { s: State["servers"][string]; onRetry: () => void; onClose: () => void }) {
+/**
+ * `join` (client without a home server, not signed in there): the invite code that came with the address, "" = none. The view
+ * then waits for a click before signing in, because that reveals the public key and creates an account on that server.
+ */
+function ServerStatus({ s, onRetry, onClose, join }: { s: ServerConnState; onRetry: (invite?: string) => void; onClose: () => void; join: string | null }) {
   const busy = s.connection === "logging-in" || s.connection === "connecting" || s.connection === "reconnecting";
   const name = s.serverName ?? s.host;
+  const [invite, setInvite] = useState(join ?? "");
+  useEffect(() => setInvite(join ?? ""), [s.host, join]);
+  const firstContact = join !== null && !s.error && !s.removed;
   return (
     <section className="chat empty server-status">
       <div className="stack">
@@ -369,10 +412,20 @@ function ServerStatus({ s, onRetry, onClose }: { s: State["servers"][string]; on
         {busy && <p className="muted">{t("status.connecting", { host: s.host })}</p>}
         {s.removed && <p className="error">{s.removed.reason === "banned" ? t("status.banned") : t("status.removed")}{s.removed.message ? `: ${s.removed.message}` : "."}</p>}
         {s.error && <p className="error">{s.error}</p>}
+        {!busy && firstContact && <p className="muted">{t("join.hint", { host: s.host })}</p>}
+        {!busy && join !== null && (
+          <label className="stack">
+            <span>{t("join.invite")}</span>
+            <input value={invite} onChange={(e) => setInvite(e.target.value)} placeholder={t("login.invitePlaceholder")} maxLength={32}
+              onKeyDown={(e) => { if (e.key === "Enter") onRetry(invite.trim() || undefined); }} />
+          </label>
+        )}
         {!busy && (
           <div className="row">
-            <button onClick={onRetry}>{t("common.retry")}</button>
-            <a className="link-btn" href={directoryServerUrl(s.host)}>{t("status.openDirect")}</a>
+            <button onClick={() => onRetry(join !== null ? invite.trim() || undefined : undefined)}>{firstContact ? t("join.join") : t("common.retry")}</button>
+            {platform.home
+              ? <a className="link-btn" href={directoryServerUrl(s.host)}>{t("status.openDirect")}</a>
+              : <button className="secondary" onClick={() => platform.links.openExternal(directoryServerUrl(s.host))}>{t("status.openInBrowser")}</button>}
             <button className="secondary" onClick={onClose}>{t("common.close")}</button>
           </div>
         )}

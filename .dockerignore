@@ -10,3 +10,5 @@ apps/server/public
 docs
 tools
 **/data
+apps/desktop/out
+apps/desktop/release

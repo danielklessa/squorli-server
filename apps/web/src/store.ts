@@ -3,6 +3,7 @@ import {
   type AccountServer, type AccountSettings, type AccountStatus, type DirectoryAccount, type DirectoryServerEvent, type DmConversation, type DmMessage, type Friend, type ServerLeaveResponse,
 } from "@squorli/protocol";
 import { activity } from "./activity";
+import { chooseInitialServer, loadClientData, parseServerAddress, saveClientData } from "./clientHome";
 import * as api from "./api";
 import { DirectoryLink, type LinkStatus } from "./directoryLink";
 import { loadOrCreateIdentity, storeIdentity, type Identity } from "./identity";
@@ -11,6 +12,7 @@ import { applyAccountSettings, sameAccountSettings, toAccountSettings } from "./
 import { accountLocalePreference, detectLocale, locale, localePreference, markAccountLocalePreference, storeLocalePreference, t, type LocalePreference } from "./i18n";
 import { loadVoiceSettings, sameSoundSettings, saveVoiceSettings, subscribeVoiceSettings } from "./voice/settings";
 import { normalizeSoundSettings } from "./voice/sounds";
+import type { PlatformHome } from "./platform/types";
 
 export type { ChannelMessages, Connection, RawLogEntry, ServerConnState } from "./serverConnection";
 
@@ -19,6 +21,10 @@ export type { ChannelMessages, Connection, RawLogEntry, ServerConnState } from "
  * the one serving the client, key `homeHost`; foreign servers from the server rail via their origin, key =
  * the host from the directory). The server rail switches `activeHost` without leaving the page; running connections
  * (and with them the voice connection) survive. Plus identity, directory (M6), friends and direct messages (M7).
+ *
+ * A client without a home server (the desktop app, docs/features/desktop.md): `homeHost` is null, the directory is the
+ * platform's default, the client has a login of its own (`signedIn`) and every server is a "foreign" one: the account's
+ * servers from the directory plus the ones added by address (`localHosts`).
  */
 
 /** Decrypted direct message (M7); text = null if it could not be opened (foreign key, corrupted). */
@@ -27,11 +33,11 @@ export type DmThread = { list: Dm[]; hasMore: boolean; loaded: boolean; loading:
 
 export type State = {
   identity: Identity | null;
-  /** Key of your own server in `servers` (the host in the address bar). */
-  homeHost: string;
-  /** The server shown in the main area (server rail). */
-  activeHost: string;
-  /** State per server; your own server is always present. */
+  /** Key of your own server in `servers` (the host in the address bar); null = the client has no home server (desktop app). */
+  homeHost: string | null;
+  /** The server shown in the main area (server rail); null = none (only without a home server). */
+  activeHost: string | null;
+  /** State per server; your own server is always present when the client has one. */
   servers: Record<string, ServerConnState>;
   /** Directory service (M6) named by your own server; null = none. */
   directoryUrl: string | null;
@@ -56,6 +62,15 @@ export type State = {
   currentPeer: string | null;
   /** Last error from a friend or message action (shown inline). */
   friendsError: string | null;
+  // ---- Client without a home server (desktop app); unused otherwise
+  /** Past the client's own login (directory account or this device's key). */
+  signedIn: boolean;
+  /** Servers added by address, in the order they were added (the rail shows them after the account's). */
+  localHosts: string[];
+  /** The client's own login: running, and its last error. */
+  clientLogin: { busy: boolean; error: string | null };
+  /** Invite codes that came with a server address or link, for the join view of that server. */
+  joinInvites: Record<string, string>;
 };
 
 /** Sessions per server (the token stays secret); v1 held only the own server's and is migrated once. */
@@ -63,11 +78,25 @@ const SESSIONS_KEY = "chat.sessions.v2";
 const SESSION_KEY_V1 = "chat.session.v1";
 type StoredSessions = { publicKey: string; tokens: Record<string, string> };
 
-export const homeState = (s: State): ServerConnState => s.servers[s.homeHost]!;
-export const activeState = (s: State): ServerConnState => s.servers[s.activeHost] ?? homeState(s);
+export const homeState = (s: State): ServerConnState | null => (s.homeHost !== null ? s.servers[s.homeHost] ?? null : null);
+export const activeState = (s: State): ServerConnState | null => (s.activeHost !== null ? s.servers[s.activeHost] : undefined) ?? homeState(s);
+
+/** A failed key restore for the login views: the directory's code and body (`totp_required` carries `email`). */
+const restoreError = (err: unknown) => Object.assign(new Error("restore failed"), { code: err instanceof api.ApiError ? err.code : null, body: err instanceof api.ApiError ? err.body : {} });
+
+/** What the store needs from the platform (`platform/`): the server that serves the page, or the directory to use when there is none. */
+export type StoreOptions = { home: PlatformHome | null; defaultDirectoryUrl: string | null };
 
 export class Store {
-  readonly homeHost = window.location.host;
+  readonly homeHost: string | null;
+  /** Domain a login on the home server signs (the hostname of the address bar). */
+  private readonly signDomain: string;
+  private readonly defaultDirectoryUrl: string | null;
+  /** Without a home server: the server viewed last (stored per device, clientHome.ts). */
+  private lastHost: string | null = null;
+  /** Without a home server: past the login and the first server chosen; a link that arrives earlier waits in `startTarget`. */
+  private entered = false;
+  private startTarget: string | null = null;
   state: State;
   private conns = new Map<string, ServerConnection>();
   private link: DirectoryLink | null = null;
@@ -85,10 +114,14 @@ export class Store {
   private settingsSupported = false;
   private settingsPushTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor() {
-    const home = this.createConnection(this.homeHost, "");
+  constructor(opts: StoreOptions) {
+    this.homeHost = opts.home?.host ?? null;
+    this.signDomain = opts.home?.signDomain ?? "";
+    this.defaultDirectoryUrl = opts.defaultDirectoryUrl;
+    const home = this.homeHost !== null ? this.createConnection(this.homeHost, "") : null;
     this.state = {
-      identity: null, homeHost: this.homeHost, activeHost: this.homeHost, servers: { [this.homeHost]: home.state },
+      identity: null, homeHost: this.homeHost, activeHost: this.homeHost, servers: home ? { [home.state.host]: home.state } : {},
+      signedIn: false, localHosts: [], clientLogin: { busy: false, error: null }, joinInvites: {},
       directoryUrl: null, directoryAccount: undefined, directoryError: null, accountServers: null, settingsSyncError: null,
       directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null, friendsError: null,
     };
@@ -100,10 +133,10 @@ export class Store {
   subscribe(fn: (s: State) => void) { this.listeners.add(fn); fn(this.state); return () => { this.listeners.delete(fn); }; }
   private set(p: Partial<State>) { this.state = { ...this.state, ...p }; for (const fn of this.listeners) fn(this.state); }
 
-  /** Connection to a server (your own server is always present). */
-  connection(host: string): ServerConnection | null { return this.conns.get(host) ?? null; }
-  get home(): ServerConnection { return this.conns.get(this.homeHost)!; }
-  get active(): ServerConnection { return this.conns.get(this.state.activeHost) ?? this.home; }
+  /** Connection to a server (your own server is always present when the client has one). */
+  connection(host: string | null): ServerConnection | null { return host !== null ? this.conns.get(host) ?? null : null; }
+  get home(): ServerConnection | null { return this.connection(this.homeHost); }
+  get active(): ServerConnection | null { return this.connection(this.state.activeHost) ?? this.home; }
 
   private createConnection(host: string, base: string): ServerConnection {
     const conn = new ServerConnection(host, base, () => this.state.identity, {
@@ -113,7 +146,7 @@ export class Store {
       onRemoved: () => this.onRemoved?.(host),
       // Your own server, or a server the rail does not list yet (first sign-in there): fetch the list again. Servers connected in the
       // background are already on it, asking the directory once per server would be pointless.
-      onConnected: () => { if (host === this.homeHost || !(this.state.accountServers ?? []).some((s) => this.hostFor(s.host) === host)) void this.refreshAccountServers(); },
+      onConnected: () => { this.noteJoined(host); if (host === this.homeHost || !(this.state.accountServers ?? []).some((s) => this.hostFor(s.host) === host)) void this.refreshAccountServers(); },
       onVoiceMoved: (channelId, by, reason) => this.onVoiceMoved?.(host, channelId, by, reason),
       onVoiceStop: (what, by) => this.onVoiceStop?.(host, what, by),
     });
@@ -125,9 +158,19 @@ export class Store {
   async init() {
     const identity = await loadOrCreateIdentity();
     this.set({ identity });
-    void this.refreshDirectory();
-    const token = this.storedToken(this.homeHost);
-    if (token) await this.home.resume(token);
+    const home = this.home;
+    if (home) {
+      void this.refreshDirectory();
+      const token = this.storedToken(home.state.host);
+      if (token) await home.resume(token);
+      return;
+    }
+    // No home server: the device remembers whether the user is past the login, the added servers and the server viewed last.
+    const data = loadClientData();
+    this.lastHost = data.lastHost;
+    this.set({ signedIn: data.signedIn, localHosts: data.hosts });
+    await this.refreshDirectory();
+    if (data.signedIn) this.enterClient();
   }
 
   // ---------- Sessions per server in localStorage
@@ -138,7 +181,7 @@ export class Store {
       const v1 = localStorage.getItem(SESSION_KEY_V1);
       if (v1) {
         const s = JSON.parse(v1) as { token: string; publicKey: string };
-        const migrated: StoredSessions = { publicKey: s.publicKey, tokens: { [this.homeHost]: s.token } };
+        const migrated: StoredSessions = { publicKey: s.publicKey, tokens: this.homeHost !== null ? { [this.homeHost]: s.token } : {} };
         localStorage.setItem(SESSIONS_KEY, JSON.stringify(migrated));
         localStorage.removeItem(SESSION_KEY_V1);
         return migrated;
@@ -167,13 +210,15 @@ export class Store {
   hostFor(directoryHost: string): string {
     const h = directoryHost.toLowerCase();
     const home = homeState(this.state);
-    return h === home.serverDomain || h === this.homeHost.toLowerCase() || h === window.location.hostname.toLowerCase() ? this.homeHost : h;
+    if (this.homeHost === null || !home) return h;
+    return h === home.serverDomain || h === this.homeHost.toLowerCase() || h === this.signDomain.toLowerCase() ? this.homeHost : h;
   }
   /** Show a server in the main area; a foreign server is connected on first use (signing in with your own key). */
   openServer(directoryHost: string) {
     const host = this.hostFor(directoryHost);
     this.set({ activeHost: host, homeOpen: false });
     if (host === this.homeHost) return;
+    this.rememberLast(host);
     let conn = this.conns.get(host);
     if (!conn) {
       conn = this.createConnection(host, directoryServerUrl(host));
@@ -188,7 +233,7 @@ export class Store {
    * a server whose account deletion is pending is left alone. Consequence: you are online on all your servers.
    */
   private connectAccountServers(servers: readonly AccountServer[]) {
-    if (!this.home.state.me) return;
+    if (this.homeHost !== null ? !this.home?.state.me : !this.state.signedIn) return;
     for (const s of servers) {
       const host = this.hostFor(s.host);
       if (host === this.homeHost || s.leaveRequestedAt || this.conns.has(host)) continue;
@@ -197,17 +242,21 @@ export class Store {
       void this.connectForeign(conn);
     }
   }
-  /** Try again (after an error or a removal). */
-  retryServer(host: string) {
+  /** Try again (after an error or a removal); also the "join" of a server added by address, then possibly with an invite. */
+  retryServer(host: string, invite?: string) {
     const conn = this.conns.get(host);
-    if (conn && host !== this.homeHost) void this.connectForeign(conn);
+    if (conn && host !== this.homeHost) void this.connectForeign(conn, invite);
   }
-  private async connectForeign(conn: ServerConnection) {
+  private markUnreachable(conn: ServerConnection) {
+    conn.state = { ...conn.state, connection: "error", error: t("err.serverUnreachableShort", { base: conn.state.base }) };
+    this.set({ servers: { ...this.state.servers, [conn.state.host]: conn.state } });
+  }
+  private async connectForeign(conn: ServerConnection, invite?: string) {
     const health = await conn.refreshHealth();
-    if (!health) { conn.state = { ...conn.state, connection: "error", error: t("err.serverUnreachableShort", { base: conn.state.base }) }; this.set({ servers: { ...this.state.servers, [conn.state.host]: conn.state } }); return; }
+    if (!health) { this.markUnreachable(conn); return; }
     const token = this.storedToken(conn.state.host);
     if (token && await conn.resume(token)) return;
-    try { await conn.login(health.domain.toLowerCase()); } catch { /* the message is kept in the server's state */ }
+    try { await conn.login(health.domain.toLowerCase(), invite); } catch { /* the message is kept in the server's state */ }
   }
   /** Close a foreign server and remove it from the client's rail (the session stays stored). */
   closeServer(host: string) {
@@ -216,7 +265,9 @@ export class Store {
     conn?.close();
     this.conns.delete(host);
     const servers = { ...this.state.servers }; delete servers[host];
-    this.set({ servers, activeHost: this.state.activeHost === host ? this.homeHost : this.state.activeHost });
+    this.set({ servers, localHosts: this.state.localHosts.filter((h) => h !== host), activeHost: this.state.activeHost === host ? this.homeHost : this.state.activeHost });
+    if (this.lastHost === host) this.lastHost = null;
+    this.saveClient();
   }
   /** Session on `host` gone: own server = back to the login (all connections closed), foreign = signed out there only. */
   private sessionLost(host: string, _message: string) {
@@ -225,20 +276,123 @@ export class Store {
   }
   private closeAllForeign() {
     for (const [host, conn] of this.conns) if (host !== this.homeHost) { conn.close(); this.conns.delete(host); }
-    this.set({ servers: { [this.homeHost]: this.home.state }, activeHost: this.homeHost });
+    const home = this.home;
+    this.set({ servers: home ? { [home.state.host]: home.state } : {}, activeHost: this.homeHost });
+  }
+
+  // ---------- Client without a home server (desktop app): own login, servers by address, the server viewed last
+  private saveClient() {
+    if (this.homeHost === null) saveClientData({ signedIn: this.state.signedIn, hosts: this.state.localHosts, lastHost: this.lastHost });
+  }
+  private rememberLast(host: string) {
+    if (this.homeHost !== null || this.lastHost === host) return;
+    this.lastHost = host;
+    this.saveClient();
+  }
+  /** A server connected: one that is not on the account's list (no directory, another directory) is kept as added by address. */
+  private noteJoined(host: string) {
+    if (this.homeHost !== null) return;
+    if (this.state.activeHost === host) this.rememberLast(host);
+    if (this.state.localHosts.includes(host) || (this.state.accountServers ?? []).some((s) => this.hostFor(s.host) === host)) return;
+    this.set({ localHosts: [...this.state.localHosts, host] });
+    this.saveClient();
+  }
+  /** Past the login: connect the added servers (the account's are connected by `connectAccountServers`) and show one. */
+  private enterClient() {
+    for (const host of this.state.localHosts) {
+      if (this.conns.has(host)) continue;
+      const conn = this.createConnection(host, directoryServerUrl(host));
+      this.set({ servers: { ...this.state.servers, [host]: conn.state } });
+      void this.connectForeign(conn);
+    }
+    this.entered = true;
+    // A link the app was opened with wins over the server viewed last.
+    const target = this.startTarget; this.startTarget = null;
+    if (target) { void this.addServer(target); return; }
+    const host = chooseInitialServer({ last: this.lastHost, accountServers: this.state.accountServers, localHosts: this.state.localHosts });
+    if (host) this.openServer(host);
+  }
+  /**
+   * A `squorli://` link reached the app (desktop): shown like an address typed in (`addServer`), so a server the key has never
+   * been on waits for a click. Before the client's own login it waits and is shown right after it.
+   */
+  openLink(input: string) {
+    if (this.homeHost !== null) return;
+    if (this.entered) void this.addServer(input); else this.startTarget = input;
+  }
+  /**
+   * Sign in with the directory account (handle + password, code with an active authenticator): fetches the key, replaces the
+   * device key, then connects the account's servers and opens the one viewed last. Throws like `loginWithHandle`.
+   */
+  async loginDirectoryAccount(handle: string, password: string, code?: string): Promise<void> {
+    const url = this.state.directoryUrl;
+    if (!url || this.homeHost !== null) return;
+    this.set({ clientLogin: { busy: true, error: null } });
+    let id: Identity;
+    try { id = await api.directoryRestore(url, handle, password, code); }
+    catch (err) {
+      this.set({ clientLogin: { busy: false, error: api.explainDirectoryError(err) } });
+      throw restoreError(err);
+    }
+    // Another key than this device had: its sessions and added servers belonged to that key.
+    if (id.publicKey !== this.state.identity?.publicKey) {
+      this.closeAllForeign();
+      this.forgetAllTokens();
+      this.lastHost = null;
+      this.set({ localHosts: [], joinInvites: {} });
+    }
+    storeIdentity(id);
+    this.set({ identity: id, directoryAccount: undefined, signedIn: true });
+    this.saveClient();
+    await this.refreshDirectory();
+    this.set({ clientLogin: { busy: false, error: null } });
+    this.enterClient();
+  }
+  /** Go on with this device's key (it may have a handle or not; servers without a directory need none). */
+  continueWithDeviceKey() {
+    if (this.homeHost !== null) return;
+    this.set({ signedIn: true, clientLogin: { busy: false, error: null } });
+    this.saveClient();
+    this.connectAccountServers(this.state.accountServers ?? []);
+    void this.connectDirectory();
+    this.enterClient();
+  }
+  /**
+   * Show a server named by an address, an invite link or a `squorli://` link (clientHome.ts `parseServerAddress`). A server
+   * the key has been on (stored session, added before, or on the account's list) is connected right away; any other one is
+   * only looked at (`/api/health`): signing in reveals the public key and creates an account there, so the join view waits
+   * for a click (`retryServer(host, invite)`). Returns a message when the input names no server.
+   */
+  async addServer(input: string): Promise<string | null> {
+    const target = parseServerAddress(input);
+    if (!target) return t("add.invalid");
+    const host = target.host;
+    let conn = this.conns.get(host);
+    if (!conn) {
+      conn = this.createConnection(host, directoryServerUrl(host));
+      this.set({ servers: { ...this.state.servers, [host]: conn.state } });
+    }
+    this.set({ activeHost: host, homeOpen: false, ...(target.invite ? { joinInvites: { ...this.state.joinInvites, [host]: target.invite } } : {}) });
+    if (conn.state.me || conn.state.connection !== "idle") { this.rememberLast(host); return null; }
+    const mine = !!this.storedToken(host) || this.state.localHosts.includes(host) || (this.state.accountServers ?? []).some((s) => this.hostFor(s.host) === host);
+    if (mine) { this.rememberLast(host); void this.connectForeign(conn, target.invite ?? undefined); }
+    else if (!(await conn.refreshHealth())) this.markUnreachable(conn);
+    return null;
   }
 
   /** Fetch the directory URL from your own server and check whether your key has a handle there. */
   async refreshDirectory(): Promise<void> {
-    const health = await this.home.refreshHealth();
-    const directoryUrl = health?.directoryUrl ?? null;
+    const home = this.home;
+    const directoryUrl = home ? (await home.refreshHealth())?.directoryUrl ?? null : this.defaultDirectoryUrl;
     this.set({ directoryUrl, directoryError: null });
     const id = this.state.identity;
     if (!directoryUrl || !id) { this.set({ directoryAccount: null }); return; }
     try { this.set({ directoryAccount: await api.directoryLookup(directoryUrl, id.publicKey) }); }
     catch (err) { this.set({ directoryAccount: undefined, directoryError: api.explainDirectoryError(err) }); }
-    void this.refreshAccountServers();
+    const rail = this.refreshAccountServers();
     void this.connectDirectory();
+    // Without a home server the caller goes on to pick the server to show, which needs the account's list.
+    if (!home) await rail;
   }
 
   // ---------- M7: directory socket (friends, presence, direct messages)
@@ -249,6 +403,7 @@ export class Store {
     this.dmKeys.clear();
     this.set({ directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null });
     if (!id || !url || !this.state.directoryAccount) return;
+    if (this.homeHost === null && !this.state.signedIn) return;
     const health = await api.directoryHealth(url).catch(() => null);
     if (!health?.features.friends) return;
     const link = new DirectoryLink(url, id, (e) => this.handleDirectory(e), (status, error) => this.set({ directoryLink: status, directoryLinkError: error ?? null }), health.features.afk);
@@ -398,6 +553,9 @@ export class Store {
       const acc = this.state.directoryAccount;
       this.set({ accountServers: status.servers, ...(acc ? { directoryAccount: { ...acc, displayName: status.displayName } } : {}) });
       this.adoptAccountSettings(status);
+      // Without a home server: a server added by address that the account's list names by now is the account's from here on.
+      const local = this.state.localHosts.filter((h) => !status.servers.some((s) => this.hostFor(s.host) === h));
+      if (local.length !== this.state.localHosts.length) { this.set({ localHosts: local }); this.saveClient(); }
       this.connectAccountServers(status.servers);
     } catch (err) { console.warn("Serverliste vom Verzeichnis nicht verfuegbar", err); }
   }
@@ -483,19 +641,18 @@ export class Store {
    * M6c: with an active authenticator the first attempt throws `totp_required`; the login screen then asks for the code.
    */
   async loginWithHandle(handle: string, password: string, invite?: string, code?: string): Promise<void> {
-    const url = this.state.directoryUrl;
-    if (!url) return;
-    const home = this.home;
+    const url = this.state.directoryUrl; const home = this.home;
+    if (!url || !home) return;
     home.state = { ...home.state, connection: "logging-in", error: null, removed: null };
-    this.set({ servers: { ...this.state.servers, [this.homeHost]: home.state } });
+    this.set({ servers: { ...this.state.servers, [home.state.host]: home.state } });
     let id: Identity;
     try { id = await api.directoryRestore(url, handle, password, code); }
     catch (err) {
       const errCode = err instanceof api.ApiError ? err.code : null;
       // totp_required is not an error but the next step: keep the message neutral.
       home.state = { ...home.state, connection: errCode === "totp_required" ? "idle" : "error", error: api.explainDirectoryError(err) };
-      this.set({ servers: { ...this.state.servers, [this.homeHost]: home.state } });
-      throw Object.assign(new Error("restore failed"), { code: errCode });
+      this.set({ servers: { ...this.state.servers, [home.state.host]: home.state } });
+      throw restoreError(err);
     }
     this.closeAllForeign();
     home.close();
@@ -513,7 +670,9 @@ export class Store {
    * null = fall back to the global name. Throws on errors (message translated where it comes from the directory).
    */
   async setServerDisplayName(displayName: string | null): Promise<void> {
-    const conn = this.active; const domain = conn.state.serverDomain; const acc = this.state.directoryAccount;
+    const conn = this.active; const acc = this.state.directoryAccount;
+    if (!conn) return;
+    const domain = conn.state.serverDomain;
     const global = acc?.displayName ?? null;
     if (acc && domain) await this.setDirectoryName(domain, displayName === global ? null : displayName);
     await conn.updateDisplayName(displayName ?? global);
@@ -542,7 +701,7 @@ export class Store {
     catch (err) { throw new Error(api.explainDirectoryError(err)); }
     if (r.delivered) {
       const key = this.hostFor(directoryHost);
-      if (key === this.homeHost) this.home.accountDeleted();
+      if (key === this.homeHost) this.home?.accountDeleted();
       else { this.closeServer(key); this.storeToken(key, null); }
     }
     void this.refreshAccountServers();
@@ -567,13 +726,21 @@ export class Store {
 
   /** Sign in on your own server (signature over the hostname in the address bar = PUBLIC_DOMAIN), optionally with an invite. */
   async login(invite?: string): Promise<void> {
-    await this.home.login(window.location.hostname, invite);
+    await this.home?.login(this.signDomain, invite);
   }
 
   /** Sign out: all servers (the client hangs off your own server's session). */
   logout() {
-    this.closeAllForeign();
-    this.home.logout();
+    const home = this.home;
+    if (home) { this.closeAllForeign(); home.logout(); return; }
+    // No home server: the client's own login ends, with every session on the servers.
+    for (const conn of this.conns.values()) conn.logout();
+    this.conns.clear();
+    this.forgetAllTokens();
+    this.lastHost = null; this.entered = false; this.startTarget = null;
+    this.set({ servers: {}, activeHost: null, signedIn: false, localHosts: [], joinInvites: {}, clientLogin: { busy: false, error: null } });
+    this.saveClient();
+    void this.connectDirectory();
   }
 
   async forgetIdentity() {

@@ -6,3 +6,5 @@ dist/
 apps/server/public/
 apps/server/scripts/.smoke-owner.json
 apps/server/data/
+apps/desktop/out/
+apps/desktop/release/

@@ -18,7 +18,8 @@ export function inviteFromUrl(): string | null {
  * create a password backup). If the device key already has a handle, it comes first.
  */
 export function LoginScreen({ store, state }: { store: Store; state: State }) {
-  const home = homeState(state);
+  // Only a client with a home server shows this login (App.tsx); one without has DesktopLogin.tsx.
+  const home = homeState(state)!;
   const [invite, setInvite] = useState(() => inviteFromUrl() ?? "");
   const [needInvite, setNeedInvite] = useState(() => !!inviteFromUrl());
   const [preview, setPreview] = useState<InvitePreview | null>(null);
@@ -54,7 +55,7 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
     const code = invite.trim();
     if (!/^[A-Za-z0-9_-]{6,32}$/.test(code)) { setPreview(null); return; }
     let alive = true;
-    store.home.api.getInvitePreview(code).then((p) => { if (alive) setPreview(p); }).catch(() => { if (alive) setPreview(null); });
+    store.home!.api.getInvitePreview(code).then((p) => { if (alive) setPreview(p); }).catch(() => { if (alive) setPreview(null); });
     return () => { alive = false; };
   }, [invite]);
 

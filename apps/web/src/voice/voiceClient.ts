@@ -25,6 +25,7 @@ import { DEFAULT_SOUND_SETTINGS, applyCueOutput, normalizeSoundSettings, playCue
 import { USER_VOLUME_MAX, clampUserVolume, loadUserVolumes, saveUserVolumes, withUserVolume, type UserVolumes } from "./userVolumes";
 import { subscriptionPermissions, type VideoAccess } from "./videoAccess";
 import { t } from "../i18n";
+import type { PlatformMedia } from "../platform/types";
 
 /**
  * Voice channel client without a UI dependency (PLAN 3.4 "shared core"): LiveKit room, microphone pipeline,
@@ -199,7 +200,8 @@ export class VoiceClient {
   /** LiveKit identity -> public key for the members of the voice connection's server. */
   private peerKeys: Record<string, string> = {};
 
-  constructor(audioHost?: HTMLElement) {
+  /** `media` = what differs between browser and desktop app (`platform/`); tests leave it out. */
+  constructor(audioHost?: HTMLElement, private readonly media: PlatformMedia | null = null) {
     this.audioHost = audioHost ?? VoiceClient.makeHost();
     // Fallback: any gesture in the document may unblock audio after the fact (resume the context, start playback).
     document.addEventListener("pointerdown", () => this.unlockOnGesture(), { capture: true, passive: true });
@@ -391,7 +393,7 @@ export class VoiceClient {
     } catch (err) {
       const message = errorText(err);
       await this.leave();
-      this.patch({ error: micFailed ? t("voice.errMic", { err: message }) : explainConnectError(message, url), rtcUrl: url });
+      this.patch({ error: micFailed ? t("voice.errMic", { err: message }) : explainConnectError(message, url, this.media?.blocksInsecureMedia ?? false), rtcUrl: url });
       throw err;
     }
   }
@@ -575,7 +577,7 @@ export class VoiceClient {
         surfaceSwitching: "include",
         contentHint: "detail",
         resolution: ScreenSharePresets.h1080fps30.resolution,
-      } : undefined, on ? { simulcast: false, videoEncoding: ScreenSharePresets.h1080fps30.encoding } : undefined);
+      } : undefined, on ? { simulcast: false, videoEncoding: ScreenSharePresets.h1080fps30.encoding, ...this.media?.screenSharePublishOverrides() } : undefined);
       const hasAudio = on && !!room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio);
       this.patch({ screenOn: on && room.localParticipant.isScreenShareEnabled, screenAudio: on ? hasAudio : null, error: null });
       if (on) this.log(hasAudio ? "bildschirm mit ton" : "bildschirm ohne ton");
@@ -992,9 +994,8 @@ function explainDisconnect(reason: DisconnectReason | undefined): { short: strin
 }
 
 /** Turn a connection error into a sentence with the cause and the next step. */
-function explainConnectError(message: string, url: string): string {
+function explainConnectError(message: string, url: string, pageIsHttps: boolean): string {
   const host = (() => { try { return new URL(url).hostname; } catch { return ""; } })();
-  const pageIsHttps = window.location.protocol === "https:";
   if (host === "localhost" || host === "127.0.0.1") return t("voice.connErrLocalhost", { message, url });
   if (pageIsHttps && url.startsWith("ws://")) return t("voice.connErrWs", { message, url });
   return t("voice.connErrGeneric", { message, url, check: url.replace(/^ws/, "http") });

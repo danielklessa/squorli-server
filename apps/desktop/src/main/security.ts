@@ -1,0 +1,59 @@
+import { app, session, shell, type Session, type WebContents } from "electron";
+import { isAllowedExternal, isAppNavigation, windowOpenDecision } from "./navigation";
+
+/**
+ * What a page may do, in one place. The client is the only content with rights; the embedded players (Twitch, YouTube)
+ * get fullscreen and nothing else. Links leave the app through the system's browser.
+ */
+
+/** Permissions of the client itself (requests and checks). Everything else is refused. */
+const CLIENT_PERMISSIONS = new Set(["media", "display-capture", "fullscreen", "speaker-selection", "idle-detection", "clipboard-sanitized-write", "window-management"]);
+const FRAME_PERMISSIONS = new Set(["fullscreen"]);
+
+const originOf = (url: string | undefined): string | null => { if (!url) return null; try { const u = new URL(url); return `${u.protocol}//${u.host}`; } catch { return null; } };
+
+export function openExternal(url: string): void {
+  if (isAllowedExternal(url)) void shell.openExternal(url);
+}
+
+export function applyPermissions(ses: Session, origins: readonly string[]): void {
+  const allowed = (permission: string, origin: string | null) => (origin !== null && origins.includes(origin) ? CLIENT_PERMISSIONS : FRAME_PERMISSIONS).has(permission);
+  ses.setPermissionRequestHandler((_contents, permission, callback, details) => callback(allowed(permission, originOf(details.requestingUrl))));
+  ses.setPermissionCheckHandler((_contents, permission, requestingOrigin) => allowed(permission, originOf(requestingOrigin)));
+}
+
+/** Every window and frame host: no foreign navigation, no webviews, own windows only. */
+export function lockDownContents(origins: readonly string[]): void {
+  app.on("web-contents-created", (_event, contents: WebContents) => {
+    contents.setWindowOpenHandler(({ url }) => {
+      const decision = windowOpenDecision(url, origins);
+      if (decision === "external") openExternal(url);
+      return decision === "allow" ? { action: "allow", overrideBrowserWindowOptions: { autoHideMenuBar: true, backgroundColor: "#0a0f1e" } } : { action: "deny" };
+    });
+    contents.on("will-navigate", (event, url) => {
+      if (isAppNavigation(url, origins)) return;
+      event.preventDefault();
+      openExternal(url);
+    });
+    contents.on("will-attach-webview", (event) => event.preventDefault());
+  });
+}
+
+/**
+ * The web radio's two players refuse to run inside a page they do not know: Twitch names the allowed parents in
+ * `frame-ancestors` (a host name, which `app://squorli` is not), YouTube wants an http(s) referrer. Only for exactly these
+ * two hosts the shell vouches for the client: it drops Twitch's `frame-ancestors` and names squorli.com as the referrer.
+ */
+export function letPlayersEmbed(ses: Session = session.defaultSession): void {
+  ses.webRequest.onHeadersReceived({ urls: ["https://player.twitch.tv/*"] }, (details, callback) => {
+    const headers = { ...details.responseHeaders };
+    for (const name of Object.keys(headers)) {
+      if (name.toLowerCase() !== "content-security-policy") continue;
+      headers[name] = (headers[name] ?? []).map((value) => value.split(";").filter((part) => !part.trim().toLowerCase().startsWith("frame-ancestors")).join(";"));
+    }
+    callback({ responseHeaders: headers });
+  });
+  ses.webRequest.onBeforeSendHeaders({ urls: ["https://www.youtube-nocookie.com/embed/*"] }, (details, callback) => {
+    callback({ requestHeaders: { ...details.requestHeaders, Referer: "https://squorli.com/" } });
+  });
+}

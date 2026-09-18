@@ -1,0 +1,82 @@
+# Desktop app (apps/desktop): builds the installers for a tag `desktop-v<version>` and collects them in a DRAFT release.
+# Publishing the draft is a person's step; the update feed on squorli.com follows separately (squorli-website,
+# `pnpm desktop:release`), which is the rollout switch. Server images use tags `v*` (ci.yml); the two never overlap.
+# Unsigned builds. Details: docs/features/desktop.md, apps/desktop/AGENTS.md.
+name: Desktop release
+
+on:
+  push:
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build (desktop-v<version>)
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Tag must match the app's version
+        shell: bash
+        run: |
+          version=$(node -p "require('./apps/desktop/package.json').version")
+          if [ "desktop-v$version" != "$TAG" ]; then echo "tag $TAG does not match apps/desktop/package.json ($version)"; exit 1; fi
+      - run: pnpm install --frozen-lockfile
+      # Electron's binary is not needed for packaging (electron-builder downloads its own copy), but harmless.
+      - run: pnpm icons
+      - run: pnpm licenses
+      - run: pnpm --filter "@squorli/desktop..." build
+      - run: pnpm --filter @squorli/desktop dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.exe.blockmap
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+            apps/desktop/release/latest*.yml
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Draft release with all files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -la artifacts
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifacts/* --clobber
+          else
+            gh release create "$TAG" artifacts/* --draft --verify-tag --title "Squorli Desktop ${TAG#desktop-v}" --notes "Installers for Windows (Squorli-Setup-*.exe) and Linux (AppImage, deb). Unsigned: Windows SmartScreen warns on the first start. Download page: https://squorli.com/en/download/"
+          fi

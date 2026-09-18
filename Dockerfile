@@ -7,6 +7,9 @@ COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* ./
 COPY packages/protocol/package.json packages/protocol/
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
+COPY apps/desktop/package.json apps/desktop/
+# The desktop app (apps/desktop) is part of the workspace and the lockfile, but the image never starts it: no Electron binary.
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm --filter @squorli/web build && pnpm --filter @squorli/server build \

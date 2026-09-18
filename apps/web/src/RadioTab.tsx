@@ -4,6 +4,7 @@ import type { ServerApi } from "./api";
 import { askConfirm } from "./dialogs";
 import { Icon } from "./Icon";
 import { t } from "./i18n";
+import { platform } from "./platform";
 
 type RunFn = (fn: () => Promise<unknown>) => Promise<void>;
 
@@ -13,7 +14,7 @@ export function RadioTab({ api, server, run }: { api: ServerApi; server: ServerS
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const urlOk = RadioUrl.safeParse(url).success;
-  const insecure = [url, ...stations.map((s) => s.url)].some((u) => u.trim().toLowerCase().startsWith("http://")) && window.location.protocol === "https:";
+  const insecure = [url, ...stations.map((s) => s.url)].some((u) => u.trim().toLowerCase().startsWith("http://")) && platform.media.blocksInsecureMedia;
   const add = () => run(async () => { await api.createRadioStation({ name: name.trim(), url: url.trim() }); setName(""); setUrl(""); });
   return (
     <div className="stack">

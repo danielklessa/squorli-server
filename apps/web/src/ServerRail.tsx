@@ -20,8 +20,12 @@ type Menu = { key: string; host: string; name: string; x: number; y: number };
  * (through the directory).
  * At the bottom: "discover servers" opens the public server directory.
  */
-export function ServerRail({ servers, serverState, activeKey, onSelect, onDiscover, onLeave, onMute, home }: {
-  servers: RailServer[]; serverState: RailState; activeKey: string | null; onSelect: (key: string, host: string) => void; onDiscover: () => void;
+export function ServerRail({ servers, serverState, activeKey, onSelect, onDiscover, onAdd, onLeave, onMute, home }: {
+  servers: RailServer[]; serverState: RailState; activeKey: string | null; onSelect: (key: string, host: string) => void;
+  /** Open the public server directory; null = the client knows no directory. */
+  onDiscover: (() => void) | null;
+  /** Add a server by address or link (client without a home server: the desktop app); null = not offered. */
+  onAdd: (() => void) | null;
   /** Delete your account on `host` (asks for confirmation itself). */
   onLeave: (host: string, name: string) => void;
   /** Mute or unmute the server `key` for myself. */
@@ -61,7 +65,8 @@ export function ServerRail({ servers, serverState, activeKey, onSelect, onDiscov
           voice={st?.voice ?? false} unread={st?.unread ?? false} mentions={st?.mentions ?? 0} muted={st?.muted ?? false} onOpen={() => onSelect(s.key, s.host)} onMenu={openMenu(s)} />;
       })}
       <span className="rail-sep" />
-      <button className="rail-item discover" title={t("rail.discover")} onClick={onDiscover}><Icon name="compass" /></button>
+      {onAdd && <button className="rail-item discover" title={t("rail.add")} onClick={onAdd}><Icon name="plus" /></button>}
+      {onDiscover && <button className="rail-item discover" title={t("rail.discover")} onClick={onDiscover}><Icon name="compass" /></button>}
       {menu && (
         <div className="rail-menu" role="menu" style={{ left: menu.x, top: menu.y }} onPointerDown={(e) => e.stopPropagation()}>
           <div className="muted small rail-menu-head">{menu.name}<br />{menu.host}</div>

@@ -19,6 +19,8 @@ test:
   image: node:24-alpine
   variables:
     PNPM_HOME: $CI_PROJECT_DIR/.pnpm
+    # apps/desktop is typechecked, tested and bundled here, never started: no Electron binary.
+    ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
   cache:
     key: pnpm-$CI_COMMIT_REF_SLUG
     paths:
@@ -71,4 +73,5 @@ build-tag:
     - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
     - docker push $CI_REGISTRY_IMAGE:latest
   rules:
-    - if: $CI_COMMIT_TAG
+    # Server images: tags `v*`. Tags `desktop-v*` belong to the desktop app (built on GitHub, .github/workflows/desktop-release.yml).
+    - if: $CI_COMMIT_TAG =~ /^v\d/

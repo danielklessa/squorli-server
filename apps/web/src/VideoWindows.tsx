@@ -4,6 +4,7 @@ import type { VoiceClient, VideoTile } from "./voice/voiceClient";
 import { Icon } from "./Icon";
 import { VideoAudioControls } from "./VideoAudioControls";
 import { t } from "./i18n";
+import { platform } from "./platform";
 import { activity, watchActivity } from "./activity";
 import { attachVideoView, fitVideoWindow, toggleVideoFullscreen, watchDocumentHidden } from "./videoDisplay";
 
@@ -76,7 +77,7 @@ export function useVideoWindows(tiles: VideoTile[], client: VoiceClient) {
     const ratio = video?.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight
       : settings.width && settings.height ? settings.width / settings.height : 16 / 9;
     const size = fitVideoWindow(ratio, 960, window.screen.availWidth, Math.max(1, window.screen.availHeight - 120));
-    const popup = window.open("about:blank", "_blank", `popup,width=${size.width},height=${size.height},resizable=yes,scrollbars=no`);
+    const popup = window.open("about:blank", "_blank", platform.window.popoutFeatures(size));
     if (!popup) throw new Error(t("stage.popupBlocked"));
     try {
       const base = popup.document.createElement("base"); base.href = document.baseURI; popup.document.head.appendChild(base);

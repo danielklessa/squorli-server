@@ -102,7 +102,8 @@ One WebSocket between client and app server for everything except media: presenc
 - **Web:** TypeScript, React (or a lighter framework, if you are more familiar with one), Vite. LiveKit JS SDK for media.
 - **Desktop:** Electron. Rationale: screen sharing including system audio, global keyboard shortcuts (push-to-talk), autostart and tray are mature in Electron. Tauri would be leaner, but to my knowledge less mature for exactly these functions; that is an assessment, not an established fact, and is worth a two-day prototype to verify before milestone 4 begins.
 - **Shared core:** State, protocol client, media logic in one package without UI dependency, so that a later mobile client can reuse it.
-- **Multi-server client (decision of 14 September 2026, user's requirement):** the client served by one server can show other Squorli servers directly (server rail), like Discord: one `ServerConnection` per server (own session token, WebSocket, state), the rail switches the shown server without leaving the page. The voice connection belongs to one server and stays up across the switch; joining a voice channel on another server disconnects the previous one. Login at a foreign server uses the same browser key with a signature over that server's `PUBLIC_DOMAIN` (the domain binding of 3.2 is kept; the client reads the domain from its `/api/health`). This requires every chat server to answer CORS for all origins; that is safe because authentication is a Bearer token only (no cookies) and the token never leaves the client's origin. The login screen, the directory account and friends/DMs stay bound to the server that serves the client.
+- **One build, two shells (decision of 18 September 2026, user):** the desktop app lives in this repo as `apps/desktop` and ships exactly the web client's build (`apps/web/dist`), served from its own scheme. The UI is not moved into a package of its own and nothing is published to a registry, so both pipelines (GitLab, GitHub) build it from a bare checkout and a UI change cannot reach one shell and miss the other. What differs (screen share codec, global push-to-talk, system audio, window background, updates, `squorli://` links) goes through the `Platform` interface in `apps/web/src/platform/`. The app has no home server: it starts from the directory account at https://directory.squorli.com and opens the server viewed last; servers can also be added by address. Installers live in GitHub Releases, the update feed and the download page on squorli.com. Decisions, phases and state: `docs/features/desktop.md`.
+- **Multi-server client (decision of 14 September 2026, user's requirement):** the client served by one server can show other Squorli servers directly (server rail), like Discord: one `ServerConnection` per server (own session token, WebSocket, state), the rail switches the shown server without leaving the page. The voice connection belongs to one server and stays up across the switch; joining a voice channel on another server disconnects the previous one. Login at a foreign server uses the same browser key with a signature over that server's `PUBLIC_DOMAIN` (the domain binding of 3.2 is kept; the client reads the domain from its `/api/health`). This requires every chat server to answer CORS for all origins; that is safe because authentication is a Bearer token only (no cookies) and the token never leaves the client's origin. The login screen, the directory account and friends/DMs stay bound to the server that serves the client. **Exception since 18 September 2026:** a client without a home server (the desktop app) takes the directory from its platform, has a login of its own (directory account or the device's key) and treats every server as a foreign one; it opens the server viewed last (`docs/features/desktop.md`, P1).
 
 ### 3.5 Speaking: Push-to-Talk and Voice Activation
 
@@ -125,7 +126,7 @@ Mandatory for Release 1, but the browsers impose hard limits that no code gets a
 | Chromium – single window | yes | to my knowledge no | **verify** |
 | Firefox | yes | no, rated low priority by Mozilla | confirmed |
 | Safari | yes | no to my knowledge | **verify** |
-| Desktop client, Windows | yes | yes, system audio via loopback (Electron/Chromium) | probable, verify |
+| Desktop client, Windows | yes | yes, system audio via loopback (Electron/Chromium) | track delivered (Electron 44, 18 September 2026: `getDisplayMedia` with the app's picker returns a video and a loopback audio track); what it sounds like to a listener, and whether the app's own playback echoes, not yet checked |
 | Desktop client, macOS | yes | system audio needs an additional path (ScreenCaptureKit or virtual audio device) | **verify**, considerable effort possible |
 | Desktop client, Linux | yes | conceivable via PipeWire/PulseAudio monitor, Wayland complicates video capture | **verify**, can be documented as a limitation |
 
@@ -143,11 +144,11 @@ What follows from this:
 ├── apps/
 │   ├── server/        Node/TS app server
 │   ├── web/           Web client
-│   └── desktop/       Electron shell around web/
+│   └── desktop/       Electron shell around web/ (ships web's build; M4, docs/features/desktop.md)
 ├── packages/
 │   ├── protocol/      Event schemas, shared types
-│   ├── core/          Client logic without UI
-│   └── ui/            Components (optional, later)
+│   ├── core/          Client logic without UI (not split off: lives in apps/web/src as UI-free modules)
+│   └── ui/            Components (optional, later; not needed for the desktop app, decision of 18 September 2026)
 ├── deploy/
 │   ├── compose.yml            Production
 │   ├── compose.dev.yml        Development
@@ -342,6 +343,7 @@ Already decided: permissive license, PTT and voice activation both, screen share
 4. **Name of the project.** **Decided (14 September 2026): Squorli.** Brand and design in `docs/brand/` (version 2, dark mode, blue signet with three speech figures); package names `@squorli/*`, Compose projects `squorli`/`squorli-dev`, image tags `squorli/app` and `squorli/directory`. Signed messages (`community-chat-login`, `community-directory-*`, HKDF infos `community-backup-*`) and the localStorage keys keep their old identifiers so that existing backups and sessions remain valid.
 5. **Tauri prototype yes/no** before M4. Note: With system audio as a requirement, Electron's maturity weighs more heavily; a Tauri prototype would have to prove exactly this function.
 6. **macOS system audio in the desktop client:** release-1 requirement or documented limitation, depending on the result of the test matrix.
+7. **Video codec of the screen share: AV1 (or VP9) instead of VP8.** *Deferred (18 September 2026, user's decision): the web app stays on VP8 for now; AV1 with a VP8 backup is to be tested at a later time, for the screen share only. What to measure and what is known: `docs/features/voice-video.md`, "Screen share codec".*
 
 ---
 

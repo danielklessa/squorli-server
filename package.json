@@ -8,6 +8,7 @@
   "engines": { "node": ">=24" },
   "scripts": {
     "dev": "node tools/dev.mjs",
+    "dev:desktop": "pnpm --filter @squorli/desktop dev",
     "dev:apps": "pnpm -r --parallel --filter ./apps/* dev",
     "build": "node tools/icons.mjs && node tools/licenses.mjs && pnpm -r build && node tools/copy-web.mjs",
     "icons": "node tools/icons.mjs",

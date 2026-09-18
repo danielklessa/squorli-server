@@ -12,6 +12,7 @@ tools/copy-web.mjs     copies apps/web/dist to apps/server/public (part of `pnpm
 tools/icons.mjs        collects all `<Icon name>` names in the web client, generates apps/web/src/icons/ from lucide-static (part of `pnpm build`, also `pnpm icons`); unknown name = build abort
 tools/emoji.mjs        generates apps/web/src/emoji/: downloads the Noto Color Emoji COLRv1 slices, OFL.txt and font.json from Google Fonts into font/ and writes font.css (needs internet; `--no-font` skips it), shortcodes and picker data de/en from emojibase-data; `pnpm emoji`, output committed, not part of `pnpm build`
 tools/licenses.mjs     generates apps/web/src/licenses/thirdParty.ts and THIRD-PARTY-NOTICES.md from the client's production dependencies (part of `pnpm build`, also `pnpm licenses`); output committed
+tools/desktop-icon.mjs generates apps/desktop/build/icon.png (1024 px) from docs/brand/squorli-icon.svg on the brand's dark tile, rendered by headless Chrome (`CHROME=<path>` for another executable); run by hand after a brand change, output committed
 tools/bots.mjs         Load test bots: `lk load-test` from the image livekit/livekit-cli, attaches to the network of the LiveKit dev container; `--video N` for camera bots (M3 bandwidth measurement)
 ```
 

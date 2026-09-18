@@ -205,7 +205,8 @@ function InvitesTab({ api, run, canManage }: { api: ServerApi; run: RunFn; canMa
   const [uses, setUses] = useState<string>("");
   const reload = () => api.listInvites().then(setList).catch(() => {});
   useEffect(() => { void reload(); }, []);
-  const link = (code: string) => `${window.location.origin}/invite/${code}`;
+  // The invite belongs to the server the panel acts on, which need not be the one serving the page (multi-server client).
+  const link = (code: string) => `${api.base || window.location.origin}/invite/${code}`;
   return (
     <div className="stack">
       <div className="row">

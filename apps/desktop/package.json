@@ -1,0 +1,29 @@
+{
+  "name": "@squorli/desktop",
+  "productName": "Squorli",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Squorli desktop app: Electron shell around the web client",
+  "author": "Daniel Klessa",
+  "homepage": "https://squorli.com",
+  "main": "out/main.cjs",
+  "scripts": {
+    "dev": "tsup && node scripts/run.mjs --dev-url=http://localhost:5173",
+    "start": "tsup && node scripts/run.mjs",
+    "build": "tsup",
+    "dist": "tsup && electron-builder --publish never",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@squorli/protocol": "workspace:*",
+    "@squorli/web": "workspace:*",
+    "@types/node": "^24.0.0",
+    "electron": "^44.4.2",
+    "electron-builder": "^26.15.3",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

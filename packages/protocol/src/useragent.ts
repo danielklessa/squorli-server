@@ -2,11 +2,14 @@
 /**
  * Device label derived from the user agent (M6c): "Chrome on Windows", "Safari on iOS". Deliberately coarse and dependency-free;
  * it only serves recognition in the device list. It lives in the protocol package because both chat server and directory service need it.
+ * The desktop app names itself (`Squorli-Desktop/<version>`, apps/desktop); it is checked first, because its user agent also
+ * carries Chrome's token.
  */
 export function labelFromUserAgent(ua: string | undefined | null): string | null {
   if (!ua) return null;
   const browser =
-    /\bEdg(?:e|A|iOS)?\/\d/.test(ua) ? "Edge"
+    /\bSquorli-Desktop\/\d/.test(ua) ? "Squorli Desktop"
+    : /\bEdg(?:e|A|iOS)?\/\d/.test(ua) ? "Edge"
     : /\bOPR\/\d|\bOpera\b/.test(ua) ? "Opera"
     : /\bFirefox\/\d|\bFxiOS\/\d/.test(ua) ? "Firefox"
     : /\bChrome\/\d|\bCriOS\/\d/.test(ua) ? "Chrome"
