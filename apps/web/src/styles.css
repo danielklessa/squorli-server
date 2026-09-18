@@ -342,7 +342,7 @@ button.dock-stage:hover { background: var(--sel); }
   .admin-modal .settings-nav button { flex: 0 0 auto; white-space: nowrap; }
   .admin-modal .settings-body { padding: 0.5rem 0.75rem 1rem; }
 }
-.meter { position: relative; height: 1.2rem; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-top: 0.4rem; background: var(--bg); }
+.meter { position: relative; height: 1.2rem; flex-shrink: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-top: 0.4rem; background: var(--bg); }
 .small-meter { height: 0.5rem; margin-top: 0.3rem; }
 .meter-fill { height: 100%; background: rgba(66,214,174,.55); transition: width 0.05s linear; }
 .meter-threshold { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--warn); }

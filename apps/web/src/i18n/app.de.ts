@@ -25,6 +25,6 @@ export const appDe: Partial<Record<keyof typeof de, string>> = {
   "admin.radio.httpHint": "Adressen mit http:// spielen die App und viele Browser (auf einer https-Seite) nicht ab. Wenn möglich https:// verwenden.",
   "dir.no_backup": "Für dieses Handle gibt es kein Passwort-Backup. Lege es dort an, wo das Handle registriert wurde (Browser oder App): „Passwort festlegen“ im Login.",
   "voice.connErrWs": "{message}. Die LiveKit-Adresse \"{url}\" läuft über ws:// (unverschlüsselt); die App blockiert das, wie ein Browser auf einer HTTPS-Seite. LIVEKIT_PUBLIC_URL auf wss:// umstellen.",
-  "voice.errMic": "Mikrofon: {err}. Prüfen, ob ein Mikrofon angeschlossen ist, Squorli in den Datenschutz-Einstellungen des Systems darauf zugreifen darf und unter Einstellungen > Audiogeräte das richtige gewählt ist.",
+  "voice.errMic": "Mikrofon: {err}. Prüfen, ob ein Mikrofon angeschlossen ist, Squorli in den Datenschutz-Einstellungen des Systems darauf zugreifen darf und unter Einstellungen > Sprache und Audio das richtige gewählt ist.",
   "voice.errCameraBusy": "Kamera: {err}. Die Kamera ließ sich nicht starten: Sie wird gerade von einem anderen Programm benutzt oder wurde noch nicht wieder freigegeben. Andere Programme mit Kamerazugriff schließen und es noch einmal versuchen.",
 };

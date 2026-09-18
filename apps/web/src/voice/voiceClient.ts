@@ -25,6 +25,7 @@ import type { VoiceSettings } from "./settings";
 import { DEFAULT_SOUND_SETTINGS, applyCueOutput, normalizeSoundSettings, playCue, shouldPlayCue, type SoundCue, type SoundSettings } from "./sounds";
 import { USER_VOLUME_MAX, clampUserVolume, loadUserVolumes, saveUserVolumes, withUserVolume, type UserVolumes } from "./userVolumes";
 import { subscriptionPermissions, type VideoAccess } from "./videoAccess";
+import { VideoWatch, parseFeedId, type VideoSource } from "./videoWatch";
 import { t } from "../i18n";
 import type { PlatformMedia } from "../platform/types";
 
@@ -79,6 +80,8 @@ export type VoiceState = {
   level: number;
   /** Microphone boost applied right now (1 = none; micBoost.ts), for the settings and the debug view. */
   micBoost: number;
+  /** Microphone test running (Einstellungen): you hear yourself, and nothing of it is sent into the channel (the microphone counts as muted). */
+  micTest: boolean;
   /** false = the browser blocks autoplay; the user has to click once. */
   canPlayback: boolean;
   /** State of the Web Audio context (microphone gate, level metering): "running" is mandatory, "suspended" = the browser blocks until a user gesture. */
@@ -169,7 +172,7 @@ export class VoiceClient {
   private readonly screenListening = new Map<string, Set<string>>();
   private readonly listeners = new Set<(s: VoiceState) => void>();
   state: VoiceState = {
-    status: "disconnected", channelId: null, afkRoom: false, participants: [], micMuted: false, deafened: false, gateOpen: false, level: 0, micBoost: 1,
+    status: "disconnected", channelId: null, afkRoom: false, participants: [], micMuted: false, deafened: false, gateOpen: false, level: 0, micBoost: 1, micTest: false,
     canPlayback: true, audioContext: "none", inputDeviceId: null, cameraOn: false, cameraBlur: 0, screenOn: false, screenAudio: null, tiles: [], notice: null, screenSink: { deviceId: null, tracks: 0, error: null }, audioProfile: null, rtcUrl: null, events: [], error: null,
   };
   private audioProfile: AudioProfile = DEFAULT_AUDIO_PROFILE;
@@ -178,6 +181,10 @@ export class VoiceClient {
   private screenSinkId: string | null = null;
   /** Microphone mute set by the user themselves, independent of deafening. */
   private micMutedByUser = false;
+  /** Microphone test: the capture opened for it while in no channel (in a channel the test listens to `mic`), and its playback. */
+  private testMic: MicPipeline | null = null;
+  private testAudio: HTMLAudioElement | null = null;
+  private micTestWanted = false;
   /** Last requested camera settings (for switching on again). */
   private camera: { deviceId: string | null; quality: "360p" | "720p"; blur: number } = { deviceId: null, quality: "720p", blur: 0 };
   /** Background processor (MediaPipe segmentation, running in the browser); kept around for toggling. */
@@ -200,6 +207,8 @@ export class VoiceClient {
   private videoAccess: VideoAccess | null = null;
   /** Whether we may receive others' camera/screen ourselves. */
   private mayViewVideo = true;
+  /** Which feeds of others the user watches: cameras until turned off, screen shares once turned on (videoWatch.ts). */
+  private readonly videoWatch = new VideoWatch();
   /** Last subscription permissions sent to LiveKit, to skip identical updates. */
   private sentVideoAccess = "";
   /** Playback volume per person (0..2), keyed by public key and stored per device (userVolumes.ts). */
@@ -286,6 +295,7 @@ export class VoiceClient {
   }
 
   async join(channelId: string, url: string, token: string, settings: VoiceSettings, opts: JoinOptions = {}): Promise<void> {
+    await this.stopMicTest();
     this.setSoundSettings(settings.sounds);
     applyCueOutput(this.ensureCtx(), settings.outputDeviceId);
     if (this.room) { this.switchingRoom = true; try { await this.leave(); } finally { this.switchingRoom = false; } }
@@ -319,8 +329,9 @@ export class VoiceClient {
     this.log(`verbinde mit ${url}${opts.iceTransportPolicy === "relay" ? " (nur TURN/relay)" : ""}`);
     room
       .on(RoomEvent.ParticipantConnected, (p) => { this.log(`teilnehmer da: ${p.identity.slice(0, 8)}`); this.peerCue("peerJoin"); this.applyVideoAccess(); this.refreshParticipants(); })
-      .on(RoomEvent.TrackPublished, () => this.applyVideoSubscriptions())
-      .on(RoomEvent.ParticipantDisconnected, (p) => { this.log(`teilnehmer weg: ${p.identity.slice(0, 8)}`); this.peerCue("peerLeave"); this.refreshParticipants(); })
+      // refreshParticipants: a share nobody watches yet is never subscribed, so `screenOn` is all the stage has to show its tile.
+      .on(RoomEvent.TrackPublished, () => { this.applyVideoSubscriptions(); this.refreshParticipants(); })
+      .on(RoomEvent.ParticipantDisconnected, (p) => { this.videoWatch.forgetParticipant(p.identity); this.log(`teilnehmer weg: ${p.identity.slice(0, 8)}`); this.peerCue("peerLeave"); this.refreshParticipants(); })
       .on(RoomEvent.Reconnecting, () => this.log("verbindung unterbrochen, versuche erneut"))
       .on(RoomEvent.Reconnected, () => this.log("wieder verbunden"))
       .on(RoomEvent.MediaDevicesError, (e) => this.log(`Gerätefehler: ${e.message}`))
@@ -334,7 +345,14 @@ export class VoiceClient {
       // LiveKit emits TrackUnsubscribed before clearing publication.track, so exclude the ended track explicitly;
       // otherwise the tile survives with a stopped track and the viewers keep a black frame.
       .on(RoomEvent.TrackUnsubscribed, (track, _pub, p) => { if (track.kind === Track.Kind.Audio) { track.detach().forEach((el) => el.remove()); this.remoteAudio.delete(track); this.dropMeter(p.identity); } this.refreshTiles(track); })
-      .on(RoomEvent.TrackUnpublished, (pub, p) => { this.log(`${p.identity.slice(0, 8)} beendet ${pub.source}`); this.refreshTiles(); })
+      .on(RoomEvent.TrackUnpublished, (pub, p) => {
+        this.log(`${p.identity.slice(0, 8)} beendet ${pub.source}`);
+        // The choice ends with the feed: a share started again has to be turned on again.
+        if (pub.source === Track.Source.Camera) this.videoWatch.forget(p.identity, "camera");
+        if (pub.source === Track.Source.ScreenShare) this.videoWatch.forget(p.identity, "screen");
+        this.refreshParticipants();
+        this.refreshTiles();
+      })
       // The microphone's track id is part of the subscription permissions (republishing changes it).
       .on(RoomEvent.LocalTrackPublished, (pub) => { this.log(`sende ${pub.source}`); this.applyVideoAccess(); this.refreshTiles(); })
       .on(RoomEvent.LocalTrackUnpublished, (pub) => {
@@ -423,6 +441,7 @@ export class VoiceClient {
     this.room = null;
     this.publication = null;
     this.stopMeters();
+    await this.stopMicTest();
     await this.mic?.stop();
     this.mic = null;
     if (room) {
@@ -433,6 +452,7 @@ export class VoiceClient {
     this.remoteAudio.clear();
     this.videoAudioHosts.clear();
     this.screenListening.clear();
+    this.videoWatch.clear();
     this.audioHost.replaceChildren();
     this.micMutedByUser = false;
     this.patch({ status: "disconnected", channelId: null, afkRoom: false, participants: [], gateOpen: false, level: 0, micBoost: 1, micMuted: false, deafened: false, inputDeviceId: null, cameraOn: false, screenOn: false, screenAudio: null, tiles: [] });
@@ -479,9 +499,30 @@ export class VoiceClient {
     for (const p of room.remoteParticipants.values()) {
       for (const pub of p.trackPublications.values()) {
         const stream = pub.kind === Track.Kind.Video || pub.source === Track.Source.ScreenShareAudio;
-        if (stream && pub.isDesired !== this.mayViewVideo) pub.setSubscribed(this.mayViewVideo);
+        if (!stream) continue;
+        // A share's audio goes with its picture: not watching the share means receiving neither.
+        const want = this.mayViewVideo && this.videoWatch.watching(p.identity, pub.source === Track.Source.Camera ? "camera" : "screen");
+        if (pub.isDesired !== want) pub.setSubscribed(want);
       }
     }
+  }
+
+  /**
+   * Watch or stop watching one feed of another participant, for yourself only (user's requirement, 19 September 2026):
+   * a screen share is never shown by itself, the user turns it on; a camera shows by itself and can be turned off. Not
+   * watching = not subscribed, so it costs no bandwidth. Kept in memory only (videoWatch.ts).
+   */
+  setVideoWatching(tileId: string, on: boolean): void {
+    const { identity, source } = parseFeedId(tileId);
+    if (this.videoWatch.watching(identity, source) === on) return;
+    this.videoWatch.set(identity, source, on);
+    this.log(`${source} von ${identity.slice(0, 8)}: ${on ? "ansehen" : "fuer mich aus"}`);
+    this.applyVideoSubscriptions();
+    this.refreshTiles();
+  }
+  isVideoWatching(tileId: string): boolean {
+    const { identity, source } = parseFeedId(tileId);
+    return this.videoWatch.watching(identity, source);
   }
 
   // ---------- Camera and screen (M3)
@@ -721,12 +762,14 @@ export class VoiceClient {
     for (const p of all) {
       const isLocal = p === room.localParticipant;
       if (!isLocal && !this.mayViewVideo) continue; // without VIEW_VIDEO only your own feeds
+      // A feed the user does not watch loses its tile at once, not only when LiveKit has ended the subscription.
+      const watching = (source: VideoSource) => isLocal || this.videoWatch.watching(p.identity, source);
       const cam = p.getTrackPublication(Track.Source.Camera)?.track;
-      if ((cam instanceof LocalVideoTrack || cam instanceof RemoteVideoTrack) && cam !== ended && !cam.isMuted) {
+      if ((cam instanceof LocalVideoTrack || cam instanceof RemoteVideoTrack) && cam !== ended && !cam.isMuted && watching("camera")) {
         tiles.push({ id: `${p.identity}:camera`, identity: p.identity, name: p.name || p.identity, isLocal, source: "camera", track: cam, audio: null, hasAudio: false });
       }
       const scr = p.getTrackPublication(Track.Source.ScreenShare)?.track;
-      if ((scr instanceof LocalVideoTrack || scr instanceof RemoteVideoTrack) && scr !== ended) {
+      if ((scr instanceof LocalVideoTrack || scr instanceof RemoteVideoTrack) && scr !== ended && watching("screen")) {
         const audioPub = p.getTrackPublication(Track.Source.ScreenShareAudio);
         const audio = audioPub?.track instanceof RemoteAudioTrack ? audioPub.track : null;
         tiles.push({ id: `${p.identity}:screen`, identity: p.identity, name: p.name || p.identity, isLocal, source: "screen", track: scr, audio, hasAudio: !!audioPub });
@@ -768,8 +811,71 @@ export class VoiceClient {
     this.refreshParticipants();
   }
 
+  /**
+   * Microphone test (Einstellungen): plays your own microphone back to you, behind the boost and whatever the gate does.
+   * In a channel it listens to the running capture and mutes the published track for as long as it runs (user's
+   * requirement: nothing of the test reaches the channel; the others see the microphone as muted). In no channel it opens
+   * a capture of its own. Call inside the click (AudioContext). Throws when the microphone cannot be opened.
+   */
+  async startMicTest(settings: VoiceSettings): Promise<void> {
+    if (this.micTestWanted) return;
+    this.micTestWanted = true;
+    const ctx = this.ensureCtx();
+    if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+    let own: MicPipeline | null = null;
+    try {
+      if (!this.mic) {
+        own = new MicPipeline(settings.vadThreshold, settings.vadHangoverMs, ctx);
+        own.onState = (s) => this.patch({ level: s.level, micBoost: s.boost });
+        own.setBoost(settings.micBoost);
+        this.testMic = own;
+        await own.start(settings.inputDeviceId);
+      }
+      // Ended while the browser asked for the microphone: the capture that opened after all is closed again.
+      if (!this.micTestWanted) { await own?.stop(); this.patch({ level: 0, micBoost: 1 }); return; }
+      // Mute first, listen second: not a word of the test goes out.
+      this.patch({ micTest: true });
+      if (!this.state.afkRoom) await this.applyMic();
+      const stream = (this.mic ?? this.testMic)?.setMonitor(true) ?? null;
+      if (!stream) throw new Error("kein Mikrofon");
+      const el = document.createElement("audio");
+      el.srcObject = stream;
+      this.testAudio = el;
+      await this.setMicTestOutput(settings.outputDeviceId);
+      await el.play();
+      this.log("mikrofontest an");
+    } catch (err) {
+      await this.endMicTest();
+      throw new Error(t("voice.errMic", { err: errorText(err) }));
+    }
+  }
+
+  async stopMicTest(): Promise<void> {
+    if (!this.micTestWanted) return;
+    await this.endMicTest();
+    this.log("mikrofontest aus");
+  }
+
+  private async endMicTest(): Promise<void> {
+    this.micTestWanted = false;
+    if (this.testAudio) { this.testAudio.pause(); this.testAudio.srcObject = null; this.testAudio = null; }
+    this.mic?.setMonitor(false);
+    const own = this.testMic;
+    this.testMic = null;
+    await own?.stop();
+    const was = this.state.micTest;
+    this.patch({ micTest: false, ...(own ? { level: 0, micBoost: 1 } : {}) });
+    if (was && !this.state.afkRoom) await this.applyMic();
+  }
+
+  /** Where the microphone test plays (the voice output device; Chromium only, elsewhere the default device). */
+  async setMicTestOutput(deviceId: string | null): Promise<void> {
+    const el = this.testAudio as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
+    await el?.setSinkId?.(deviceId ?? "").catch(() => {});
+  }
+
   private async applyMic(): Promise<void> {
-    const muted = this.micMutedByUser || this.state.deafened;
+    const muted = this.micMutedByUser || this.state.deafened || this.state.micTest;
     const track = this.publication?.track;
     if (track instanceof LocalAudioTrack) {
       if (muted) await track.mute(); else await track.unmute();
@@ -781,10 +887,15 @@ export class VoiceClient {
   setMode(mode: GateMode) { this.mic?.setMode(mode); }
   setThreshold(t: number) { this.mic?.setThreshold(t); }
   setHangover(ms: number) { this.mic?.setHangover(ms); }
-  setMicBoost(b: MicBoostSettings) { this.mic?.setBoost(b); }
+  setMicBoost(b: MicBoostSettings) { this.mic?.setBoost(b); this.testMic?.setBoost(b); }
   setPttHeld(held: boolean) { this.mic?.setPttHeld(held); }
 
   async setInputDevice(deviceId: string | null): Promise<void> {
+    if (this.testMic) {
+      // Microphone test in no channel: test the newly chosen microphone (the monitor output survives the restart).
+      try { await this.testMic.start(deviceId); this.patch({ error: null }); } catch (err) { this.patch({ error: t("voice.errMic", { err: errorText(err) }) }); }
+      return;
+    }
     if (!this.mic || !this.publication) return;
     try {
       const track = await this.mic.start(deviceId, this.audioProfile.stereo);

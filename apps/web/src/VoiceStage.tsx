@@ -14,6 +14,7 @@ import { Icon } from "./Icon";
 import { t } from "./i18n";
 import { platform } from "./platform";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
+import { feedId, videoActive } from "./voice/videoWatch";
 
 type Props = {
   client: VoiceClient;
@@ -47,13 +48,17 @@ type Props = {
 };
 
 type Layout = "grid" | "focus";
-type Item = { key: string; participant: VoiceParticipant; tile: VideoTile | null; kind: "camera" | "screen" } | { key: string; participant: null; tile: null; kind: "player" };
+/** `off`: the participant sends this feed, the user may see it and does not watch it (voiceClient.setVideoWatching): the tile offers to turn it on. */
+type Item = { key: string; participant: VoiceParticipant; tile: VideoTile | null; kind: "camera" | "screen"; off: boolean } | { key: string; participant: null; tile: null; kind: "player"; off: false };
 
 /**
  * Stage of a voice channel (M3): one tile per participant (camera or avatar) plus one per screen share.
  * The default is the tile view; the tile size is computed so that all of them fit into the visible area
  * (no scrolling). Clicking a tile enlarges it (focus), clicking the large tile goes back.
- * "Speaker" follows the active speaker or the newest screen share without pinning.
+ * "Speaker" follows the active speaker or the newest screen share the user watches, without pinning.
+ * Others' feeds are the user's choice (19 September 2026): a screen share shows a tile that offers to watch it and is only
+ * received after that; a camera shows by itself; both can be turned off for yourself from the tile or its context menu.
+ * The tile view can hide participants without video while any video is being sent; that choice is never stored.
  * Receive quality follows the tile size (adaptiveStream in the voice core); here the <video> only has to have the right size.
  */
 export function VoiceStage({ client, voice, channel, members, myPermissions, api, radio, radioStations, radioTitle, playerTile, playerPopped, onRestorePlayer, onToggleCamera, onToggleBlur, onLeave, onPopout, poppedIds, onRestore, detached, onToggleWindow }: Props) {
@@ -68,7 +73,8 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
   const [lastSpeaker, setLastSpeaker] = useState<string | null>(null);
   const canStream = hasPermission(myPermissions, Permission.STREAM_VIDEO) && !voice.afkRoom; // nothing is sent in the AFK channel
   // Without VIEW_VIDEO others' camera and screen never arrive; say so while somebody is sharing, instead of just showing avatars.
-  const hiddenStreams = !hasPermission(myPermissions, Permission.VIEW_VIDEO) && participants.some((p) => !p.isLocal && (p.cameraOn || p.screenOn));
+  const mayView = hasPermission(myPermissions, Permission.VIEW_VIDEO);
+  const hiddenStreams = !mayView && participants.some((p) => !p.isLocal && (p.cameraOn || p.screenOn));
 
   // Others win over yourself; whether you are featured at all while only you speak is the user's choice (settings > view).
   const { featureSelfInSpeakerView } = useVoiceSettings();
@@ -77,19 +83,24 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
     if (s) setLastSpeaker(s.identity);
   }, [voice.participants, featureSelfInSpeakerView]);
 
+  const notWatched = (p: VoiceParticipant, source: "camera" | "screen") => !p.isLocal && mayView && (source === "camera" ? p.cameraOn : p.screenOn) && !client.isVideoWatching(feedId(p.identity, source));
   const items: Item[] = [];
   for (const p of participants) {
     const cam = voice.tiles.find((t) => t.identity === p.identity && t.source === "camera") ?? null;
-    items.push({ key: `${p.identity}:camera`, participant: p, tile: cam, kind: "camera" });
+    items.push({ key: feedId(p.identity, "camera"), participant: p, tile: cam, kind: "camera", off: notWatched(p, "camera") });
   }
   // A Twitch or YouTube source of the radio is shown like a screen share (user's decision); real shares come after it, so the newest of them wins the focus.
-  if (playerTile) items.push({ key: `player:${playerTile}`, participant: null, tile: null, kind: "player" });
+  if (playerTile) items.push({ key: `player:${playerTile}`, participant: null, tile: null, kind: "player", off: false });
   for (const t of voice.tiles.filter((t) => t.source === "screen")) {
     const participant = participants.find((p) => p.identity === t.identity);
-    if (participant) items.push({ key: t.id, participant, tile: t, kind: "screen" });
+    if (participant) items.push({ key: t.id, participant, tile: t, kind: "screen", off: false });
   }
-  // A new screen share automatically moves into focus as long as nothing is pinned.
-  const screens = items.filter((i) => i.kind === "screen" || i.kind === "player");
+  // Shares the user does not watch (the default for every new share): a tile that offers to watch it, never the picture.
+  for (const p of participants) {
+    if (notWatched(p, "screen") && !items.some((i) => i.key === feedId(p.identity, "screen"))) items.push({ key: feedId(p.identity, "screen"), participant: p, tile: null, kind: "screen", off: true });
+  }
+  // A new screen share the user watches automatically moves into focus as long as nothing is pinned.
+  const screens = items.filter((i) => (i.kind === "screen" && !i.off) || i.kind === "player");
   const lastScreen = screens[screens.length - 1];
   // With "feature myself" off your own camera tile only becomes the large one by pinning it, or when nobody else is there.
   const mayFeature = (i: Item) => featureSelfInSpeakerView || !i.participant?.isLocal;
@@ -104,7 +115,13 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
   const focus = items.find((i) => i.key === focusKey) ?? null;
   const rest = items.filter((i) => i.key !== focusKey);
   const screenHint = explainScreenAudio(voice, platform.kind === "desktop" ? { audioPossible: platform.os === "windows" } : undefined);
-  const grid = useFittedGrid(items.length);
+  // Tile view: hide participants without video. Only while a video is being sent at all, and never stored: it is gone
+  // with the last video and with the stage (user's requirement).
+  const anyVideo = videoActive(participants, !!playerTile);
+  const [videoOnly, setVideoOnly] = useState(false);
+  useEffect(() => { if (!anyVideo) setVideoOnly(false); }, [anyVideo]);
+  const gridItems = videoOnly && anyVideo ? items.filter((i) => i.kind !== "camera" || i.participant.cameraOn) : items;
+  const grid = useFittedGrid(gridItems.length);
 
   // A share's audio plays only for who selected that share (clicked it large) or popped it out (VideoWindows.tsx); a share
   // that merely moved into focus by itself stays silent. Leaving the stage ends the listening.
@@ -122,6 +139,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
   // Right-click a tile of another member: how loud to play them back. Bots have no member entry and get no menu.
   const [menu, setMenu] = useState<({ identity: string } & MenuAnchor) | null>(null);
   const menuMember = menu ? members.find((m) => m.userId === menu.identity) ?? null : null;
+  const menuParticipant = menu ? participants.find((p) => p.identity === menu.identity) ?? null : null;
   const openMenu = (item: Item, event: ReactMouseEvent<HTMLElement>) => {
     if (!item.participant || item.participant.isLocal || !members.some((m) => m.userId === item.participant.identity)) return;
     if (event.currentTarget.ownerDocument.fullscreenElement) return; // the menu lives in the body, behind a fullscreen tile
@@ -136,6 +154,10 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
         <span className="muted small">· {t("stage.participants", { n: voice.participants.length })}{voice.audioProfile && ` · Opus ${voice.audioProfile.bitrate} kbit/s ${voice.audioProfile.stereo ? t("stage.stereo") : t("stage.mono")}`}</span>
         <span className="spacer" />
         {radioStations && !voice.afkRoom && <RadioControl api={api} player={radio} channel={channel} stations={radioStations} nowPlaying={radioTitle} canControl={hasPermission(myPermissions, Permission.CONTROL_RADIO)} />}
+        {layout === "grid" && anyVideo && (
+          <button className={`icon ${videoOnly ? "on" : ""}`} aria-pressed={videoOnly} title={t(videoOnly ? "stage.showAll" : "stage.videoOnly")} aria-label={t(videoOnly ? "stage.showAll" : "stage.videoOnly")}
+            onClick={() => setVideoOnly(!videoOnly)}><Icon name={videoOnly ? "user-x" : "user"} /></button>
+        )}
         <div className="seg">
           <button className={layout === "focus" ? "active" : ""} title={t("stage.speakerHint")} onClick={() => setLayout("focus")}>{t("stage.speaker")}</button>
           <button className={layout === "grid" ? "active" : ""} title={t("stage.gridHint")} onClick={() => setLayout("grid")}>{t("stage.grid")}</button>
@@ -156,7 +178,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
       ) : layout === "grid" || !focus ? (
         <div className="stage-grid" ref={grid.ref}>
           <div className="stage-grid-inner" style={{ gridTemplateColumns: `repeat(${grid.cols}, ${grid.tileWidth}px)` }}>
-            {items.map((i) => i.kind === "player" ? <PlayerTile key={i.key} popped={playerPopped} elsewhere={detached} onRestore={onRestorePlayer} />
+            {gridItems.map((i) => i.kind === "player" ? <PlayerTile key={i.key} popped={playerPopped} elsewhere={detached} onRestore={onRestorePlayer} />
               : <Tile key={i.key} item={i} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} onMenu={openMenu} pinned={false} onClick={() => focusOn(i.key)} />)}
           </div>
         </div>
@@ -177,6 +199,11 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
         <ContextMenu anchor={menu} label={displayNameOf(menuMember)} onClose={() => setMenu(null)}>
           <div className="context-identity" role="presentation"><Avatar name={displayNameOf(menuMember)} /><strong>{displayNameOf(menuMember)}</strong></div>
           <UserVolumeControl client={client} publicKey={menuMember.publicKey} />
+          {menuParticipant && mayView && (["camera", "screen"] as const).filter((source) => source === "camera" ? menuParticipant.cameraOn : menuParticipant.screenOn).map((source) => {
+            const id = feedId(menuParticipant.identity, source);
+            const on = client.isVideoWatching(id);
+            return <button key={source} role="menuitem" className="secondary small" onClick={() => { setMenu(null); client.setVideoWatching(id, !on); }}><Icon name={on ? "eye-off" : "eye"} /> {t(`stage.${source}${on ? "Off" : "On"}`)}</button>;
+          })}
         </ContextMenu>
       )}
 
@@ -262,10 +289,19 @@ function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onResto
     return () => { doc.removeEventListener("fullscreenchange", update); client.setScreenAudioListening(listenId, "fullscreen", false); };
   }, [client, listenId]);
   const cls = ["tile", item.kind, hasAudioControls ? "has-volume" : "", p.speaking && item.kind === "camera" ? "speaking" : "", big ? "big" : "", tile && !popped ? "" : "avatar"].join(" ");
+  // Turned off while it fills the screen: leave fullscreen, an avatar has no business there.
+  const watch = (on: boolean) => { const doc = ref.current?.ownerDocument; if (!on && doc?.fullscreenElement === ref.current) void doc?.exitFullscreen().catch(() => {}); client.setVideoWatching(item.key, on); };
+  // A share nobody turned on for themselves: the whole tile is the switch, there is nothing to enlarge yet.
+  const shareOff = item.kind === "screen" && item.off;
   return (
-    <div ref={ref} className={cls} onClick={() => { if (!ref.current?.ownerDocument.fullscreenElement) onClick(); }} onContextMenu={(event) => onMenu(item, event)} title={big ? t("stage.backToGrid") : t("stage.enlarge")}>
-      {popped ? <div className="tile-popped"><Icon name="external-link" /><span>{t("stage.poppedOut")}</span><button className="secondary small" onClick={(event) => { event.stopPropagation(); onRestore(tile!.id); }}>{t("stage.restoreVideo")}</button></div> : tile ? <TrackVideo tile={tile} /> : <Avatar name={p.name} size="large" />}
+    <div ref={ref} className={cls} onClick={() => { if (shareOff) watch(true); else if (!ref.current?.ownerDocument.fullscreenElement) onClick(); }} onContextMenu={(event) => onMenu(item, event)} title={shareOff ? t("stage.screenOn") : big ? t("stage.backToGrid") : t("stage.enlarge")}>
+      {shareOff ? <div className="tile-popped"><Icon name="monitor" /><span>{t("stage.shareOffered", { name: p.name })}</span><button className="small" onClick={(event) => { event.stopPropagation(); watch(true); }}><Icon name="eye" /> {t("stage.watch")}</button></div>
+        : popped ? <div className="tile-popped"><Icon name="external-link" /><span>{t("stage.poppedOut")}</span><button className="secondary small" onClick={(event) => { event.stopPropagation(); onRestore(tile!.id); }}>{t("stage.restoreVideo")}</button></div> : tile ? <TrackVideo tile={tile} /> : <Avatar name={p.name} size="large" />}
+      {item.kind === "camera" && item.off && <div className="tile-window-actions" onClick={(event) => event.stopPropagation()}>
+        <button className="icon" title={t("stage.cameraOn")} aria-label={t("stage.cameraOn")} onClick={() => watch(true)}><Icon name="eye" /></button>
+      </div>}
       {tile && !popped && <div className="tile-window-actions" onClick={(event) => event.stopPropagation()}>
+        {!tile.isLocal && <button className="icon" title={t(item.kind === "screen" ? "stage.screenOff" : "stage.cameraOff")} aria-label={t(item.kind === "screen" ? "stage.screenOff" : "stage.cameraOff")} onClick={() => watch(false)}><Icon name="eye-off" /></button>}
         <button className="icon" title={t("stage.popout")} aria-label={t("stage.popout")} onClick={() => { setError(""); try { onPopout(tile, ref.current?.ownerDocument.defaultView ?? undefined); } catch (error) { setError(error instanceof Error ? error.message : t("stage.popupFailed")); } }}><Icon name="external-link" /></button>
         <FullscreenButton target={target} onError={setError} />
       </div>}
@@ -273,6 +309,7 @@ function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onResto
       <div className="tile-label">
         <span>{item.kind === "screen" && <><Icon name="monitor" /> </>}{p.isLocal ? `${p.name} ${t("members.you")}` : p.name}</span>
         {item.kind === "camera" && p.micMuted && <> <Icon name="mic-off" title={t("voice.micMuted")} /></>}
+        {item.kind === "camera" && item.off && <> <Icon name="eye-off" title={t("stage.cameraOffByMe")} /></>}
         {item.kind === "camera" && p.deafened && <> <Icon name="headphone-off" title={t("voice.deafened")} /></>}
         {item.kind === "screen" && tile?.hasAudio && <> {tile.isLocal || client.isScreenAudioListening(tile.id) ? <Icon name="volume-2" title={t("stage.withAudio")} /> : <Icon name="volume-x" title={t("stage.audioOnSelect")} />}</>}
         {pinned && <> <Icon name="pin" title={t("stage.pinned")} /></>}

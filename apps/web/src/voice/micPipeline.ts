@@ -71,6 +71,8 @@ export class MicPipeline {
   private analyser: AnalyserNode | null = null;
   private gain: GainNode | null = null;
   private dest: MediaStreamAudioDestinationNode | null = null;
+  /** Second output for listening to yourself (microphone test): behind the boost, before the gate. Survives a restart of the capture. */
+  private monitor: MediaStreamAudioDestinationNode | null = null;
   private samples = new Float32Array(1024);
   private timer: number | null = null;
   private gate: VoiceGate;
@@ -133,6 +135,8 @@ export class MicPipeline {
     this.autoGain = new AutoGain(this.rememberedGain);
     this.applyBoost(true);
     this.gain.connect(this.dest);
+    if (this.monitor && this.monitor.context !== this.ctx) this.monitor = null;
+    if (this.monitor) this.shaper.connect(this.monitor);
 
     this.gate.reset();
     this.timer = window.setInterval(() => this.tick(), 50);
@@ -153,7 +157,22 @@ export class MicPipeline {
   /** Keep the gate permanently open (e.g. a microphone test). */
   setForcedOpen(v: boolean) { this.forcedOpen = v; this.apply(); }
 
-  /** Boost settings (Einstellungen > Sprechen); takes effect at once. */
+  /**
+   * Microphone test: a stream of what the microphone delivers behind the boost, whatever the gate does; the published track
+   * is not touched (the VoiceClient mutes it meanwhile). null = the capture is not running. `false` ends it.
+   */
+  setMonitor(on: boolean): MediaStream | null {
+    if (!on) {
+      if (this.monitor) { try { this.shaper?.disconnect(this.monitor); } catch { /* was not connected */ } }
+      this.monitor = null;
+      return null;
+    }
+    if (!this.ctx || !this.shaper) return null;
+    if (!this.monitor) { this.monitor = this.ctx.createMediaStreamDestination(); this.shaper.connect(this.monitor); }
+    return this.monitor.stream;
+  }
+
+  /** Boost settings (Einstellungen > Sprache und Audio); takes effect at once. */
   setBoost(b: MicBoostSettings) { this.boost = { auto: b.auto, gain: clampBoost(b.gain) }; this.applyBoost(true); }
 
   /** Sets the boost's gain: learned (automatic) or by hand. The node gets gain / SOFT_CLIP_RANGE, see micBoost.ts. */
@@ -203,6 +222,7 @@ export class MicPipeline {
 
   async stop() {
     await this.stopCapture();
+    this.monitor = null;
     if (this.ownsCtx) await this.ctx?.close().catch(() => {});
     this.ctx = null;
   }

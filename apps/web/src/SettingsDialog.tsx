@@ -17,12 +17,11 @@ import { SOUND_CUES, type SoundCue, type SoundSettings } from "./voice/sounds";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 
-export type SettingsTab = "profile" | "view" | "voice" | "audio" | "camera" | "sounds" | "sessions" | "account" | "app" | "licenses";
+export type SettingsTab = "profile" | "view" | "voice" | "camera" | "sounds" | "sessions" | "account" | "app" | "licenses";
 const TABS: { id: SettingsTab; label: string; icon: string }[] = [
   { id: "profile", label: t("settings.tab.profile"), icon: "user" },
   { id: "view", label: t("settings.tab.view"), icon: "languages" },
   { id: "voice", label: t("settings.tab.voice"), icon: "mic" },
-  { id: "audio", label: t("settings.tab.audio"), icon: "headphones" },
   { id: "camera", label: t("settings.tab.camera"), icon: "video" },
   { id: "sounds", label: t("settings.tab.sounds"), icon: "bell" },
   { id: "sessions", label: t("settings.tab.sessions"), icon: "monitor-smartphone" },
@@ -46,7 +45,7 @@ const fmt = fmtDateTime;
 /**
  * All user and profile settings in one categorized modal (categories on the left), opened by the gear next to your name:
  * profile (display name on this server; with a directory account also the global name), view (language, speaker view),
- * speaking, audio devices, camera, sounds, sessions (devices signed in on this server, M6c), account (handle, key, link to
+ * voice and audio (microphone with its test, speaking, output devices), camera, sounds, sessions (devices signed in on this server, M6c), account (handle, key, link to
  * the directory's account page, sign out, discard identity) and licenses (our own and the third-party notices, LicensesTab.tsx). With a directory account everything except the device selection
  * is stored there (store.ts pushes every change); sessions and the name on this server belong to the server shown.
  */
@@ -104,6 +103,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
   const [idleDenied, setIdleDenied] = useState(false);
   const [devices, setDevices] = useState<{ inputs: MediaDeviceInfo[]; outputs: MediaDeviceInfo[]; cameras: MediaDeviceInfo[] }>({ inputs: [], outputs: [], cameras: [] });
   const [capturingKey, setCapturingKey] = useState(false);
+  const [testBusy, setTestBusy] = useState(false);
   const dirHost = directoryUrl ? new URL(directoryUrl).host : null;
   const joined = voice.status !== "disconnected";
   const inAccount = !!directoryUrl && !!directoryAccount;
@@ -131,6 +131,17 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
     window.addEventListener("keydown", handler, { once: true });
     return () => { window.removeEventListener("keydown", handler); onCapturingKey(false); };
   }, [capturingKey]);
+
+  // The microphone test ends with its tab and with the dialog.
+  useEffect(() => { if (tab !== "voice") void client.stopMicTest(); }, [tab, client]);
+  useEffect(() => () => { void client.stopMicTest(); }, [client]);
+  async function toggleMicTest() {
+    setTestBusy(true);
+    try {
+      if (voice.micTest) await client.stopMicTest(); else await client.startMicTest(settingsRef.current);
+      setErr(null);
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setTestBusy(false); }
+  }
 
   const loadSessions = useCallback(async () => {
     if (!api) return;
@@ -263,7 +274,27 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
 
             {tab === "voice" && (
               <>
-                <h3>{t("settings.tab.voice")}</h3>
+                <h3>{t("settings.input")}</h3>
+                <label className="stack">
+                  {t("settings.microphone")}
+                  <select value={voice.inputDeviceId ?? settings.inputDeviceId ?? ""}
+                    onChange={(e) => { const id = e.target.value || null; update({ inputDeviceId: id }); void client.setInputDevice(id); }}>
+                    <option value="">{t("settings.default")}</option>
+                    {devices.inputs.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId}</option>)}
+                  </select>
+                </label>
+                <div className="row">
+                  <button className="secondary" disabled={testBusy} aria-pressed={voice.micTest} onClick={() => void toggleMicTest()}><Icon name={voice.micTest ? "square" : "play"} /> {voice.micTest ? t("settings.micTestStop") : t("settings.micTest")}</button>
+                </div>
+                {voice.micTest && <p className="warn-box small" role="status">{joined && !voice.afkRoom ? t("settings.micTestRunningJoined") : t("settings.micTestRunning")}</p>}
+                {(joined || voice.micTest) && (
+                  <div className="meter" title={t("dock.micLevel")}>
+                    <div className="meter-fill" style={{ width: `${levelPct}%` }} />
+                    {settings.mode === "vad" && <div className="meter-threshold" style={{ left: `${thresholdPct}%` }} />}
+                  </div>
+                )}
+                <span className="muted small">{t("settings.micTestHint")}</span>
+                <h3>{t("settings.speaking")}</h3>
                 <div className="row">
                   <label className="check"><input type="radio" checked={settings.mode === "vad"} onChange={() => update({ mode: "vad" })} /> {t("settings.vad")}</label>
                   <label className="check"><input type="radio" checked={settings.mode === "ptt"} onChange={() => update({ mode: "ptt" })} /> {t("settings.ptt")}</label>
@@ -274,12 +305,6 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
                       {t("settings.threshold")}
                       <input type="range" min={0.005} max={0.25} step={0.005} value={settings.vadThreshold} onChange={(e) => update({ vadThreshold: Number(e.target.value) })} />
                     </label>
-                    {joined && (
-                      <div className="meter" title={t("dock.micLevel")}>
-                        <div className="meter-fill" style={{ width: `${levelPct}%` }} />
-                        <div className="meter-threshold" style={{ left: `${thresholdPct}%` }} />
-                      </div>
-                    )}
                     <label className="stack">
                       {t("settings.hangover", { ms: settings.vadHangoverMs })}
                       <input type="range" min={100} max={1500} step={50} value={settings.vadHangoverMs} onChange={(e) => update({ vadHangoverMs: Number(e.target.value) })} />
@@ -301,27 +326,13 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
                   </label>
                 )}
                 <span className="muted small">
-                  {joined && settings.micBoost.auto && !voice.afkRoom ? `${t("settings.micBoostNow", { pct: Math.round(voice.micBoost * 100) })} ` : ""}{t("settings.micBoostHint", { max: MIC_BOOST_MAX * 100 })}
+                  {(joined || voice.micTest) && settings.micBoost.auto && (!voice.afkRoom || voice.micTest) ? `${t("settings.micBoostNow", { pct: Math.round(voice.micBoost * 100) })} ` : ""}{t("settings.micBoostHint", { max: MIC_BOOST_MAX * 100 })}
                 </span>
-              </>
-            )}
-
-            {tab === "audio" && (
-              <>
-                <h3>{t("settings.input")}</h3>
-                <label className="stack">
-                  {t("settings.microphone")}
-                  <select value={voice.inputDeviceId ?? settings.inputDeviceId ?? ""}
-                    onChange={(e) => { const id = e.target.value || null; update({ inputDeviceId: id }); void client.setInputDevice(id); }}>
-                    <option value="">{t("settings.default")}</option>
-                    {devices.inputs.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId}</option>)}
-                  </select>
-                </label>
                 <h3>{t("settings.output")}</h3>
                 <label className="stack">
                   {t("settings.voiceOut")}
                   <select value={settings.outputDeviceId ?? ""} disabled={devices.outputs.length === 0}
-                    onChange={(e) => { const id = e.target.value || null; update({ outputDeviceId: id }); if (id) void client.setOutputDevice(id); }}>
+                    onChange={(e) => { const id = e.target.value || null; update({ outputDeviceId: id }); if (id) void client.setOutputDevice(id); void client.setMicTestOutput(id); }}>
                     <option value="">{t("settings.default")}</option>
                     {devices.outputs.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId}</option>)}
                   </select>

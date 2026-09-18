@@ -16,6 +16,8 @@
 .ic-crown::before { content: "\e1d6"; }
 .ic-download::before { content: "\e0b2"; }
 .ic-external-link::before { content: "\e0b9"; }
+.ic-eye::before { content: "\e0ba"; }
+.ic-eye-off::before { content: "\e0bb"; }
 .ic-flag::before { content: "\e0d1"; }
 .ic-grip-vertical::before { content: "\e0eb"; }
 .ic-hand::before { content: "\e1d7"; }
