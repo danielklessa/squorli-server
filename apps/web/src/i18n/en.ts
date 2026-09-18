@@ -16,6 +16,7 @@ export const en: Messages = {
   "common.dismiss": "Dismiss",
   "common.language": "Language",
   "lang.auto": "Browser language",
+  "lang.autoSystem": "System language",
   "lang.de": "Deutsch",
   "lang.en": "English",
 

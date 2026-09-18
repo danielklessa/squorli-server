@@ -17,6 +17,7 @@ export const de = {
   "common.dismiss": "Ausblenden",
   "common.language": "Sprache",
   "lang.auto": "Browsersprache",
+  "lang.autoSystem": "Systemsprache",
   "lang.de": "Deutsch",
   "lang.en": "English",
 

@@ -205,7 +205,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
               <>
                 <h3>{t("common.language")}</h3>
                 <select value={localePreference()} disabled={busy} onChange={(e) => void changeLocale(e.target.value as LocalePreference)}>
-                  <option value="auto">{t("lang.auto")}</option>
+                  <option value="auto">{t(platform.kind === "desktop" ? "lang.autoSystem" : "lang.auto")}</option>
                   {LOCALES.map((l) => <option key={l} value={l}>{t(`lang.${l}`)}</option>)}
                 </select>
                 <span className="muted small">{t("profile.languageHint")}</span>
