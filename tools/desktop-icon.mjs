@@ -26,5 +26,11 @@ writeFileSync(page, `<!doctype html><meta charset="utf-8"><style>
 </style><div class="tile">${svg.replace(/<\?xml[^>]*\?>/, "")}</div>`);
 mkdirSync(dirname(out), { recursive: true });
 execFileSync(chrome, ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--default-background-color=00000000", `--window-size=${SIZE},${SIZE}`, `--screenshot=${out}`, pathToFileURL(page).href], { stdio: "ignore" });
+// Tray icon: the brand's small mark (the variant for sizes below 32 px), transparent, 64 px; the app scales it to the tray's size.
+const tray = join(root, "apps/desktop/build/tray.png");
+const small = readFileSync(join(root, "docs/brand/squorli-icon-small.svg"), "utf8");
+const trayPage = join(work, "tray.html");
+writeFileSync(trayPage, `<!doctype html><meta charset="utf-8"><style>html, body { margin: 0; width: 64px; height: 64px; background: transparent; overflow: hidden; } svg { width: 64px; height: 64px; display: block; }</style>${small.replace(/<\?xml[^>]*\?>/, "")}`);
+execFileSync(chrome, ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--default-background-color=00000000", "--window-size=64,64", `--screenshot=${tray}`, pathToFileURL(trayPage).href], { stdio: "ignore" });
 rmSync(work, { recursive: true, force: true });
-console.log(`[desktop-icon] ${out}`);
+console.log(`[desktop-icon] ${out}\n[desktop-icon] ${tray}`);

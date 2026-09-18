@@ -160,6 +160,8 @@ export class VoiceClient {
   private readonly audioHost: HTMLElement;
   private readonly remoteAudio = new Map<RemoteTrack, { element: HTMLMediaElement; identity: string }>();
   private readonly videoAudioHosts = new Map<string, HTMLElement>();
+  /** Screen tiles whose audio the user listens to, with the reasons why (selected in the stage, popped out); see setScreenAudioListening. */
+  private readonly screenListening = new Map<string, Set<string>>();
   private readonly listeners = new Set<(s: VoiceState) => void>();
   state: VoiceState = {
     status: "disconnected", channelId: null, afkRoom: false, participants: [], micMuted: false, deafened: false, gateOpen: false, level: 0,
@@ -334,7 +336,14 @@ export class VoiceClient {
         this.log(`beendet ${pub.source}`);
         this.applyVideoAccess();
         // Also end up here when the browser itself stops the share (the "stop sharing" bar).
-        if (pub.source === Track.Source.ScreenShare) this.patch({ screenOn: false, screenAudio: null });
+        if (pub.source === Track.Source.ScreenShare) {
+          this.patch({ screenOn: false, screenAudio: null });
+          // Audio the platform captured itself (desktop app) was published by us, so its end is ours too, also when the
+          // share ended by itself (the shared window closed).
+          this.media?.stopScreenAudio();
+          const audio = this.room?.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio)?.track;
+          if (audio) void this.room?.localParticipant.unpublishTrack(audio).catch(() => {});
+        }
         if (pub.source === Track.Source.Camera) this.patch({ cameraOn: false });
         this.refreshTiles();
       })
@@ -417,6 +426,7 @@ export class VoiceClient {
     for (const { element } of this.remoteAudio.values()) element.remove();
     this.remoteAudio.clear();
     this.videoAudioHosts.clear();
+    this.screenListening.clear();
     this.audioHost.replaceChildren();
     this.micMutedByUser = false;
     this.patch({ status: "disconnected", channelId: null, afkRoom: false, participants: [], gateOpen: false, level: 0, micMuted: false, deafened: false, inputDeviceId: null, cameraOn: false, screenOn: false, screenAudio: null, tiles: [] });
@@ -578,6 +588,13 @@ export class VoiceClient {
         contentHint: "detail",
         resolution: ScreenSharePresets.h1080fps30.resolution,
       } : undefined, on ? { simulcast: false, videoEncoding: ScreenSharePresets.h1080fps30.encoding, ...this.media?.screenSharePublishOverrides() } : undefined);
+      // Desktop app on Windows: the shell captured the audio itself (one window's, or the system's without the app); it becomes
+      // the share's audio track. Stereo without DTX: it is programme material, not speech.
+      const captured = on && room.localParticipant.isScreenShareEnabled ? await this.media?.takeScreenAudio() ?? null : null;
+      if (captured && !room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio)) {
+        await room.localParticipant.publishTrack(captured, { source: Track.Source.ScreenShareAudio, dtx: false, red: false, forceStereo: true, audioPreset: { maxBitrate: 128_000 } });
+      }
+      if (!on) this.media?.stopScreenAudio();
       const hasAudio = on && !!room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio);
       this.patch({ screenOn: on && room.localParticipant.isScreenShareEnabled, screenAudio: on ? hasAudio : null, error: null });
       if (on) this.log(hasAudio ? "bildschirm mit ton" : "bildschirm ohne ton");
@@ -737,7 +754,7 @@ export class VoiceClient {
   async setDeafened(on: boolean): Promise<void> {
     if (this.state.afkRoom) return;
     this.patch({ deafened: on });
-    for (const { element } of this.remoteAudio.values()) element.muted = on;
+    this.applyAudioMuted();
     this.applyUserVolumes(); // the boosted path (above 100 %) bypasses the elements and is silenced there
     await this.applyMic();
     await this.room?.localParticipant.setAttributes({ deafened: on ? "1" : "" }).catch(() => {});
@@ -855,6 +872,33 @@ export class VoiceClient {
     return { path, sender, receivers, videoSend, videoRecv };
   }
 
+  // ---------- A share's audio plays only for who chose to watch that share (user's requirement, 18 September 2026)
+  /**
+   * Nobody in the channel is made to hear a screen share's audio: it plays only while the user has that share selected in
+   * the stage or popped out (`reason` = who asks: "stage", "popout"; several may hold it). While nobody listens the track
+   * is also disabled at LiveKit, so it costs no bandwidth.
+   */
+  setScreenAudioListening(tileId: string, reason: string, on: boolean): void {
+    const reasons = this.screenListening.get(tileId) ?? new Set<string>();
+    if (on === reasons.has(reason)) return;
+    if (on) reasons.add(reason); else reasons.delete(reason);
+    if (reasons.size) this.screenListening.set(tileId, reasons); else this.screenListening.delete(tileId);
+    this.applyScreenListening(tileId.slice(0, -":screen".length));
+    this.patch({});
+  }
+  isScreenAudioListening(tileId: string): boolean { return this.screenListening.has(tileId); }
+  private audioMuted(track: RemoteTrack, identity: string): boolean {
+    return this.state.deafened || (track.source === Track.Source.ScreenShareAudio && !this.screenListening.has(`${identity}:screen`));
+  }
+  private applyAudioMuted(): void {
+    for (const [track, { element, identity }] of this.remoteAudio) element.muted = this.audioMuted(track, identity);
+  }
+  private applyScreenListening(identity: string): void {
+    this.applyAudioMuted();
+    const pub = this.room?.remoteParticipants.get(identity)?.getTrackPublication(Track.Source.ScreenShareAudio);
+    pub?.setEnabled(this.screenListening.has(`${identity}:screen`));
+  }
+
   /** Move the existing audio element, preserving LiveKit volume/sink management and avoiding duplicate playback. */
   setVideoAudioHost(tileId: string, host: HTMLElement): () => void {
     this.videoAudioHosts.set(tileId, host);
@@ -872,7 +916,7 @@ export class VoiceClient {
       const host = this.videoAudioHosts.get(identity + ":" + kind) ?? this.audioHost;
       if (element.parentElement === host) continue;
       host.appendChild(element);
-      element.muted = this.state.deafened;
+      element.muted = this.audioMuted(track, identity);
       void element.play().catch(() => this.patch({ canPlayback: false }));
     }
   }
@@ -880,8 +924,9 @@ export class VoiceClient {
   private attachRemote(track: RemoteTrack, identity: string) {
     if (track.kind !== Track.Kind.Audio) return;
     const el = track.attach();
-    el.muted = this.state.deafened; // deafening also applies to tracks that arrive later
+    el.muted = this.audioMuted(track, identity); // deafening and "not listening to this share" also apply to tracks that arrive later
     this.remoteAudio.set(track, { element: el, identity });
+    if (track.source === Track.Source.ScreenShareAudio) this.applyScreenListening(identity);
     this.routeVideoAudio();
     if (track.source === Track.Source.ScreenShareAudio) void this.applyScreenSink();
     if (track.source === Track.Source.Microphone) this.addMeter(identity, track.mediaStreamTrack);

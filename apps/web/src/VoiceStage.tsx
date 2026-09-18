@@ -100,6 +100,15 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
   const screenHint = explainScreenAudio(voice);
   const grid = useFittedGrid(items.length);
 
+  // A share's audio plays only for who selected that share (clicked it large) or popped it out (VideoWindows.tsx); a share
+  // that merely moved into focus by itself stays silent. Leaving the stage ends the listening.
+  const screenIds = voice.tiles.filter((tile) => tile.source === "screen" && !tile.isLocal).map((tile) => tile.id).join(" ");
+  useEffect(() => {
+    const ids = screenIds ? screenIds.split(" ") : [];
+    for (const id of ids) client.setScreenAudioListening(id, "stage", layout === "focus" && pinned === id);
+    return () => { for (const id of ids) client.setScreenAudioListening(id, "stage", false); };
+  }, [client, screenIds, layout, pinned]);
+
   // Click a tile: show it large. Click the large tile: back to the tiles.
   const focusOn = (key: string) => { setPinned(key); setLayout("focus"); };
   const unfocus = () => { setPinned(null); setLayout("grid"); };
@@ -231,6 +240,15 @@ function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onResto
   const [error, setError] = useState("");
   const hasAudioControls = item.kind === "screen" && !!tile && !tile.isLocal && client.getVideoAudioVolume(tile.id) !== null;
   const popped = !!tile && poppedIds.has(tile.id);
+  // A share shown in fullscreen counts as selected, also from a small tile: its audio plays (voiceClient.setScreenAudioListening).
+  const listenId = item.kind === "screen" && tile && !tile.isLocal ? tile.id : null;
+  useEffect(() => {
+    const doc = ref.current?.ownerDocument;
+    if (!listenId || !doc) return;
+    const update = () => client.setScreenAudioListening(listenId, "fullscreen", doc.fullscreenElement === ref.current);
+    update(); doc.addEventListener("fullscreenchange", update);
+    return () => { doc.removeEventListener("fullscreenchange", update); client.setScreenAudioListening(listenId, "fullscreen", false); };
+  }, [client, listenId]);
   const cls = ["tile", item.kind, hasAudioControls ? "has-volume" : "", p.speaking && item.kind === "camera" ? "speaking" : "", big ? "big" : "", tile && !popped ? "" : "avatar"].join(" ");
   return (
     <div ref={ref} className={cls} onClick={() => { if (!ref.current?.ownerDocument.fullscreenElement) onClick(); }} onContextMenu={(event) => onMenu(item, event)} title={big ? t("stage.backToGrid") : t("stage.enlarge")}>
@@ -244,7 +262,7 @@ function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onResto
         <span>{item.kind === "screen" && <><Icon name="monitor" /> </>}{p.isLocal ? `${p.name} ${t("members.you")}` : p.name}</span>
         {item.kind === "camera" && p.micMuted && <> <Icon name="mic-off" title={t("voice.micMuted")} /></>}
         {item.kind === "camera" && p.deafened && <> <Icon name="headphone-off" title={t("voice.deafened")} /></>}
-        {item.kind === "screen" && tile?.hasAudio && <> <Icon name="volume-2" title={t("stage.withAudio")} /></>}
+        {item.kind === "screen" && tile?.hasAudio && <> {tile.isLocal || client.isScreenAudioListening(tile.id) ? <Icon name="volume-2" title={t("stage.withAudio")} /> : <Icon name="volume-x" title={t("stage.audioOnSelect")} />}</>}
         {pinned && <> <Icon name="pin" title={t("stage.pinned")} /></>}
       </div>
       {hasAudioControls && tile && <VideoAudioControls client={client} tile={tile} />}

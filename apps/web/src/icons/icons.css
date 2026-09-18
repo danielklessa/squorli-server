@@ -33,6 +33,7 @@
 .ic-mic::before { content: "\e118"; }
 .ic-mic-off::before { content: "\e119"; }
 .ic-minimize::before { content: "\e11a"; }
+.ic-minus::before { content: "\e11c"; }
 .ic-monitor::before { content: "\e11d"; }
 .ic-monitor-smartphone::before { content: "\e3a6"; }
 .ic-moon::before { content: "\e11e"; }

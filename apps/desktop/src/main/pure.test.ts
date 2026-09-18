@@ -1,10 +1,12 @@
 import { join, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CONTENT_SECURITY_POLICY, contentTypeOf, resolveAppFile } from "./appFiles";
-import { normalizeAppearance, supportedMaterials } from "./appearance";
+import { appearanceState, normalizeAppearance, supportedMaterials } from "./appearance";
+import { hwndOfHandle, hwndOfSource } from "./captureSource";
 import { findDeepLink } from "./deepLinkArgs";
 import { isAllowedExternal, windowOpenDecision } from "./navigation";
 import { desktopUserAgent } from "./userAgent";
+import { restoreWindowState } from "./windowState";
 
 const root = join(sep === "\\" ? "C:\\app" : "/app", "renderer");
 
@@ -51,19 +53,53 @@ describe("desktopUserAgent", () => {
 });
 
 describe("appearance", () => {
-  it("offers materials on Windows 11 22H2 and later only", () => {
-    expect(supportedMaterials("win32", "10.0.26200")).toEqual(["mica", "acrylic"]);
-    expect(supportedMaterials("win32", "10.0.22621")).toEqual(["mica", "acrylic"]);
-    expect(supportedMaterials("win32", "10.0.19045")).toEqual([]);
-    expect(supportedMaterials("linux", "6.8.0")).toEqual([]);
+  it("offers mica on Windows 11 22H2 and later, a see-through window on Windows and Linux", () => {
+    expect(supportedMaterials("win32", "10.0.26200")).toEqual(["mica", "clear"]);
+    expect(supportedMaterials("win32", "10.0.22621")).toEqual(["mica", "clear"]);
+    expect(supportedMaterials("win32", "10.0.19045")).toEqual(["clear"]);
+    expect(supportedMaterials("linux", "6.8.0")).toEqual(["clear"]);
+    expect(supportedMaterials("darwin", "24.0.0")).toEqual([]);
   });
   it("turns whatever was stored into a valid appearance", () => {
     const all = supportedMaterials("win32", "10.0.26200");
-    expect(normalizeAppearance({ material: "acrylic", opacity: 0.75 }, all)).toEqual({ material: "acrylic", opacity: 0.75 });
-    expect(normalizeAppearance({ material: "acrylic", opacity: 0.1 }, all)).toEqual({ material: "acrylic", opacity: 0.4 });
-    expect(normalizeAppearance({ material: "acrylic", opacity: 7 }, [])).toEqual({ material: "none", opacity: 1 });
-    expect(normalizeAppearance({ material: "tabbed", opacity: "x" }, all)).toEqual({ material: "none", opacity: 1 });
-    for (const v of [null, undefined, 5, "acrylic", []]) expect(normalizeAppearance(v, all)).toEqual({ material: "none", opacity: 1 });
+    expect(normalizeAppearance({ material: "clear", opacity: 0.75 }, all)).toEqual({ material: "clear", opacity: 0.75 });
+    expect(normalizeAppearance({ material: "mica", opacity: 0.1 }, all)).toEqual({ material: "mica", opacity: 0.4 });
+    expect(normalizeAppearance({ material: "mica", opacity: 7 }, ["clear"])).toEqual({ material: "none", opacity: 1 });
+    expect(normalizeAppearance({ material: "acrylic", opacity: "x" }, all)).toEqual({ material: "none", opacity: 1 });
+    for (const v of [null, undefined, 5, "clear", []]) expect(normalizeAppearance(v, all)).toEqual({ material: "none", opacity: 1 });
+  });
+  it("knows what the running window shows and when a restart is pending", () => {
+    expect(appearanceState({ material: "mica", opacity: 0.8 }, false, "none")).toEqual({ appearance: { material: "mica", opacity: 0.8 }, effective: "mica", needsRestart: false });
+    expect(appearanceState({ material: "clear", opacity: 0.8 }, false, "mica")).toEqual({ appearance: { material: "clear", opacity: 0.8 }, effective: "mica", needsRestart: true });
+    expect(appearanceState({ material: "clear", opacity: 0.8 }, true, "clear")).toEqual({ appearance: { material: "clear", opacity: 0.8 }, effective: "clear", needsRestart: false });
+    expect(appearanceState({ material: "none", opacity: 1 }, true, "clear")).toEqual({ appearance: { material: "none", opacity: 1 }, effective: "clear", needsRestart: true });
+  });
+});
+
+describe("restoreWindowState", () => {
+  const main = { x: 0, y: 0, width: 1920, height: 1040 }, left = { x: -2560, y: 0, width: 2560, height: 1400 };
+  it("reopens where the window was, also on a display left of the main one", () => {
+    expect(restoreWindowState({ bounds: { x: 100, y: 80, width: 1300, height: 800 }, maximized: false }, [main])).toEqual({ bounds: { x: 100, y: 80, width: 1300, height: 800 }, maximized: false });
+    expect(restoreWindowState({ bounds: { x: -2000, y: 200, width: 1300, height: 800 }, maximized: true }, [main, left])).toEqual({ bounds: { x: -2000, y: 200, width: 1300, height: 800 }, maximized: true });
+  });
+  it("falls back to the default place when the display is gone or the title bar would be out of reach", () => {
+    expect(restoreWindowState({ bounds: { x: -2000, y: 200, width: 1300, height: 800 } }, [main])).toBeNull();
+    expect(restoreWindowState({ bounds: { x: 100, y: -400, width: 1300, height: 800 } }, [main])).toBeNull();
+    expect(restoreWindowState({ bounds: { x: 1900, y: 100, width: 1300, height: 800 } }, [main])).toBeNull();
+  });
+  it("clamps the size to the display and survives rubbish", () => {
+    expect(restoreWindowState({ bounds: { x: 0, y: 0, width: 5000, height: 100 } }, [main])).toEqual({ bounds: { x: 0, y: 0, width: 1920, height: 480 }, maximized: false });
+    for (const v of [null, undefined, 3, "x", {}, { bounds: { x: "1", y: 0, width: 1, height: 1 } }, { bounds: { x: NaN, y: 0, width: 800, height: 600 } }]) expect(restoreWindowState(v, [main])).toBeNull();
+  });
+});
+
+describe("captureSource", () => {
+  it("reads the window handle of a source id and of Electron's handle buffer", () => {
+    expect(hwndOfSource("window:1312345:0")).toBe("1312345");
+    expect(hwndOfSource("screen:0:0")).toBeNull();
+    for (const id of ["window:abc:0", "window:12", "window:1 --x:0", ""]) expect(hwndOfSource(id), id).toBeNull();
+    expect(hwndOfHandle(Uint8Array.from([0x59, 0x06, 0x14, 0x00, 0, 0, 0, 0]))).toBe(String(0x140659));
+    expect(hwndOfHandle(Uint8Array.from([0x39, 0x30, 0, 0]))).toBe("12345");
   });
 });
 

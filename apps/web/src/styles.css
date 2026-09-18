@@ -28,13 +28,15 @@
   --head-h: 4.5rem;                    /* shared height of the headers (sidebar, chat, stage) */
   --r-panel: var(--sq-radius-panel, 20px);
   --u: var(--sq-space-unit, 4px);
+  --gap: calc(var(--u) * 1.5);         /* between the areas (rail, channels, main, members); half of the former 12 px (user's wish) */
 }
-/* Desktop app with a window material (mica/acrylic, platform/desktop.ts sets data-material and --win-alpha): the page lets the
-   system's material through. The big surfaces take the chosen opacity, panels keep more of it so text stays readable; everything
-   that floats (dialogs, menus) and every raised surface (--bg4) stays opaque. Contrast over a material is the user's choice:
-   the brand's measured pairs hold for opaque colors only (docs/brand/AGENTS.md). */
+/* Desktop app with a window background (platform/desktop.ts sets data-material = "mica" or "clear" and --win-alpha): the page
+   lets what is behind it through: Windows' mica, or with "clear" (a really see-through window) the desktop itself in the gaps
+   between the areas. The big surfaces take the chosen opacity, panels keep more of it so text stays readable; everything that
+   floats (dialogs, menus) and every raised surface (--bg4) stays opaque. Contrast over a background is the user's choice: the
+   brand's measured pairs hold for opaque colors only (docs/brand/AGENTS.md). */
 html[data-material] body { background: transparent; }
-html[data-material] .app, html[data-material] .login {
+html[data-material] #root {
   --bg: color-mix(in srgb, var(--sq-night, #0C1424) calc(var(--win-alpha, 1) * 100%), transparent);
   --bg3: color-mix(in srgb, var(--sq-night, #0C1424) calc(var(--win-alpha, 1) * 100%), transparent);
   --bg2: color-mix(in srgb, var(--sq-surface, #162238) calc((var(--win-alpha, 1) * 0.5 + 0.5) * 100%), transparent);
@@ -42,7 +44,35 @@ html[data-material] .app, html[data-material] .login {
 html[data-material] .modal-backdrop, html[data-material] .rail-menu, html[data-material] .login-card {
   --bg: var(--sq-night, #0C1424); --bg2: var(--sq-surface, #162238); --bg3: var(--sq-night, #0C1424);
 }
+/* With a window background the rail becomes an area of its own too (rounded, with the gap), like the others. */
+html[data-material] .rail { margin: var(--gap) 0 var(--gap) var(--gap); border-radius: var(--r-panel); }
+
+/* Desktop app: own title bar (TitleBar.tsx) above the client; the window has no system frame. The bar drags the window, its
+   buttons do not. Overlays start below it, so the window can always be moved, minimized and closed. */
+html[data-desktop] { --titlebar-h: calc(2rem + var(--gap)); }
+html[data-desktop] #root { display: flex; flex-direction: column; }
+html[data-desktop] .app { flex: 1; min-height: 0; height: auto; }
+html[data-desktop] .login { flex: 1; min-height: 0; overflow-y: auto; }
+.titlebar { flex: none; height: 2rem; margin: var(--gap) var(--gap) 0; display: flex; align-items: center; gap: 0.5rem; padding-left: 0.75rem; border-radius: var(--r); background: var(--bg2); color: var(--muted); font-size: 0.8125rem; font-weight: 600; user-select: none; overflow: hidden; -webkit-app-region: drag; }
+.titlebar-mark { flex: none; }
+.titlebar-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.titlebar.inactive .titlebar-mark, .titlebar.inactive .titlebar-title { opacity: 0.55; }
+.titlebar-buttons { display: flex; height: 100%; flex: none; -webkit-app-region: no-drag; }
+button.titlebar-btn { width: 2.75rem; height: 100%; padding: 0; border-radius: 0; background: transparent; color: var(--muted); display: grid; place-items: center; font-size: 0.95rem; }
+button.titlebar-btn:hover { background: var(--bg4); color: var(--text); }
+button.titlebar-btn.close:hover { background: var(--danger); color: var(--on-light); }
+button.titlebar-btn:focus-visible { outline-offset: -3px; }
 * { box-sizing: border-box; }
+/* Scrollbars in the client's look (user's wish, 18 September 2026): slim, rounded thumb with air around it, no track, no arrows.
+   Chromium (browser and desktop app) through the ::-webkit pseudo elements, which the standard properties would switch off;
+   everything else (Firefox) through the standard properties. */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--muted) 32%, transparent); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; min-height: 2.5rem; }
+::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--muted) 58%, transparent); }
+::-webkit-scrollbar-thumb:active { background-color: var(--brand); }
+::-webkit-scrollbar-button { display: none; }
+@supports not selector(::-webkit-scrollbar) { * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent; } }
 html, body, #root { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); }
 :focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
@@ -96,8 +126,19 @@ h4 { font-size: 0.875rem; font-weight: 600; color: var(--muted); padding: 0 0.5r
 .invite-preview { background: var(--bg); padding: 0.6rem 0.9rem; border-radius: var(--r); }
 
 /* Layout */
-.app { height: 100%; display: grid; grid-template-columns: 17rem minmax(0, 1fr) 15rem; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
-.app.with-rail { grid-template-columns: 5rem 17rem minmax(0, 1fr) 15rem; }
+/* --left-w / --members-w: the side columns' widths, dragged by the user (layout.ts, ColumnHandle.tsx); App.tsx sets them. */
+.app { height: 100%; display: grid; grid-template-columns: var(--left-w, 17rem) minmax(0, 1fr) var(--members-w, 15rem); grid-template-rows: minmax(0, 1fr); overflow: hidden; position: relative; }
+.app.with-rail { grid-template-columns: 5rem var(--left-w, 17rem) minmax(0, 1fr) var(--members-w, 15rem); }
+/* Drag handle over the gap next to a side column. Absolutely placed grid children take no cell; their grid column is the
+   containing block. It is wider than the gap so it is easy to hit, and shows a line on hover, focus and while dragging. */
+.col-handle { position: absolute; top: calc(var(--gap) + var(--r-panel)); bottom: calc(var(--gap) + var(--r-panel)); width: calc(var(--gap) + 6px); cursor: col-resize; z-index: 3; touch-action: none; border-radius: 3px; }
+.col-handle::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--brand); opacity: 0; transition: opacity .12s; }
+.col-handle:hover::after, .col-handle:active::after, .col-handle:focus-visible::after { opacity: 1; }
+.col-handle:focus-visible { outline: none; }
+/* Start AND end line: for an absolutely placed grid child an open end means the container's edge, not the next line. */
+.col-handle.for-left { grid-column: 1 / 2; right: -3px; }
+.app.with-rail .col-handle.for-left { grid-column: 2 / 3; }
+.col-handle.for-members { grid-column: -2 / -1; left: -3px; }
 /* Server rail (M6d): the servers of your own handle according to the directory, current server highlighted */
 .rail { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 1.25rem 0; background: var(--bg); overflow-y: auto; min-height: 0; }
 .rail-item { position: relative; width: 3rem; height: 3rem; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--bg2); color: var(--text); text-decoration: none; transition: border-radius 0.12s, background 0.12s; flex: none; }
@@ -122,7 +163,7 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 .rail-menu-head { word-break: break-all; }
 .rail-menu button { justify-content: flex-start; }
 .rail-badge { position: absolute; right: -4px; bottom: -4px; min-width: 1.1rem; height: 1.1rem; padding: 0 0.3rem; border-radius: 999px; background: var(--danger); color: var(--on-dark); font-size: 0.7rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; border: 2px solid var(--bg); }
-.app.home { grid-template-columns: 5rem 17rem minmax(0, 1fr); }
+.app.home { grid-template-columns: 5rem var(--left-w, 17rem) minmax(0, 1fr); }
 .home-side { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .home-search { display: flex; align-items: center; gap: 0.2rem; padding: 0.5rem 0.6rem 0; }
 .home-search input { flex: 1; min-width: 0; }
@@ -146,10 +187,11 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 .browser-item .grow p { margin: 0.15rem 0 0; }
 .link-btn { display: inline-block; background: var(--accent); color: var(--on-dark); font-weight: 600; padding: calc(var(--u) * 2) calc(var(--u) * 4); border-radius: var(--r); text-decoration: none; }
 .rail-empty { padding-top: 0.4rem; }
-.left { margin: 0.75rem; border-radius: var(--r-panel); overflow: hidden; min-width: 0; display: flex; flex-direction: column; background: var(--bg2); min-height: 0; }
-.main { border: 1px solid var(--line); border-radius: var(--r-panel); margin: 0.75rem 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; position: relative; background: var(--bg3); }
-.members-col { background: var(--bg); overflow-y: auto; padding: 1.25rem 0.75rem; font-size: 0.95rem; }
-@media (max-width: 900px) { .app { grid-template-columns: 13rem minmax(0, 1fr); } .members-col { display: none; } }
+.left { margin: var(--gap); border-radius: var(--r-panel); overflow: hidden; min-width: 0; display: flex; flex-direction: column; background: var(--bg2); min-height: 0; }
+.main { border: 1px solid var(--line); border-radius: var(--r-panel); margin: var(--gap) 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; position: relative; background: var(--bg3); }
+/* An area of its own like the channel list: panel colour, rounded, with the same gap to the main area and the window's edge. */
+.members-col { margin: var(--gap); border-radius: var(--r-panel); background: var(--bg2); overflow-y: auto; padding: 1.25rem 0.75rem; font-size: 0.95rem; min-width: 0; }
+@media (max-width: 900px) { .app { grid-template-columns: 13rem minmax(0, 1fr); } .members-col, .col-handle { display: none; } }
 
 /* Sidebar */
 .sidebar { flex: 1; overflow-y: auto; min-height: 0; }
@@ -203,6 +245,8 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 /* Dock */
 .dock { background: var(--bg); border-top: 1px solid var(--line); }
 .dock > .dock-row { padding: 0.5rem 0.6rem; }
+/* A message after the voice connection ended (e.g. "Getrennt: ...") sits directly in the dock: keep it off the edges. */
+.dock > .error { margin: 0; padding: 0.625rem 0.75rem 0.25rem; overflow-wrap: anywhere; }
 /* Voice connection: its own area with status, level and quick actions above the name row */
 .dock-voice { padding: 0.875rem; font-size: 0.875rem; border-bottom: 1px solid var(--line); background: var(--bg2); }
 .dock-status { display: flex; align-items: center; gap: 0.75rem; }
@@ -382,7 +426,7 @@ button.dock-stage:hover { background: var(--sel); }
 .presence.on { background: var(--ok); }
 
 /* Modal */
-.modal-backdrop { position: fixed; inset: 0; background: rgba(4,8,18,.7); display: grid; place-items: center; z-index: 10; padding: 1rem; }
+.modal-backdrop { position: fixed; inset: var(--titlebar-h, 0px) 0 0 0; background: rgba(4,8,18,.7); display: grid; place-items: center; z-index: 10; padding: 1rem; }
 .modal { background: var(--bg2); border-radius: var(--r-panel); width: min(56rem, 100%); max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 16px 48px rgba(0,0,0,.45); }
 .small-modal { width: min(28rem, 100%); padding: 1.25rem 1.5rem 1.5rem; }
 .modal-head { display: flex; align-items: center; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--line); }

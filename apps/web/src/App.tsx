@@ -1,5 +1,5 @@
 import { useVideoWindows } from "./VideoWindows";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { AdminPanel } from "./AdminPanel";
 import { ChatView } from "./ChatView";
 import { DebugPanel } from "./DebugPanel";
@@ -20,8 +20,11 @@ import { applyBranding } from "./branding";
 import { ServerBrowser } from "./ServerBrowser";
 import { ServerRail } from "./ServerRail";
 import { buildRailServers } from "./railServers";
+import { ColumnHandle } from "./ColumnHandle";
+import { loadLayout, saveLayout, type ColumnId, type Layout } from "./layout";
 import { NoServers } from "./NoServers";
 import { ScreenPicker } from "./ScreenPicker";
+import { TitleBar } from "./TitleBar";
 import { loadVoiceSettings, saveVoiceSettings } from "./voice/settings";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
 import { Permission, directoryServerIconUrl, directoryServerUrl, displayNameOf, hasPermission, type Member } from "@squorli/protocol";
@@ -57,6 +60,9 @@ export function App() {
   /** Stage (tiles/screen) instead of chat in the main area; voice keeps running independently. */
   const [stageOpen, setStageOpen] = useState(false);
   const [showBrowser, setShowBrowser] = useState(false);
+  /** Widths of the two side columns, dragged by the user; kept per device (layout.ts). */
+  const [layout, setLayout] = useState<Layout>(loadLayout);
+  const resizeColumn = (column: ColumnId, width: number, keep: boolean) => setLayout((prev) => { const next = { ...prev, [column]: width }; if (keep) saveLayout(next); return next; });
   const voiceSettings = useVoiceSettings();
   /** Camera picker open (list of cameras) when there is more than one at switch-on time. */
   const [cameraPick, setCameraPick] = useState<MediaDeviceInfo[] | null>(null);
@@ -65,9 +71,9 @@ export function App() {
    * only joining a voice channel on another server ends it (as the user specified).
    */
   /** Desktop app: the shell asks which screen or window to share (ScreenPicker.tsx); a browser has its own picker. */
-  const [screenPick, setScreenPick] = useState<{ sources: ScreenSource[]; canShareAudio: boolean; resolve: (pick: ScreenPick | null) => void } | null>(null);
+  const [screenPick, setScreenPick] = useState<{ sources: ScreenSource[]; resolve: (pick: ScreenPick | null) => void } | null>(null);
   useEffect(() => {
-    platform.screen.setPicker((sources, canShareAudio) => new Promise((resolve) => setScreenPick((open) => { open?.resolve(null); return { sources, canShareAudio, resolve }; })));
+    platform.screen.setPicker((sources) => new Promise((resolve) => setScreenPick((open) => { open?.resolve(null); return { sources, resolve }; })));
     return () => platform.screen.setPicker(null);
   }, []);
   // Desktop app: a `squorli://` link from a browser. The store shows the server (or keeps the link until after the login).
@@ -262,7 +268,7 @@ export function App() {
 
   // With a home server the client hangs off the session there; without one (desktop app) it has a login of its own.
   const homeless = state.homeHost === null;
-  if (homeless ? !state.signedIn : !home?.server || !home.me || !home.userId) return homeless ? <DesktopLogin store={store} state={state} /> : <LoginScreen store={store} state={state} />;
+  if (homeless ? !state.signedIn : !home?.server || !home.me || !home.userId) return <><TitleBar title="Squorli" />{homeless ? <DesktopLogin store={store} state={state} /> : <LoginScreen store={store} state={state} />}</>;
 
   const server = active?.server ?? null;
   /** The server on screen with its connection; null = none is shown (connecting, join view, or no server at all). */
@@ -319,7 +325,11 @@ export function App() {
   };
 
   return (
-    <div className={`app ${showRail ? "with-rail" : ""} ${homeOpen ? "home" : ""} ${navigationOpen ? "navigation-open" : ""}`}>
+    <>
+    <TitleBar title={title} />
+    <div className={`app ${showRail ? "with-rail" : ""} ${homeOpen ? "home" : ""} ${navigationOpen ? "navigation-open" : ""}`} style={{ "--left-w": `${layout.left}px`, "--members-w": `${layout.members}px` } as CSSProperties}>
+      <ColumnHandle column="left" width={layout.left} label={t("layout.resizeLeft")} onChange={(w) => resizeColumn("left", w, false)} onCommit={(w) => resizeColumn("left", w, true)} />
+      {!homeOpen && view && <ColumnHandle column="members" width={layout.members} label={t("layout.resizeMembers")} onChange={(w) => resizeColumn("members", w, false)} onCommit={(w) => resizeColumn("members", w, true)} />}
       {videoWindows.windows}
       {embedSource && channelRadio && <EmbedPlayer source={embedSource} name={channelRadio.name} volume={radioState.volume} muted={voice.deafened} popout={playerWindow} sync={embedSync} onNotice={(text) => client.setNotice(text)} />}
       <button className="mobile-navigation secondary" aria-expanded={navigationOpen} aria-controls="app-navigation" onClick={() => setNavigationOpen((open) => !open)}><Icon name={navigationOpen ? "x" : "hash"} />{t("app.navigation")}</button>
@@ -374,7 +384,7 @@ export function App() {
         voice={view.active.voice} channels={view.server.channels} friends={friendsMenu} client={client} />}
 
       {showAdmin && view && <AdminPanel api={view.conn.api} server={view.server} myUserId={view.active.userId!} directoryUrl={view.active.directoryUrl} onClose={() => setShowAdmin(false)} />}
-      {screenPick && <ScreenPicker sources={screenPick.sources} canShareAudio={screenPick.canShareAudio}
+      {screenPick && <ScreenPicker sources={screenPick.sources}
         onPick={(pick) => { screenPick.resolve(pick); setScreenPick(null); }} onCancel={() => { screenPick.resolve(null); setScreenPick(null); }} />}
       {cameraPick && <CameraPicker cameras={cameraPick} initial={voiceSettings.cameraDeviceId} initialBlur={voiceSettings.cameraBlur} onPick={(id, b) => { void pickCamera(id, b); }} onCancel={() => setCameraPick(null)} />}
       {miniProfile && active?.me && (
@@ -391,6 +401,7 @@ export function App() {
           onForget={() => { setSettingsTab(null); void client.leave(); void store.forgetIdentity(); }} />
       )}
     </div>
+    </>
   );
 }
 

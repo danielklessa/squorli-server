@@ -45,6 +45,8 @@ jobs:
       - run: pnpm icons
       - run: pnpm licenses
       - run: pnpm --filter "@squorli/desktop..." build
+      # Windows: the native audio capture helper (MSVC is part of the runner image); a no-op elsewhere.
+      - run: pnpm --filter @squorli/desktop native
       - run: pnpm --filter @squorli/desktop dist
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"

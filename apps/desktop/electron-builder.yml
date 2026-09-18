@@ -10,6 +10,7 @@ directories:
 # The two bundles contain everything except Electron itself: no node_modules in the package.
 files:
   - out/**
+  - build/tray.png
   - package.json
   - "!node_modules"
 npmRebuild: false
@@ -39,6 +40,11 @@ win:
   target:
     - target: nsis
       arch: [x64]
+  # The native audio capture helper (apps/desktop/native, built by `pnpm --filter @squorli/desktop native` before packaging).
+  extraResources:
+    - from: native/bin/win32-x64
+      to: native
+      filter: ["*.exe"]
 nsis:
   oneClick: false
   perMachine: false
@@ -51,8 +57,8 @@ linux:
   target: [AppImage, deb]
   category: Network
   synopsis: Self-hosted community chat with voice and video
-  # OPEN (user's decision): a deb package must name a maintainer with an e-mail address, which becomes public with the package.
-  # Until one is entered here (`maintainer: Name <address>`), the deb target fails; AppImage and the Windows installer do not need it.
+  # A deb package must name a maintainer; the address is public with the package (user's decision, 18 September 2026).
+  maintainer: Daniel Klessa <desktop@squorli.com>
   executableName: squorli
   artifactName: Squorli-${version}-${arch}.${ext}
 

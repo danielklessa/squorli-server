@@ -5,15 +5,18 @@ import type { ScreenPick, ScreenSource } from "./platform";
 
 /**
  * Which screen or window to share. Only the desktop app shows it: a browser brings its own picker, Electron has none, so
- * the shell lists the sources and asks the client (`platform.screen.setPicker`, App.tsx). System audio exists on Windows
- * only and carries everything the computer plays, so it is a choice and off by default.
+ * the shell lists the sources and asks the client (`platform.screen.setPicker`, App.tsx). Audio is a choice and off by
+ * default: for a window it is what that window's application plays, for a screen what the computer plays (`source.audio`
+ * says whether the shell can deliver it; Windows only).
  */
-export function ScreenPicker({ sources, canShareAudio, onPick, onCancel }: { sources: ScreenSource[]; canShareAudio: boolean; onPick: (pick: ScreenPick) => void; onCancel: () => void }) {
+export function ScreenPicker({ sources, onPick, onCancel }: { sources: ScreenSource[]; onPick: (pick: ScreenPick) => void; onCancel: () => void }) {
   const screens = sources.filter((s) => s.kind === "screen");
   const windows = sources.filter((s) => s.kind === "window");
   const [selected, setSelected] = useState<string | null>(screens.length === 1 ? screens[0]!.id : null);
   const [audio, setAudio] = useState(false);
-  const pick = (id = selected) => { if (id) onPick({ sourceId: id, audio: canShareAudio && audio }); };
+  const chosen = sources.find((s) => s.id === selected) ?? null;
+  const anyAudio = sources.some((s) => s.audio);
+  const pick = (id = selected) => { const s = sources.find((x) => x.id === id); if (s) onPick({ sourceId: s.id, audio: s.audio && audio }); };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } if (e.key === "Enter" && selected) pick(); };
@@ -46,10 +49,10 @@ export function ScreenPicker({ sources, canShareAudio, onPick, onCancel }: { sou
           {group(t("screenPick.screens"), screens)}
           {group(t("screenPick.windows"), windows)}
         </div>
-        {canShareAudio && (
-          <label className="check"><input type="checkbox" checked={audio} onChange={(e) => setAudio(e.target.checked)} /> {t("screenPick.audio")}</label>
+        {anyAudio && (
+          <label className="check"><input type="checkbox" checked={audio && (chosen?.audio ?? true)} disabled={chosen !== null && !chosen.audio} onChange={(e) => setAudio(e.target.checked)} /> {chosen?.kind === "window" ? t("screenPick.audioWindow") : t("screenPick.audio")}</label>
         )}
-        {canShareAudio && <span className="muted small">{t("screenPick.audioHint")}</span>}
+        {anyAudio && <span className="muted small">{chosen && !chosen.audio ? t("screenPick.audioNone") : chosen?.kind === "window" ? t("screenPick.audioWindowHint") : t("screenPick.audioHint")}</span>}
         <div className="dialog-actions">
           <button className="secondary" onClick={onCancel}>{t("common.cancel")}</button>
           <button disabled={!selected} onClick={() => pick()}>{t("screenPick.share")}</button>

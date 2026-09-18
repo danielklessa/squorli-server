@@ -12,6 +12,7 @@
     "dev": "tsup && node scripts/run.mjs --dev-url=http://localhost:5173",
     "start": "tsup && node scripts/run.mjs",
     "build": "tsup",
+    "native": "node native/build.mjs",
     "dist": "tsup && electron-builder --publish never",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"

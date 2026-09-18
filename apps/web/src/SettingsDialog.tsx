@@ -76,8 +76,11 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
   const handle = me?.handle ?? directoryAccount?.handle ?? null;
   // Desktop app: window background (mica/acrylic + opacity); null in the browser and where the system offers no material.
   const windowLook = platform.window.appearance;
-  const [look, setLook] = useState<WindowAppearance | null>(() => windowLook?.get() ?? null);
-  const changeLook = (next: WindowAppearance) => { setLook(next); void windowLook?.set(next).then(() => setLook(windowLook.get())); };
+  const [look, setLook] = useState<WindowAppearance | null>(() => windowLook?.state().appearance ?? null);
+  const [lookRestart, setLookRestart] = useState(() => windowLook?.state().needsRestart ?? false);
+  const trayPref = platform.window.tray;
+  const [closeToTray, setCloseToTray] = useState(() => trayPref?.closeToTray() ?? false);
+  const changeLook = (next: WindowAppearance) => { setLook(next); void windowLook?.set(next).then((s) => { setLook(s.appearance); setLookRestart(s.needsRestart); }); };
   const [globalName, setGlobalName] = useState(directoryAccount?.displayName ?? "");
   // The global name arrives with the signed account status, possibly after the dialog opened: follow it until the user edits the field
   // (an empty field saved over a name that had not arrived yet would delete it).
@@ -219,6 +222,14 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
                       <input type="range" min={40} max={100} step={5} value={Math.round(look.opacity * 100)} disabled={look.material === "none"} onChange={(e) => changeLook({ ...look, opacity: Number(e.target.value) / 100 })} />
                     </label>
                     <span className="muted small">{t("settings.windowHint")}</span>
+                    {lookRestart && <div className="row"><span className="warn-box small">{t("settings.windowRestart")}</span><button className="secondary small" onClick={() => windowLook.restart()}>{t("settings.windowRestartNow")}</button></div>}
+                  </>
+                )}
+                {trayPref && (
+                  <>
+                    <h3>{t("settings.tray")}</h3>
+                    <label className="check"><input type="checkbox" checked={closeToTray} onChange={(e) => { const on = e.target.checked; setCloseToTray(on); void trayPref.setCloseToTray(on).then(setCloseToTray); }} /> {t("settings.closeToTray")}</label>
+                    <span className="muted small">{t("settings.closeToTrayHint")}</span>
                   </>
                 )}
                 <h3>{t("settings.speakerView")}</h3>

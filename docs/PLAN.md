@@ -126,7 +126,7 @@ Mandatory for Release 1, but the browsers impose hard limits that no code gets a
 | Chromium – single window | yes | to my knowledge no | **verify** |
 | Firefox | yes | no, rated low priority by Mozilla | confirmed |
 | Safari | yes | no to my knowledge | **verify** |
-| Desktop client, Windows | yes | yes, system audio via loopback (Electron/Chromium) | track delivered (Electron 44, 18 September 2026: `getDisplayMedia` with the app's picker returns a video and a loopback audio track); what it sounds like to a listener, and whether the app's own playback echoes, not yet checked |
+| Desktop client, Windows | yes | yes: one window's audio, or the system's audio without the app, through a native helper (WASAPI process loopback, Windows 10 2004+); Chromium's loopback only as the fallback | signal measured in the app (18 September 2026, `docs/features/desktop.md`); a listener's side not yet checked |
 | Desktop client, macOS | yes | system audio needs an additional path (ScreenCaptureKit or virtual audio device) | **verify**, considerable effort possible |
 | Desktop client, Linux | yes | conceivable via PipeWire/PulseAudio monitor, Wayland complicates video capture | **verify**, can be documented as a limitation |
 

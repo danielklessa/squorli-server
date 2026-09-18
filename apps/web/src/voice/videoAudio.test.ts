@@ -30,7 +30,9 @@ describe("pop-out audio routing", () => {
     client.toggleVideoAudioMuted("alice:screen");
     expect(share.volume).toBe(0);
     expect(mic.volume).toBe(0.4);
+    // A pop-out listens to its share (VideoWindows.tsx); only then its audio plays at all.
     const restore = client.setVideoAudioHost("alice:screen", screen);
+    client.setScreenAudioListening("alice:screen", "popout", true);
     await client.setDeafened(true);
     client.toggleVideoAudioMuted("alice:screen");
     expect(share.volume).toBe(0.65);
@@ -39,6 +41,25 @@ describe("pop-out audio routing", () => {
     await client.setDeafened(false);
     expect(share.volume).toBe(0.65);
     expect(share.muted).toBe(false);
+  });
+  it("plays a share's audio only while the user listens to that share", async () => {
+    const { client, audio } = setup();
+    const mic = audio(Track.Source.Microphone), share = audio(Track.Source.ScreenShareAudio);
+    await client.setDeafened(false); // applies the rule to the elements
+    expect(mic.muted).toBe(false);
+    expect(share.muted).toBe(true);
+    expect(client.isScreenAudioListening("alice:screen")).toBe(false);
+    client.setScreenAudioListening("alice:screen", "stage", true);
+    client.setScreenAudioListening("alice:screen", "popout", true);
+    expect(share.muted).toBe(false);
+    client.setScreenAudioListening("alice:screen", "stage", false);
+    expect(share.muted).toBe(false); // the pop-out still listens
+    await client.setDeafened(true);
+    expect(share.muted).toBe(true);
+    await client.setDeafened(false);
+    client.setScreenAudioListening("alice:screen", "popout", false);
+    expect(share.muted).toBe(true);
+    expect(mic.muted).toBe(false);
   });
   it("restores the previous volume after moving the slider to zero", () => {
     const { client, audio } = setup();

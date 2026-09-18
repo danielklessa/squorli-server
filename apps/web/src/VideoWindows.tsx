@@ -123,6 +123,12 @@ function VideoWindow({ entry, tile, client, onClose }: { entry: Entry; tile: Vid
     };
   }, [entry]);
   useEffect(() => client.setVideoAudioHost(tile.id, audioRef.current!), [client, tile.id]);
+  // A popped-out share is one the user chose to watch: its audio plays (voiceClient.setScreenAudioListening).
+  useEffect(() => {
+    if (tile.source !== "screen" || tile.isLocal) return;
+    client.setScreenAudioListening(tile.id, "popout", true);
+    return () => client.setScreenAudioListening(tile.id, "popout", false);
+  }, [client, tile.id, tile.source, tile.isLocal]);
   useEffect(() => { ref.current?.focus(); }, []);
   useEffect(() => { entry.document.title = tile.name + " | Squorli"; }, [entry.document, tile.name]);
 
