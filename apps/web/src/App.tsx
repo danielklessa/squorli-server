@@ -131,6 +131,7 @@ export function App() {
   useEffect(() => client.setHangover(voiceSettings.vadHangoverMs), [client, voiceSettings.vadHangoverMs]);
   useEffect(() => {
     // A kick, ban or session loss on the voice connection's server ends it.
+    store.voiceActive = () => client.state.status !== "disconnected";
     store.onRemoved = (host) => { if (host === voiceHostRef.current) { void client.leave(); setVoiceHost(null); } };
     void store.init();
   }, [store, client]);
@@ -142,6 +143,7 @@ export function App() {
     if (wasInVoice && !now) {
       if (voiceHostRef.current) store.connection(voiceHostRef.current)?.send({ type: "voice.leave" });
       setVoiceHost(null); setStageOpen(false); setAfkReturn(null);
+      store.applyPendingLocale(); // a language change waited for this (store.ts reloadForLocale)
     }
     setWasInVoice(now);
   }, [voice.status]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -425,7 +427,7 @@ export function App() {
       {settingsTab && (homeless || (active?.me && conn)) && (
         <SettingsDialog api={active?.me && conn ? conn.api : null} me={active?.me ?? null} publicKey={state.identity?.publicKey ?? null} displayName={me?.displayName ?? active?.me?.displayName ?? state.directoryAccount?.displayName ?? "…"} directoryUrl={state.directoryUrl} directoryAccount={state.directoryAccount}
           serverDomain={active?.serverDomain ?? null} clientVersion={platform.app?.version ?? home?.serverVersion ?? null} syncError={state.settingsSyncError} client={client} voice={voice} initialTab={settingsTab}
-          onSaveServerName={(n) => store.setServerDisplayName(n)} onSaveGlobalName={(n) => store.setDirectoryName(null, n)} onSetLocale={(pref) => store.setLocale(pref)}
+          onSaveServerName={(n) => store.setServerDisplayName(n)} onSaveGlobalName={(n) => store.setDirectoryName(null, n)} onSetLocale={(pref) => store.setLocale(pref)} localePending={state.localeReloadPending}
           onCapturingKey={setCapturingPttKey} onClose={() => setSettingsTab(null)}
           onLogout={() => { setSettingsTab(null); void client.leave(); store.logout(); }}
           onForget={() => { setSettingsTab(null); void client.leave(); void store.forgetIdentity(); }} />

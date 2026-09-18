@@ -10,16 +10,32 @@ import type { Hub } from "../hub";
 import { actorOf, loadChannels, loadState } from "../state";
 import type { VoicePresence } from "../voice/presence";
 import type { RadioMetadata } from "../radio/metadata";
+import type { LivekitAdmin } from "../livekit/admin";
+import { Liveness, PING_EVERY_MS } from "./liveness";
 
 /**
  * Real-time channel for everything except media: state after the handshake, presence, channel state, messages, typing.
  * State reconciliation by sequence number after a reconnect: the client reloads /api/state and the history (M2).
  */
-export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presence: VoicePresence<WebSocket>, radioMeta: RadioMetadata) {
+export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presence: VoicePresence<WebSocket>, radioMeta: RadioMetadata, lk: LivekitAdmin) {
   const unsubscribe = presence.onChange((channelId, members) => {
     hub.broadcast({ type: "voice.state", channelId, members });
   });
   app.addHook("onClose", async () => unsubscribe());
+
+  // Connections whose other end vanished without a close would keep their voice presence and keep their user "present"
+  // for the AFK detection for ever (liveness.ts): ping them, terminate the dead, count the silent ones as idle.
+  const liveness = new Liveness<WebSocket>();
+  const heartbeat = setInterval(() => {
+    const { dead, stale } = liveness.sweep();
+    for (const ws of dead) { app.log.info("ws terminated: nothing heard"); ws.terminate(); }
+    for (const ws of stale) hub.setStale(ws, true);
+    for (const ws of liveness.connections()) if (ws.readyState === ws.OPEN) ws.ping();
+    // Entries taken over from LiveKit (below) are a guess: gone once the participant is.
+    const restored = presence.restoredEntries();
+    if (restored.length) void lk.roomsByIdentity().then((rooms) => { if (rooms) for (const e of restored) if (rooms.get(e.userId) !== e.channelId && presence.channelOf(e.conn) === e.channelId) presence.leave(e.conn); });
+  }, PING_EVERY_MS);
+  app.addHook("onClose", async () => clearInterval(heartbeat));
 
   app.get("/api/ws", { websocket: true }, (socket: WebSocket, req) => {
     let userId: string | null = null;
@@ -27,7 +43,9 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
     const helloTimeout = setTimeout(() => socket.close(4001, "hello timeout"), 10_000);
     let lastTyping = 0;
 
+    socket.on("pong", () => { liveness.heard(socket, false); });
     socket.on("message", async (raw) => {
+      if (liveness.heard(socket, true)) hub.setStale(socket, false);
       let json: unknown;
       try { json = JSON.parse(raw.toString()); } catch { return send({ type: "error", code: "bad_message", message: "invalid json" }); }
       const ev = ClientEvent.safeParse(json);
@@ -47,12 +65,23 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
         userId = session.userId;
         clearTimeout(helloTimeout);
         hub.add(userId, socket, session.sessionId);
+        liveness.add(socket);
         req.log.info({ userId }, "ws connected");
         send({ type: "welcome", userId, serverTime: new Date().toISOString(), protocolVersion: PROTOCOL_VERSION, state: await loadState(db, hub, userId) });
         for (const ch of await loadChannels(db)) {
           if (ch.kind === "voice") send({ type: "voice.state", channelId: ch.id, members: presence.members(ch.id) });
           const title = radioMeta.titleOf(ch.id);
           if (title) send({ type: "radio.meta", channelId: ch.id, title });
+        }
+        // Voice outlives this process and every reconnect (LiveKit), the presence here does not: a member who is still
+        // talking comes back into their channel's list. Clients of today say it themselves right after the welcome
+        // (then there is nothing to do here); older ones (desktop app up to 0.1.2) never do.
+        const rooms = await lk.roomsByIdentity();
+        const room = rooms?.get(userId);
+        if (room && socket.readyState === socket.OPEN && !presence.channelOfUser(userId)) {
+          const [channel] = await db.select({ id: channels.id, kind: channels.kind }).from(channels).where(eq(channels.id, room)).limit(1);
+          const [user] = await db.select({ publicKey: users.publicKey, displayName: users.displayName, handle: users.handle }).from(users).where(eq(users.id, userId)).limit(1);
+          if (channel?.kind === "voice" && user && socket.readyState === socket.OPEN && !presence.channelOfUser(userId)) presence.join(socket, channel.id, { userId, displayName: displayNameOf(user) }, true);
         }
         return;
       }
@@ -69,9 +98,11 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
           if (!channel || channel.kind !== "voice") return send({ type: "error", code: "unknown_channel", message: `no such voice channel: ${ev.data.channelId}` });
           const [user] = await db.select({ publicKey: users.publicKey, displayName: users.displayName, handle: users.handle }).from(users).where(eq(users.id, userId)).limit(1);
           if (!user) return socket.close(4003, "unauthorized");
+          presence.dropRestored(userId, socket);
           return presence.join(socket, channel.id, { userId, displayName: displayNameOf(user) });
         }
         case "voice.leave":
+          presence.dropRestored(userId, socket);
           return presence.leave(socket);
         case "activity":
           // AFK detection: the hub turns the connections' reports into the member's state (index.ts broadcasts and moves).
@@ -87,6 +118,7 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
 
     socket.on("close", () => {
       clearTimeout(helloTimeout);
+      liveness.remove(socket);
       hub.remove(socket);
       presence.leave(socket);
       if (userId) req.log.info({ userId }, "ws closed");

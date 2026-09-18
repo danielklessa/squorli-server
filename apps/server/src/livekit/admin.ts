@@ -10,8 +10,33 @@ import type { Config } from "../config";
  */
 export class LivekitAdmin {
   private readonly svc: RoomServiceClient;
+  private snapshot: { at: number; rooms: Promise<Map<string, string> | null> } | null = null;
   constructor(config: Config, private readonly log: FastifyBaseLogger) {
     this.svc = new RoomServiceClient(config.LIVEKIT_URL, config.LIVEKIT_API_KEY, config.LIVEKIT_API_SECRET);
+  }
+
+  /**
+   * Who sits in which room right now (identity = user id, room = channel id), for putting voice presence back after a
+   * restart or a reconnect (voice/presence.ts). One listing serves everybody who asks within 3 s (after a restart all
+   * clients come back at once). null = LiveKit did not answer: the caller changes nothing then.
+   */
+  roomsByIdentity(): Promise<Map<string, string> | null> {
+    if (this.snapshot && Date.now() - this.snapshot.at < 3000) return this.snapshot.rooms;
+    const rooms = (async () => {
+      try {
+        const out = new Map<string, string>();
+        for (const room of await this.svc.listRooms()) {
+          if (room.numParticipants === 0) continue;
+          for (const p of await this.svc.listParticipants(room.name)) out.set(p.identity, room.name);
+        }
+        return out;
+      } catch (err) {
+        this.log.debug({ err }, "livekit roomsByIdentity: LiveKit nicht erreichbar");
+        return null;
+      }
+    })();
+    this.snapshot = { at: Date.now(), rooms };
+    return rooms;
   }
 
   /** Mute a participant's camera and/or screen tracks (including screen audio). */

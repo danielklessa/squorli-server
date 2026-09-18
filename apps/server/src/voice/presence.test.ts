@@ -16,6 +16,22 @@ describe("VoicePresence", () => {
     expect(p.channelOf("c2")).toBe("lobby");
   });
 
+  it("an entry restored from LiveKit gives way once the user's client speaks for itself", () => {
+    const p = new VoicePresence<string>();
+    p.join("tab1", "lobby", a, true);
+    expect(p.restoredEntries()).toEqual([{ conn: "tab1", channelId: "lobby", userId: a.userId }]);
+    // The other tab is the one in voice and leaves: nothing of the user may stay behind.
+    p.dropRestored(a.userId, "tab2");
+    p.leave("tab2");
+    expect(p.members("lobby")).toEqual([]);
+    // The connection itself says where it is: an ordinary entry from then on.
+    p.join("tab1", "lobby", a, true);
+    p.dropRestored(a.userId, "tab1");
+    p.join("tab1", "lobby", a);
+    expect(p.restoredEntries()).toEqual([]);
+    expect(p.members("lobby")).toEqual([a]);
+  });
+
   it("counts a user with two connections once", () => {
     const p = new VoicePresence<string>();
     p.join("tab1", "lobby", a);

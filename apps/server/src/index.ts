@@ -183,7 +183,7 @@ async function main() {
   await registerRadioRoutes(app, db, hub, syncRadioMeta);
   await registerAttachmentRoutes(app, db, config);
   await registerLivekitRoutes(app, db, config);
-  await registerWs(app, db, hub, presence, radioMeta);
+  await registerWs(app, db, hub, presence, radioMeta, lk);
 
   // The built web client is served by the same process (one container less).
   const staticDir = config.STATIC_DIR ?? join(here, "..", "public");

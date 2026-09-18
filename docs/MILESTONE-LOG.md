@@ -4,6 +4,9 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 | Date | Change |
 |---|---|
+| 2026-09-18 | A language change no longer ends voice: the reload waits until the voice connection has ended (`store.reloadForLocale`, hint in Einstellungen > Ansicht). User's requirement. |
+| 2026-09-18 | Voice channel list survives a server restart: at the hello the server restores a member's presence from LiveKit's participant list (for clients that do not announce their channel again, desktop app up to 0.1.2), checked again in the heartbeat; no join sound on it (cues only follow LiveKit). User's report. |
+| 2026-09-18 | AFK and voice presence survive dead connections: server heartbeat (`ws/liveness.ts`: ping, terminate after 90 s, silent clients count as idle), client says its voice channel again after a reconnect and replaces a deaf socket (chat and directory connection; the directory service got the same heartbeat). User's report: not moved after 20 minutes, a member in two channels. |
 | 2026-09-18 | Desktop app: texts no longer speak of "this browser": overlay catalogs `i18n/app.de.ts`/`app.en.ts` (21 keys), taken first by `t()` in the app; `lang.autoSystem` folded into them. |
 | 2026-09-18 | Desktop app: system-wide AFK detection always runs (the shell grants the permission by itself), the settings show an explanation instead of the browser's switch and permission text (`platform.systemIdle`). |
 | 2026-09-18 | Desktop app: the "shared without audio" hint no longer talks about a browser dialog; it names the app's picker, or that share audio is Windows only. |

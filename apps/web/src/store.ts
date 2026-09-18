@@ -48,6 +48,8 @@ export type State = {
   accountServers: AccountServer[] | null;
   /** Last failure while saving the settings in the directory account (shown in the settings dialog); null = fine. */
   settingsSyncError: string | null;
+  /** A language change is stored but waits for the reload until the voice connection has ended (`reloadForLocale`). */
+  localeReloadPending: boolean;
   // ---- M7: friends and direct messages over the directory socket
   /** Connection to the directory socket; "idle" also when there is no directory or no account. */
   directoryLink: LinkStatus;
@@ -122,7 +124,7 @@ export class Store {
     this.state = {
       identity: null, homeHost: this.homeHost, activeHost: this.homeHost, servers: home ? { [home.state.host]: home.state } : {},
       signedIn: false, localHosts: [], clientLogin: { busy: false, error: null }, joinInvites: {},
-      directoryUrl: null, directoryAccount: undefined, directoryError: null, accountServers: null, settingsSyncError: null,
+      directoryUrl: null, directoryAccount: undefined, directoryError: null, accountServers: null, settingsSyncError: null, localeReloadPending: false,
       directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null, friendsError: null,
     };
     subscribeVoiceSettings((_s, source) => { if (source === "user") this.scheduleSettingsPush(); });
@@ -587,7 +589,7 @@ export class Store {
     if (synced !== null && pref !== synced) { this.scheduleSettingsPush(0); return; }
     storeLocalePreference(remote.locale);
     markAccountLocalePreference(remote.locale);
-    if (detectLocale() !== locale) window.location.reload();
+    this.reloadForLocale();
   }
   private localAccountSettings(): AccountSettings { return toAccountSettings(loadVoiceSettings(), localePreference()); }
   private scheduleSettingsPush(delayMs = 800): void {
@@ -618,7 +620,24 @@ export class Store {
     storeLocalePreference(pref);
     if (this.settingsPushTimer) { clearTimeout(this.settingsPushTimer); this.settingsPushTimer = null; }
     await this.pushSettings();
+    this.reloadForLocale();
+  }
+
+  /** Whether a voice connection is running (App.tsx sets it): a reload would throw the user out of their channel. */
+  voiceActive: () => boolean = () => false;
+
+  /**
+   * The texts follow a language change through a reload (i18n/index.ts). Not while the user sits in a voice channel (user's
+   * requirement, 18 September 2026: "Wenn ich die Sprache in meinem Client ändere möchte ich nicht aus Sprachkanälen
+   * geschmissen werden"): the choice is stored, the settings say so, and App.tsx calls `applyPendingLocale` once voice ended.
+   */
+  private reloadForLocale(): void {
+    if (detectLocale() === locale) { if (this.state.localeReloadPending) this.set({ localeReloadPending: false }); return; }
+    if (this.voiceActive()) { this.set({ localeReloadPending: true }); return; }
     window.location.reload();
+  }
+  applyPendingLocale(): void {
+    if (this.state.localeReloadPending) this.reloadForLocale();
   }
 
   /** Register a handle at the directory (M6a). */

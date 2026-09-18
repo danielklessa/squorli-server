@@ -5,7 +5,8 @@ import { sign, type Identity } from "./identity";
  * Second WebSocket connection (M7): to the directory service, for friends, presence and end-to-end encrypted
  * direct messages. Sign-in without a session: the service sends a challenge, we answer with a signature from the
  * device key (bound to the directory's host). Reconnect with growing backoff; the store receives
- * every event and the connection state.
+ * every event and the connection state. Like `ServerConnection` it notices a connection that died without a close: nothing
+ * arrived between two of its pings = drop the socket and connect again (18 September 2026, docs/features/afk.md).
  */
 export type LinkStatus = "idle" | "connecting" | "connected" | "error";
 
@@ -17,6 +18,8 @@ export class DirectoryLink {
   private want = false;
   /** AFK detection: the user's activity state (activity.ts), reported when the directory knows the `activity` event (features.afk). */
   private idle = false;
+  private pingSentAt = 0;
+  private lastHeard = 0;
 
   constructor(private readonly url: string, private readonly identity: Identity,
     private readonly onEvent: (e: DirectoryServerEvent) => void, private readonly onStatus: (s: LinkStatus, error?: string) => void, private readonly reportsActivity = false) {}
@@ -31,9 +34,12 @@ export class DirectoryLink {
   connect() {
     this.want = true;
     this.onStatus("connecting");
+    this.dropSocket(); // never two sockets of one client: an earlier one left open would keep the account present
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
     const ws = new WebSocket(`${this.url.replace(/^http/, "ws")}/api/ws`);
     this.ws = ws;
     ws.onmessage = (m) => {
+      this.lastHeard = Date.now();
       const parsed = DirectoryServerEvent.safeParse(JSON.parse(String(m.data)));
       if (!parsed.success) return;
       const e = parsed.data;
@@ -47,7 +53,8 @@ export class DirectoryLink {
         this.delay = 1000;
         this.onStatus("connected");
         if (this.ping) clearInterval(this.ping);
-        this.ping = window.setInterval(() => this.send({ type: "ping", t: Date.now() }), 25_000);
+        this.pingSentAt = 0;
+        this.ping = window.setInterval(() => this.heartbeat(), 25_000);
         if (this.idle && this.reportsActivity) this.send({ type: "activity", idle: true });
       }
       if (e.type === "error" && (e.code === "version" || e.code === "unauthorized" || e.code === "unknown_account")) {
@@ -65,6 +72,30 @@ export class DirectoryLink {
       this.timer = window.setTimeout(() => this.connect(), this.delay);
       this.delay = Math.min(30_000, this.delay * 2);
     };
+  }
+
+  /** Let go of the current socket without waiting for its close (a dead connection may take minutes to notice). */
+  private dropSocket() {
+    const ws = this.ws;
+    if (!ws) return;
+    this.ws = null;
+    ws.onmessage = ws.onclose = null;
+    try { ws.close(); } catch { /* already closing */ }
+    if (this.ping) { clearInterval(this.ping); this.ping = null; }
+  }
+
+  /** Every 25 s: nothing arrived since the last ping (the service answers each with `pong`) = the connection is dead. */
+  private heartbeat() {
+    const now = Date.now();
+    // A timer that fired late (throttled or frozen page) proves nothing: answers may still be waiting behind it.
+    if (this.pingSentAt && this.lastHeard < this.pingSentAt && now - this.pingSentAt < 60_000) {
+      this.pingSentAt = 0;
+      this.dropSocket();
+      if (this.want) this.connect();
+      return;
+    }
+    this.pingSentAt = now;
+    this.send({ type: "ping", t: now });
   }
 
   send(e: DirectoryClientEvent): boolean {

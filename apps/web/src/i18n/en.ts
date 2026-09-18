@@ -451,6 +451,7 @@ export const en: Messages = {
   "profile.nameGlobal": "Display name on all servers",
   "profile.nameGlobalHint": "Stored at {host} with your account @{handle} and used on every server for which you set no own name. Other servers pick it up the next time they are opened.",
   "profile.languageHint": "Without a choice the browser language decides; English when it is not supported. Changing it reloads the page.",
+  "profile.languagePending": "Saved. The language changes once you leave the voice channel, so that the connection does not drop now.",
   "profile.devices": "Signed-in devices",
   "profile.devicesHint": "Sessions of your account on this server. A signed-out device falls back to the login immediately.",
   "profile.unknownDevice": "Unknown device",

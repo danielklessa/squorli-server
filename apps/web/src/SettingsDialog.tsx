@@ -49,7 +49,7 @@ const fmt = fmtDateTime;
  * the directory's account page, sign out, discard identity) and licenses (our own and the third-party notices, LicensesTab.tsx). With a directory account everything except the device selection
  * is stored there (store.ts pushes every change); sessions and the name on this server belong to the server shown.
  */
-export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, directoryAccount, serverDomain, clientVersion, syncError, client, voice, initialTab, onSaveServerName, onSaveGlobalName, onSetLocale, onCapturingKey, onClose, onLogout, onForget }: {
+export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, directoryAccount, serverDomain, clientVersion, syncError, client, voice, initialTab, onSaveServerName, onSaveGlobalName, onSetLocale, localePending, onCapturingKey, onClose, onLogout, onForget }: {
   /** The server on screen and who you are there; null = none is shown (client without a home server): the dialog then has
    *  no profile and no sessions, which belong to a server, and the account page names the directory account and `publicKey`. */
   api: ServerApi | null; me: Me | null; publicKey: string | null;
@@ -64,6 +64,8 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
   onSaveServerName: (displayName: string | null) => Promise<void>;
   onSaveGlobalName: (displayName: string | null) => Promise<void>;
   onSetLocale: (pref: LocalePreference) => Promise<void>;
+  /** The chosen language waits for the end of the voice connection (store.ts `reloadForLocale`). */
+  localePending: boolean;
   /** While the push-to-talk key is being captured the dock's push-to-talk listener has to stay quiet. */
   onCapturingKey: (capturing: boolean) => void;
   onClose: () => void; onLogout: () => void; onForget: () => void;
@@ -213,6 +215,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
                   {LOCALES.map((l) => <option key={l} value={l}>{t(`lang.${l}`)}</option>)}
                 </select>
                 <span className="muted small">{t("profile.languageHint")}</span>
+                {localePending && <p className="warn-box small" role="status">{t("profile.languagePending")}</p>}
                 {windowLook && look && (
                   <>
                     <h3>{t("settings.window")}</h3>

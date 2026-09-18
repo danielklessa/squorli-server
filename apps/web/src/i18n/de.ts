@@ -452,6 +452,7 @@ export const de = {
   "profile.nameGlobal": "Anzeigename auf allen Servern",
   "profile.nameGlobalHint": "Wird bei {host} zu deinem Konto @{handle} gespeichert und gilt auf jedem Server, für den du keinen eigenen Namen setzt. Andere Server übernehmen ihn beim nächsten Öffnen.",
   "profile.languageHint": "Ohne Auswahl entscheidet die Browsersprache; Englisch, wenn sie nicht unterstützt wird. Ein Wechsel lädt die Seite neu.",
+  "profile.languagePending": "Gespeichert. Die Sprache wechselt, sobald du den Sprachkanal verlässt, damit die Verbindung jetzt nicht abbricht.",
   "profile.devices": "Angemeldete Geräte",
   "profile.devicesHint": "Sitzungen deines Kontos auf diesem Server. Ein abgemeldetes Gerät fällt sofort auf den Login zurück.",
   "profile.unknownDevice": "Unbekanntes Gerät",

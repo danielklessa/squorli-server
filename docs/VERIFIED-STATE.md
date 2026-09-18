@@ -4,6 +4,12 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 Base check of the complete workflow: 14 September 2026, Windows 11, Node 25.2.1, pnpm 10.15.0, Docker 29, LiveKit 1.13.6.
 
+- **Language change while in voice (18 September 2026):** `pnpm typecheck` 4/4, web tests 217, `pnpm build` green; checked in headless Chrome against a test server on :3001 (docs/features/settings.md). Not checked: desktop shell, the account's language arriving while in voice.
+
+- **Voice presence after a server restart (18 September 2026):** `pnpm typecheck` 4/4, server tests 47 (`presence.test.ts` 5), web 217, `pnpm build` green; restart of a test server on :3001 under a client in voice, today's and a simulated old client (docs/features/voice-video.md). Not checked: several members, production.
+
+- **Dead connections (18 September 2026):** `pnpm typecheck` 4/4, server tests 46 (`ws/liveness.test.ts` 3 new, `hub.test.ts` 6), `pnpm build` green; behaviour checked against a test server on :3001 (docs/features/afk.md). Not checked: real sleep/network change, behind a proxy.
+
 - **Desktop app wording (18 September 2026):** `pnpm typecheck` 4/4, web tests 217 (`i18n/index.test.ts` 2 new), `pnpm build` green; texts looked at in the dev shell.
 
 - **Desktop app: AFK detection without a switch (18 September 2026):** `pnpm typecheck` 4/4, web tests 215, `pnpm build` green; dev shell with a fresh profile: detector started at load, settings section without a checkbox.

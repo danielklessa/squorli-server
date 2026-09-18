@@ -91,6 +91,15 @@ export class ServerConnection {
   private reconnectDelay = 1000;
   private wantConnection = false;
   private pingTimer: number | null = null;
+  /** Watchdog for a connection that died without a close (sleep, network change): when the last ping went out and when anything last arrived. */
+  private pingSentAt = 0;
+  private lastHeard = 0;
+  /**
+   * The voice channel this client told the server it sits in. The server keeps that per WebSocket, and voice (LiveKit) is a
+   * connection of its own that survives a reconnect here: after one, the place is announced again. Without it the member
+   * vanished from the channel's list and the AFK move never found them (user's report, 18 September 2026).
+   */
+  private voiceChannelId: string | null = null;
   /** Newest message shown per channel (readState.ts), loaded for the signed-in user at every welcome. */
   private read: ReadState = {};
   /** The server keeps read states (GET /api/read-state answered): marks come from there and hold on every device. */
@@ -186,6 +195,7 @@ export class ServerConnection {
     for (const timer of this.ackTimers.values()) clearTimeout(timer);
     this.ackTimers.clear(); this.acked = {}; this.liveLatest = {}; this.serverRead = false;
     if (this.recountTimer !== null) { clearTimeout(this.recountTimer); this.recountTimer = null; }
+    this.voiceChannelId = null;
     this.set({ me: null, userId: null, connection: "idle", server: null, messages: {}, voice: {}, currentChannelId: null, unread: {}, mentions: {}, muted: {}, serverMuted: false, readSync: false, removed: null, error });
   }
 
@@ -205,10 +215,14 @@ export class ServerConnection {
     if (!token) return;
     this.set({ connection: this.state.server ? "reconnecting" : "connecting" });
     const base = this.state.base || window.location.origin;
+    // Never two sockets of one client: an earlier one that stayed open would keep its own presence on the server.
+    this.dropSocket();
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     const ws = new WebSocket(`${base.replace(/^http/, "ws")}/api/ws`);
     this.ws = ws;
     ws.onopen = () => this.send({ type: "hello", protocolVersion: PROTOCOL_VERSION, sessionToken: token });
     ws.onmessage = (m) => {
+      this.lastHeard = Date.now();
       this.pushLog({ dir: "in", at: Date.now(), text: String(m.data).slice(0, 2000) });
       const parsed = ServerEvent.safeParse(JSON.parse(m.data));
       if (parsed.success) this.handle(parsed.data);
@@ -226,6 +240,30 @@ export class ServerConnection {
     };
   }
 
+  /** Let go of the current socket without waiting for its close (a dead connection may take minutes to notice). */
+  private dropSocket() {
+    const ws = this.ws;
+    if (!ws) return;
+    this.ws = null;
+    ws.onopen = ws.onmessage = ws.onclose = null;
+    try { ws.close(); } catch { /* already closing */ }
+    if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
+  }
+
+  /** Every 20 s: nothing arrived since the last ping (the server answers each with `pong`) = the connection is dead; connect again. */
+  private heartbeat() {
+    const now = Date.now();
+    // A timer that fired late (throttled or frozen page) proves nothing: answers may still be waiting behind it.
+    if (this.pingSentAt && this.lastHeard < this.pingSentAt && now - this.pingSentAt < 60_000) {
+      this.pingSentAt = 0;
+      this.dropSocket();
+      if (this.wantConnection) this.connect();
+      return;
+    }
+    this.pingSentAt = now;
+    this.send({ type: "ping", t: now });
+  }
+
   /** The user turned idle or came back (store.ts). A server counts a fresh connection as active, so only `true` needs repeating after a welcome. */
   setIdle(idle: boolean) {
     if (idle === this.idle) return;
@@ -238,6 +276,8 @@ export class ServerConnection {
   }
 
   send(e: ClientEvent) {
+    if (e.type === "voice.join") this.voiceChannelId = e.channelId;
+    else if (e.type === "voice.leave") this.voiceChannelId = null;
     if (this.ws?.readyState !== WebSocket.OPEN) return;
     const text = JSON.stringify(e);
     this.pushLog({ dir: "out", at: Date.now(), text });
@@ -258,9 +298,11 @@ export class ServerConnection {
         this.read = pruneReadState(loadReadState(this.state.host, e.userId), e.state.channels.map((c) => c.id));
         void this.syncReadState();
         if (this.idle) this.reportIdle();
+        if (this.voiceChannelId) this.send({ type: "voice.join", channelId: this.voiceChannelId });
         if (!wasReconnect) this.hooks.onConnected();
         if (this.pingTimer) clearInterval(this.pingTimer);
-        this.pingTimer = window.setInterval(() => this.send({ type: "ping", t: Date.now() }), 20_000);
+        this.pingSentAt = 0;
+        this.pingTimer = window.setInterval(() => this.heartbeat(), 20_000);
         // After a reconnect: reload the current channel's history, messages could be missing.
         if (wasReconnect && current) { this.set({ messages: { ...this.state.messages, [current]: EMPTY } }); void this.loadHistory(current); }
         else if (current) void this.loadHistory(current);
@@ -354,6 +396,7 @@ export class ServerConnection {
         break;
       case "removed":
         this.wantConnection = false;
+        this.voiceChannelId = null;
         this.hooks.onRemoved();
         this.set({ removed: { reason: e.reason, message: e.message }, connection: "idle", server: null, messages: {}, voice: {} });
         break;

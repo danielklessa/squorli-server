@@ -44,6 +44,21 @@ describe("Hub AFK state", () => {
     expect(hub.isOnline("u1")).toBe(false);
   });
 
+  it("a connection whose client went silent counts as idle until it speaks again", () => {
+    const hub = new Hub();
+    const a = sock(), b = sock();
+    hub.add("u1", a, "s1"); hub.add("u1", b, "s2");
+    hub.setIdle(a, true);
+    hub.setStale(b, true);
+    expect(hub.isAfk("u1")).toBe(true);
+    hub.setStale(b, false);
+    expect(hub.isAfk("u1")).toBe(false);
+    // Closing a silent connection is not "the connection in use closed": no new waiting time.
+    hub.setStale(b, true);
+    hub.remove(b);
+    expect(hub.isAfk("u1")).toBe(true);
+  });
+
   it("waits the full time after the connection in use has closed", () => {
     vi.useFakeTimers();
     const hub = new Hub();
