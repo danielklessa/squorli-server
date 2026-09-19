@@ -180,6 +180,7 @@ export const en: Messages = {
   "login.otherAccount": "Sign in with a different account",
   "login.withoutAccount": "Without account: use this browser's key",
   "login.inviteCode": "Invite code",
+  "login.inviteRequiredHint": "This server takes new members by invite only. If you are a member here already, you can leave the field empty.",
   "login.invitePlaceholder": "e.g. from a link /invite/…",
   "login.signInConnect": "Sign in and connect",
   "login.haveInvite": "I have an invitation",

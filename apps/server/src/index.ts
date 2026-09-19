@@ -103,8 +103,9 @@ async function main() {
     /** Public server key; the directory checks it during server registration (host proof). */
     serverKey: directory?.serverKey ?? null,
     /** Server name and icon for the page title and favicon even before sign-in (both are also visible in the invite preview). */
-    ...(await loadSettings(db).then((st) => ({ serverName: st.name, iconUrl: st.iconUrl, requireAccount: st.requireAccount && !!config.DIRECTORY_URL }))
-      .catch(() => ({ serverName: null, iconUrl: null, requireAccount: false }))),
+    /** `inviteRequired`: new members need an invite code (the server is not open), so the login shows the field from the start. No secret: a sign-in without a code answers `invite_required` anyway. */
+    ...(await loadSettings(db).then((st) => ({ serverName: st.name, iconUrl: st.iconUrl, requireAccount: st.requireAccount && !!config.DIRECTORY_URL, inviteRequired: !st.openJoin }))
+      .catch(() => ({ serverName: null, iconUrl: null, requireAccount: false, inviteRequired: false }))),
     version: VERSION,
     /** Directory service (M6) that this server recognizes; the client registers handles there. null = none. */
     directoryUrl: config.DIRECTORY_URL ?? null,

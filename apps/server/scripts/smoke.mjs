@@ -154,6 +154,12 @@ check("role Mitglied exists", !!memberRole && (memberRole.permissions & P.SEND_M
 await api("PATCH", "/api/settings", { openJoin: false, name: "Rauchtest-Server" }, owner.token);
 const [, s2] = await api("GET", "/api/state", undefined, owner.token);
 check("settings patch", s2.settings.name === "Rauchtest-Server" && s2.settings.openJoin === false);
+// /api/health tells the login whether new members need an invite, so it can show the code field from the start
+await api("PATCH", "/api/settings", { openJoin: true }, owner.token);
+const [, hOpen] = await api("GET", "/api/health");
+await api("PATCH", "/api/settings", { openJoin: false }, owner.token);
+const [, hClosed] = await api("GET", "/api/health");
+check("health inviteRequired follows openJoin", hOpen.inviteRequired === false && hClosed.inviteRequired === true);
 
 // ---------- Structure
 const [sc, cat] = await api("POST", "/api/categories", { name: "Smoke" }, owner.token);

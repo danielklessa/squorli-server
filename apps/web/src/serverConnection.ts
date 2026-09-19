@@ -54,6 +54,8 @@ export type ServerConnState = {
   serverDomain: string | null;
   /** Sign-in only with a directory account (from /api/health). */
   requireAccount: boolean;
+  /** New members need an invite code (from /api/health; false for servers that do not say). */
+  inviteRequired: boolean;
   serverVersion: string | null;
   /** Directory service named by this server; null = none. */
   directoryUrl: string | null;
@@ -119,7 +121,7 @@ export class ServerConnection {
     this.state = {
       host, base, me: null, userId: null, connection: "idle", error: null, removed: null, server: null,
       voice: {}, radioTitles: {}, clockOffset: 0, messages: {}, typing: {}, currentChannelId: null, unread: {}, mentions: {}, muted: {}, serverMuted: false, readSync: false, log: [],
-      serverName: null, iconUrl: null, serverDomain: null, requireAccount: false, serverVersion: null, directoryUrl: null,
+      serverName: null, iconUrl: null, serverDomain: null, requireAccount: false, inviteRequired: false, serverVersion: null, directoryUrl: null,
     };
     // Token rejected by the server (expired, signed out from another device): do not keep running with a dead token.
     // Back in front of this tab: another device may have read channels meanwhile (normally `read.update` says so right away).
@@ -136,7 +138,7 @@ export class ServerConnection {
     const health = await this.api.getHealth().catch(() => null);
     this.set({
       serverName: health?.serverName ?? null, iconUrl: health?.iconUrl ? this.api.abs(health.iconUrl) : null, serverDomain: health?.domain?.toLowerCase() ?? null,
-      directoryUrl: health?.directoryUrl ?? null, requireAccount: !!health?.directoryUrl && health?.requireAccount === true, serverVersion: health?.version ?? null,
+      directoryUrl: health?.directoryUrl ?? null, requireAccount: !!health?.directoryUrl && health?.requireAccount === true, inviteRequired: health?.inviteRequired === true, serverVersion: health?.version ?? null,
     });
     return health;
   }

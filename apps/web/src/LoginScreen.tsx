@@ -114,6 +114,8 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
     return link ? formatDeepLink(link) : null;
   })();
 
+  const showInvite = needInvite || !!invite || home.inviteRequired;
+
   const accountBox = showAccount && (
     <div className="stack handle-box">
       <h2>{t("login.withAccount")}</h2>
@@ -212,10 +214,12 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
           <a href={state.directoryUrl} target="_blank" rel="noreferrer">{t("login.createAccount")}</a>
           <p className="muted small">{t("login.createDirectoryHint", { host: dirHost ?? "" })}</p>
         </div>}
-        {(needInvite || invite) && (
+        {/* Always there when the server takes new members by invite only (user's wish, 19 September 2026); it holds the code of an invite link. */}
+        {showInvite && (
           <label className="stack">
             <span>{t("login.inviteCode")}</span>
-            <input value={invite} onChange={(e) => setInvite(e.target.value)} placeholder={t("login.invitePlaceholder")} autoFocus />
+            <input value={invite} maxLength={32} onChange={(e) => setInvite(e.target.value)} placeholder={t("login.invitePlaceholder")} autoFocus={needInvite && !invite} />
+            {home.inviteRequired && <span className="muted small">{t("login.inviteRequiredHint")}</span>}
           </label>
         )}
         {accountBox}{deviceBox}
@@ -223,7 +227,7 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
         {!showDevice && state.directoryError && <p className="error small">{state.directoryError}</p>}
 
         <div className="row">
-          {!needInvite && !invite && <button className="secondary" onClick={() => setNeedInvite(true)}>{t("login.haveInvite")}</button>}
+          {!showInvite && <button className="secondary" onClick={() => setNeedInvite(true)}>{t("login.haveInvite")}</button>}
         </div>
       </div>
       {appLink && <p className="login-app muted small">{t("login.appHint")} <a href={appLink}>{t("login.openInApp")}</a> · <a href={DOWNLOAD_URL} target="_blank" rel="noreferrer">{t("login.getApp")}</a></p>}

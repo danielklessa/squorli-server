@@ -4,6 +4,7 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 | Date | Change |
 |---|---|
+| 2026-09-19 | Login (user's wish): on a server that takes new members by invite only the invite code field is shown from the start (`inviteRequired` in `/api/health`, no protocol bump); an invite link's code stands in the field and "In der App öffnen" carries it (both already worked, now checked). Desktop app version 0.1.5. |
 | 2026-09-19 | Web login password eye buttons moved inside the input edge, with text padding and preserved 44 px targets. |
 | 2026-09-19 | Web sign-in handle field now shows a fixed @ prefix and removes typed/pasted leading @ characters to avoid duplicates. |
 | 2026-09-19 | Server login: visible language buttons instead of dropdown; account-creation link on its own row with a bilingual explanation of the configured Directory destination. |

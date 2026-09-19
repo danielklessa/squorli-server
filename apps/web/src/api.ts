@@ -156,6 +156,8 @@ export type Health = {
   ok: boolean; domain: string; protocolVersion: number; directoryUrl: string | null; serverName: string | null; iconUrl: string | null;
   /** Sign-in only with a directory account (Admin > Server); the server reports false if it does not use a directory. */
   requireAccount: boolean;
+  /** New members need an invite code (the server is not open). Missing on servers older than 19 September 2026. */
+  inviteRequired?: boolean;
   /** Server version (package.json), shown at the bottom of the login next to the Squorli note. */
   version: string;
 };

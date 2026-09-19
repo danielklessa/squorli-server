@@ -181,6 +181,7 @@ export const de = {
   "login.otherAccount": "Mit einem anderen Konto anmelden",
   "login.withoutAccount": "Ohne Konto: Schlüssel dieses Browsers verwenden",
   "login.inviteCode": "Einladungscode",
+  "login.inviteRequiredHint": "Dieser Server nimmt neue Mitglieder nur mit Einladung auf. Bist du hier schon Mitglied, kannst du das Feld leer lassen.",
   "login.invitePlaceholder": "z. B. aus einem Link /invite/…",
   "login.signInConnect": "Anmelden und verbinden",
   "login.haveInvite": "Ich habe eine Einladung",
