@@ -6,6 +6,7 @@ import type { de } from "./de";
  * running in the app (index.ts). Same keys as `app.en.ts` and the same placeholders as the catalog (index.test.ts).
  */
 export const appDe: Partial<Record<keyof typeof de, string>> = {
+  "login.createDirectoryHint": "Öffnet das Verzeichnis {host} in deinem Browser. Erstelle dort dein Konto und melde dich anschließend hier in der App an.",
   "login.localHint": "Du brauchst weder Benutzername noch Passwort oder E-Mail-Adresse. Dein Zugang wird auf diesem Gerät gespeichert. Löschst du die App-Daten oder wechselst das Gerät, kannst du diesen Zugang ohne Sicherung nicht wiederherstellen.",
   "login.savedHint": "Dein Konto ist auf diesem Gerät gespeichert. Du kannst dich direkt verbinden, ohne dein Passwort erneut einzugeben.",
   "lang.auto": "Systemsprache",

@@ -184,7 +184,7 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
   );
 
   return (
-    <main className="login server-login">
+    <main className="login auth-login">
       <div className="login-card">
         <header className="login-head">
           <img className="login-icon" src={home.iconUrl ?? "/brand/squorli-icon.svg"} alt="" width="72" height="72" />

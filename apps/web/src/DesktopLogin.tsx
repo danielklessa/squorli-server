@@ -3,8 +3,10 @@ import { useState } from "react";
 import * as api from "./api";
 import { askConfirm } from "./dialogs";
 import type { State, Store } from "./store";
-import { LOCALES, localePreference, setLocalePreference, t, type LocalePreference } from "./i18n";
+import { LOCALES, locale, t } from "./i18n";
 import { platform } from "./platform";
+import { PasswordInput } from "./PasswordInput";
+import { loginView, type LoginChoice } from "./loginView";
 
 /**
  * Login of a client without a home server (the desktop app, docs/features/desktop.md). The directory account comes first:
@@ -16,6 +18,8 @@ export function DesktopLogin({ store, state }: { store: Store; state: State }) {
   const busy = state.clientLogin.busy;
   const dirHost = state.directoryUrl ? new URL(state.directoryUrl).host : null;
   const account = state.directoryAccount;
+  const [choice, setChoice] = useState<LoginChoice | null>(null);
+  const { showAccount, showDevice } = loginView(!!state.directoryUrl, !!account, false, choice);
   const [handle, setHandle] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -50,7 +54,7 @@ export function DesktopLogin({ store, state }: { store: Store; state: State }) {
   }
 
   return (
-    <main className="login">
+    <main className="login auth-login">
       <div className="login-card">
         <header className="login-head">
           <img className="login-icon" src="/brand/squorli-icon.svg" alt="" width="72" height="72" />
@@ -58,51 +62,71 @@ export function DesktopLogin({ store, state }: { store: Store; state: State }) {
         </header>
         {state.clientLogin.error && <p className="error">{state.clientLogin.error}</p>}
 
-        {state.directoryUrl && (
+        {state.directoryUrl && <>
+          <nav className="login-choices" aria-label={t("login.accessChoice")}>
+            <button type="button" className="secondary" aria-pressed={showAccount} disabled={busy} onClick={() => setChoice("account")}>{t("login.withAccount")}</button>
+            <button type="button" className="secondary" aria-pressed={showDevice} disabled={busy} onClick={() => setChoice("device")}>{t(account ? "login.savedAccount" : "login.continueLocal")}</button>
+          </nav>
+          <div className="login-create-row">
+            <a href={state.directoryUrl} target="_blank" rel="noreferrer" onClick={(e) => { e.preventDefault(); platform.links.openExternal(state.directoryUrl!); }}>{t("login.createAccount")}</a>
+            <p className="muted small">{t("login.createDirectoryHint", { host: dirHost ?? "" })}</p>
+          </div>
+        </>}
+
+        {showAccount && (
           <div className="stack handle-box">
-            <strong>{t("login.withAccount")}</strong>
+            <h2>{t("login.withAccount")}</h2>
             <span className="muted small">{t("desktopLogin.accountHint", { host: dirHost ?? "" })}</span>
-            <div className="row">
-              <span className="muted">@</span>
-              <input value={handle} onChange={(e) => setHandle(e.target.value)} placeholder={t("login.handlePlaceholder")} maxLength={32} autoComplete="username" autoFocus disabled={busy} />
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("login.password")} autoComplete="current-password" disabled={busy}
+            <div className="login-fields">
+              <label className="stack"><span>{t("login.username")}</span>
+                <span className="login-handle-field">
+                  <span className="muted" aria-hidden="true">@</span>
+                  <input value={handle} onChange={(e) => setHandle(e.target.value.trimStart().replace(/^@+/, ""))} placeholder={t("login.handleExample")} maxLength={33} autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus disabled={busy} aria-describedby="desktop-handle-hint" />
+                </span>
+                <small id="desktop-handle-hint" className="muted">{t("login.usernameHint")}</small>
+              </label>
+              <label className="stack"><span>{t("login.password")}</span>
+              <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" disabled={busy}
                 onKeyDown={(e) => { if (e.key === "Enter") void signIn(); }} />
-              <button onClick={() => void signIn()} disabled={busy || cleanHandle.length < 3 || password.length < BACKUP_MIN_PASSWORD || (needCode && code.trim().length < 6)}>{busy ? t("login.connecting") : t("login.signIn")}</button>
+              </label>
             </div>
             {needCode && (
-              <div className="row">
+              <div className="login-fields">
+                <label className="stack"><span>{t("login.codePlaceholder")}</span>
                 <input value={code} onChange={(e) => setCode(e.target.value)} placeholder={t("login.codePlaceholder")} inputMode="numeric" autoComplete="one-time-code" maxLength={20} autoFocus disabled={busy}
                   onKeyDown={(e) => { if (e.key === "Enter") void signIn(); }} />
+                </label>
                 {emailOffered && <button type="button" className="secondary" onClick={() => void sendEmailCode()} disabled={busy || emailBusy}>{emailBusy ? t("login.emailCodeSending") : t("login.emailCode")}</button>}
               </div>
             )}
             {needCode && emailNote && <span className="muted small">{emailNote}</span>}
-            <span className="muted small">
-              {t("login.noAccount")} <a href={state.directoryUrl} target="_blank" rel="noreferrer">{t("login.createAt", { host: dirHost ?? "" })}</a>{t("login.thenSignIn")}
-            </span>
+            <button className="login-primary" onClick={() => void signIn()} disabled={busy || cleanHandle.length < 3 || password.length < BACKUP_MIN_PASSWORD || (needCode && code.trim().length < 6)}>{busy ? t("login.connecting") : t("login.signIn")}</button>
           </div>
         )}
 
-        <div className="stack handle-box">
-          <strong>{t("desktopLogin.deviceKey")}</strong>
-          <code className="key">{state.identity?.publicKey ?? "…"}</code>
+        {showDevice && <div className="stack handle-box">
+          <h2>{t(account ? "login.savedAccount" : "login.continueLocal")}</h2>
+          <p className="muted small">{t(account ? "login.savedHint" : "login.localHint")}</p>
           {account
             ? <p>{t("login.handle")}: <strong>@{account.handle}</strong> <span className="muted small">{t("login.verifiedAt", { host: dirHost ?? "" })}</span></p>
             : <span className="muted small">{t("desktopLogin.deviceKeyHint")}</span>}
           {state.directoryError && <p className="error small">{state.directoryError}</p>}
-          <div className="row">
-            <button className="secondary" onClick={() => store.continueWithDeviceKey()} disabled={!state.identity || busy}>{account ? t("desktopLogin.continueAs", { handle: account.handle }) : t("desktopLogin.continueKey")}</button>
+          <details className="login-details">
+            <summary>{t("desktopLogin.deviceKey")}</summary>
+            <code className="key">{state.identity?.publicKey ?? "…"}</code>
             <button className="secondary" onClick={() => void store.forgetIdentity()} disabled={busy}>{t("login.forgetIdentity")}</button>
-          </div>
-        </div>
+          </details>
+          <button className="login-primary" onClick={() => store.continueWithDeviceKey()} disabled={!state.identity || busy}>{account ? t("desktopLogin.continueAs", { handle: account.handle }) : t("login.continueLocal")}</button>
+        </div>}
+        {!showDevice && state.directoryError && <p className="error small">{state.directoryError}</p>}
       </div>
       <footer className="login-foot">
         <img src="/brand/squorli-icon-small.svg" alt="" width="18" height="18" />
         <span>{t("desktopLogin.app")}{platform.app ? ` · ${t("login.version", { v: platform.app.version })}` : ""}</span>
-        <select className="lang-select" aria-label={t("common.language")} value={localePreference()} onChange={(e) => setLocalePreference(e.target.value as LocalePreference)}>
-          <option value="auto">{t("lang.auto")}</option>
-          {LOCALES.map((l) => <option key={l} value={l}>{t(`lang.${l}`)}</option>)}
-        </select>
+        <div className="login-languages" role="group" aria-label={t("common.language")}>
+          {LOCALES.map((l) => <button key={l} type="button" className="secondary" lang={l} aria-pressed={locale === l}
+            onClick={() => { if (l !== locale) void store.setLocale(l); }}>{t(`lang.${l}`)}</button>)}
+        </div>
       </footer>
     </main>
   );
