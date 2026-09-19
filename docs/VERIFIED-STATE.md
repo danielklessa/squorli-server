@@ -4,6 +4,8 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 Base check of the complete workflow: 14 September 2026, Windows 11, Node 25.2.1, pnpm 10.15.0, Docker 29, LiveKit 1.13.6.
 
+- **Interrupted AudioContext on iOS (19 September 2026):** root typecheck, tests (web 263, 1 new in `gate.test.ts`; protocol 57, server 55, desktop 18) and build passed. Not checked: the iPhone; no desktop browser has the state "interrupted", so nothing but the unit test covers it.
+
 - **Refused microphone explained (19 September 2026):** root typecheck, tests (web 262, 3 new in `micPermission.test.ts`; protocol 57, server 55, desktop 18) and build passed. Headless Chrome without the fake permission UI against the dev LiveKit: permission state "denied", the join fails with the explained text. Not checked: the iPhone, where the refusal was reported and whose cause is still open.
 
 - **Home screen icon and name (19 September 2026):** root typecheck, tests (protocol 57, server 55 with 2 new, web 259, desktop 18) and build passed; client with `app-icons/` copied to `apps/server/public`. Dev server: `/api/manifest.webmanifest` answers `application/manifest+json`, `no-cache`, "Squorli - Test Server", also through Vite; icons served; the four PNGs inspected. Not checked: a real iPhone or Android phone, the smoke test.

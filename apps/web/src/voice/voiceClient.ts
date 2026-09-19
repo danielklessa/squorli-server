@@ -17,7 +17,7 @@ import {
   type TrackPublishOptions,
 } from "livekit-client";
 import { BackgroundBlur, supportsBackgroundProcessors, type BackgroundProcessorWrapper } from "@livekit/track-processors";
-import { VoiceGate, rmsLevel } from "./gate";
+import { VoiceGate, contextNeedsResume, rmsLevel } from "./gate";
 import { boostLimits, type MicBoostSettings } from "./micBoost";
 import { MicPipeline, openMic, type GateMode, type OpenedMic } from "./micPipeline";
 import { micPermissionState, micRefusal } from "./micPermission";
@@ -239,7 +239,7 @@ export class VoiceClient {
    */
   prepareAudio(): void {
     const ctx = this.ensureCtx();
-    if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+    if (contextNeedsResume(ctx.state)) void ctx.resume().catch(() => {});
     if (!this.unlocked) {
       const el = document.createElement("audio");
       el.src = SILENT_WAV;
@@ -276,14 +276,22 @@ export class VoiceClient {
     if (!this.audioCtx || this.audioCtx.state === "closed") {
       this.audioCtx = new AudioContext();
       // Volumes above 100 % run through this context; while it is not running they fall back to 100 % (applyUserVolumes).
-      this.audioCtx.onstatechange = () => { this.applyUserVolumes(); this.patch({ audioContext: this.audioCtx?.state ?? "none" }); };
+      this.audioCtx.onstatechange = () => {
+        this.applyUserVolumes();
+        this.patch({ audioContext: this.audioCtx?.state ?? "none" });
+        // The context stopped while a microphone runs through it (iOS: "interrupted" by the microphone prompt, the start of
+        // the capture, a phone call): ask for it back at once. A capturing page may do that without a gesture; where it may
+        // not, nothing changes and the dock's "Mikrofon freigeben" and the next tap remain.
+        const ctx = this.audioCtx;
+        if (ctx && (this.mic || this.testMic) && contextNeedsResume(ctx.state)) void ctx.resume().then(() => this.log("audio-kontext wieder gestartet")).catch(() => {});
+      };
     }
     return this.audioCtx;
   }
 
   private unlockOnGesture(): void {
     const ctx = this.audioCtx;
-    if (ctx && ctx.state === "suspended") void ctx.resume().then(() => this.log("audio-kontext freigegeben (klick)")).catch(() => {});
+    if (ctx && contextNeedsResume(ctx.state)) void ctx.resume().then(() => this.log("audio-kontext freigegeben (klick)")).catch(() => {});
     if (this.room && !this.room.canPlaybackAudio) void this.startAudio();
   }
 
@@ -888,7 +896,7 @@ export class VoiceClient {
     if (this.micTestWanted) return;
     this.micTestWanted = true;
     const ctx = this.ensureCtx();
-    if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+    if (contextNeedsResume(ctx.state)) void ctx.resume().catch(() => {});
     let own: MicPipeline | null = null;
     try {
       if (!this.mic) {

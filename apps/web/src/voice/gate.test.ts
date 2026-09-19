@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { VoiceGate, rmsLevel } from "./gate";
+import { contextNeedsResume, VoiceGate, rmsLevel } from "./gate";
 
 describe("VoiceGate", () => {
   it("opens above threshold and holds for the hangover", () => {
@@ -35,5 +35,14 @@ describe("rmsLevel", () => {
     expect(rmsLevel(sq)).toBeCloseTo(1, 5);
     const half = new Float32Array(16).fill(0.5);
     expect(rmsLevel(half)).toBeCloseTo(0.5, 5);
+  });
+});
+
+describe("contextNeedsResume", () => {
+  it("resumes iOS's interrupted context like a suspended one, and leaves a running or closed one alone", () => {
+    expect(contextNeedsResume("suspended")).toBe(true);
+    expect(contextNeedsResume("interrupted")).toBe(true);
+    expect(contextNeedsResume("running")).toBe(false);
+    expect(contextNeedsResume("closed")).toBe(false);
   });
 });

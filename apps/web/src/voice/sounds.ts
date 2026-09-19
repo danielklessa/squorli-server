@@ -8,6 +8,7 @@
  * Rising = arriving, falling = leaving.
  */
 import type { SoundSettings as ProtocolSoundSettings } from "@squorli/protocol";
+import { contextNeedsResume } from "./gate";
 
 export type SoundCue = "selfJoin" | "selfLeave" | "peerJoin" | "peerLeave";
 
@@ -74,7 +75,7 @@ export function shouldPlayCue(cue: SoundCue, settings: SoundSettings, ctx: { dea
 export function playCue(ctx: AudioContext, cue: SoundCue, volume: number): void {
   try {
     if (ctx.state === "closed") return;
-    if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+    if (contextNeedsResume(ctx.state)) void ctx.resume().catch(() => {}); // also iOS's "interrupted" (gate.ts)
     const master = ctx.createGain();
     master.gain.value = Math.min(1, Math.max(0, volume));
     master.connect(ctx.destination);

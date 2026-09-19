@@ -31,6 +31,14 @@ export class VoiceGate {
   }
 }
 
+/**
+ * Does an AudioContext in this state have to be resumed before it processes anything? Everything but "running" and "closed":
+ * besides "suspended" there is WebKit's "interrupted" (iOS sets it when the microphone prompt shows, when the capture
+ * starts and on a phone call). The client only ever resumed "suspended", so on an iPhone that was asked for the
+ * microphone the pipeline ran through a standing context: level 0, nobody heard the user (user's report, 19 September 2026).
+ */
+export const contextNeedsResume = (state: string): boolean => state !== "running" && state !== "closed";
+
 /** RMS level 0..1 from time-domain samples (Float32, -1..1). */
 export function rmsLevel(samples: Float32Array): number {
   let sum = 0;

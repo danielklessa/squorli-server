@@ -1,4 +1,4 @@
-import { VoiceGate, rmsLevel } from "./gate";
+import { VoiceGate, contextNeedsResume, rmsLevel } from "./gate";
 import { AutoGain, DEFAULT_MIC_BOOST, DESKTOP_BOOST_LIMITS, MOBILE_BOOST_LIMITS, SOFT_CLIP_RANGE, clampBoost, softClipCurve, type MicBoostLimits, type MicBoostSettings } from "./micBoost";
 
 /**
@@ -113,7 +113,9 @@ export class MicPipeline {
     if (!this.ctx || this.ctx.state === "closed") { this.ctx = new AudioContext(); this.ownsCtx = true; }
     // resume() hangs forever in some browsers without a user gesture; do not wait for it, the click fallback in the
     // VoiceClient catches up on it. Until then the pipeline delivers silence (level 0).
-    if (this.ctx.state === "suspended") await Promise.race([this.ctx.resume().catch(() => {}), new Promise((r) => setTimeout(r, 300))]);
+    // Not only "suspended": iOS leaves the context "interrupted" after its microphone prompt and the start of the capture (gate.ts).
+    // The capture is open at this point, and WebKit lets a capturing page start audio without another gesture.
+    if (contextNeedsResume(this.ctx.state)) await Promise.race([this.ctx.resume().catch(() => {}), new Promise((r) => setTimeout(r, 300))]);
 
     this.source = this.ctx.createMediaStreamSource(this.stream);
     this.analyser = this.ctx.createAnalyser();

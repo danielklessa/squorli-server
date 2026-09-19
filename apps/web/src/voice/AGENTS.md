@@ -30,6 +30,8 @@ Dated feature entries (per-person volume, `VIEW_VIDEO`, cues, pop-outs and fulls
 
 ## Known pitfalls
 
+- **An AudioContext has a fourth state on iOS, "interrupted" (19 September 2026):** WebKit sets it when the microphone prompt shows, when the capture starts and on a phone call. Whoever checks `state === "suspended"` before `resume()` never resumes it, and the microphone runs through a standing context: level 0 and silence for the others, while the others are still heard (their audio plays through `<audio>` elements). Always ask `contextNeedsResume(state)` (`gate.ts`: everything but "running" and "closed"; tested). `MicPipeline.start()` resumes after the capture opened, `prepareAudio()` and every gesture resume, and the context's `onstatechange` asks for it back while a microphone runs (a capturing page may start audio without a gesture in WebKit).
+
 - **Browser autoplay:** audio from other participants may be blocked until the user clicks once; the client then shows "Ton freigeben" (unblock audio) (`room.startAudio()`).
 - **Choosing an output device** (setSinkId) exists only in Chromium; Firefox/Safari show an empty list.
 - **Screen share without audio:** only Chromium delivers audio, and there only with "Tab" (tab audio) or on Windows with "entire screen" with system audio enabled; individual windows never. Firefox/Safari never. The stage shows a yellow notice in both cases. The matrix in PLAN 3.6 is checked with `/test/screenshare.html` per browser/operating system and recorded there.
