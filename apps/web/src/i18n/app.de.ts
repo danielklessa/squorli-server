@@ -6,6 +6,8 @@ import type { de } from "./de";
  * running in the app (index.ts). Same keys as `app.en.ts` and the same placeholders as the catalog (index.test.ts).
  */
 export const appDe: Partial<Record<keyof typeof de, string>> = {
+  "login.localHint": "Du brauchst weder Benutzername noch Passwort oder E-Mail-Adresse. Dein Zugang wird auf diesem Gerät gespeichert. Löschst du die App-Daten oder wechselst das Gerät, kannst du diesen Zugang ohne Sicherung nicht wiederherstellen.",
+  "login.savedHint": "Dein Konto ist auf diesem Gerät gespeichert. Du kannst dich direkt verbinden, ohne dein Passwort erneut einzugeben.",
   "lang.auto": "Systemsprache",
   "login.replaceKeyText": "Auf diesem Gerät ist bereits @{handle} eingerichtet. Die Anmeldung mit einem Konto ersetzt diesen Schlüssel.",
   "login.replaceKeyTextNoBackup": "Auf diesem Gerät ist bereits @{handle} eingerichtet. Die Anmeldung mit einem Konto ersetzt diesen Schlüssel, und er hat noch kein Passwort-Backup. Ohne Backup ist er danach weg.",
