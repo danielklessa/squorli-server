@@ -104,3 +104,15 @@ apps/web/              Web client: Vite 5 + React 18 + livekit-client. The deskt
 
 - **`@types/dom-mediacapture-transform`** is a peer dependency of `@livekit/track-processors` (types for MediaStreamTrackProcessor); as a devDependency in the web package, otherwise `tsc` breaks.
 - Old client after a change, white screen after a deploy, `Route GET:/ not found`: `apps/server/AGENTS.md` pitfalls (static serving). Browser audio, output devices, screen share without audio: `src/voice/AGENTS.md`.
+
+## Mobile navigation (19 September 2026)
+
+At widths up to 700 px, App.tsx owns the navigation/content state. The rail and channel/friend list fill the height; text/DM content slides over them with a back button. MobileVoicePreview.tsx is a native bottom dialog showing server voice presence before an explicit join. Voice stays in the existing VoiceClient when the stage is minimized; VoiceDock restores it. Keep desktop rendering and direct voice-channel joining unchanged. Layout and animation use existing brand tokens; respect reduced motion.
+
+Mobile zoom policy (19 September 2026, user request): index.html fixes the viewport scale; styles.css allows panning without pinch zoom up to 700 px and keeps form controls at least 16 px to prevent focus zoom. Desktop CSS is unchanged.
+
+Mobile settings (19 September 2026): settings-backdrop/settings-modal scoped rules make the settings full-viewport at <=700 px. Categories stay on the left as icon/label buttons; navigation and body scroll independently. Keep mobile changes scoped so desktop and admin dialogs retain their layout.
+
+Mobile administration (19 September 2026): admin-backdrop/admin-modal share the mobile settings layout at <=700 px. Categories remain left with icons and labels, both columns scroll independently. Roles, channel creation and channel editor actions stack within the content column; keep desktop grids unchanged.
+
+Dialog opening focus (19 September 2026): SettingsDialog and AdminPanel focus their close button on narrow viewports (<=700 px) or coarse primary pointers; never autofocus a mobile text input. Settings retain desktop profile-input autofocus. Evaluate this policy when the dialog mounts.

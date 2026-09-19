@@ -3,6 +3,12 @@
  * Placeholders are written as {name} and filled by t(). Keep real umlauts in everything a user sees.
  */
 export const de = {
+  "mobile.back": "Zurück",
+  "mobile.minimizeVoice": "Sprachchat minimieren",
+  "mobile.joinVoice": "Verbinden",
+  "mobile.joiningVoice": "Verbindung wird hergestellt …",
+  "mobile.openVoice": "Sprachchat öffnen",
+  "mobile.emptyVoice": "Hier ist gerade niemand.",
   // ---- common
   "common.cancel": "Abbrechen",
   "common.ok": "OK",

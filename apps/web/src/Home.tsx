@@ -15,7 +15,7 @@ export const friendName = (f: Friend) => f.displayName ?? `@${f.handle}`;
 /** Address of a friend's avatar at the directory (null = none, or no directory known). */
 export const friendAvatar = (directoryUrl: string | null, f: { publicKey: string; avatarUpdatedAt: string | null }) => (directoryUrl ? directoryAvatarUrl(directoryUrl, f.publicKey, f.avatarUpdatedAt) : null);
 
-export function HomeSidebar({ state, store, members }: { state: State; store: Store; members: Member[] }) {
+export function HomeSidebar({ state, store, members, onOpenChat }: { state: State; store: Store; members: Member[]; onOpenChat: () => void }) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<FriendSearchResult[]>([]);
   const friends = state.friends ?? [];
@@ -85,7 +85,7 @@ export function HomeSidebar({ state, store, members }: { state: State; store: St
             const unread = state.conversations[f.publicKey]?.unread ?? 0;
             return (
               <li key={f.publicKey} className={`channel friend ${state.currentPeer === f.publicKey ? "active" : ""} ${unread ? "unread" : ""} ${f.online ? "" : "offline"}`}>
-                <button className="channel-btn" onClick={() => store.selectPeer(f.publicKey)} title={`@${f.handle}`}>
+                <button className="channel-btn" onClick={() => { store.selectPeer(f.publicKey); onOpenChat(); }} title={`@${f.handle}`}>
                   <Avatar name={friendName(f)} src={friendAvatar(state.directoryUrl, f)} online={f.online} afk={f.afk} />
                   <span className="channel-name">{friendName(f)}</span>
                   {f.online && f.afk && <Icon name="moon" className="afk" title={t("members.afk")} />}

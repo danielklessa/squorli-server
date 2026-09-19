@@ -4,6 +4,11 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 | Date | Change |
 |---|---|
+| 2026-09-19 | Settings and server administration focus Close on mobile opening; desktop profile autofocus retained. |
+| 2026-09-19 | Server administration adopts the mobile settings layout: full viewport, categories on the left, independent scrolling, stacked role/channel forms and larger touch controls. |
+| 2026-09-19 | Mobile settings use the full viewport, compact categories on the left, independent scrolling, larger touch controls and wrapping session/license content. Desktop unchanged. |
+| 2026-09-19 | Disable mobile page zoom through viewport and touch-action; mobile form controls at least 16 px to avoid focus zoom. |
+| 2026-09-19 | Mobile-only navigation: full-height rail beside channels/friends, chats slide in across the viewport, back arrow, voice preview from below with explicit Connect, minimizable full-screen stage and bottom actions. Desktop behavior preserved. Notes: ui-admin.md and voice-video.md. |
 | 2026-09-19 | Desktop app version 0.1.7 (`apps/desktop/package.json`; user's request): carries the role menu that only offers what works and the header controls of one height. The server part (first owner sets other owners' roles) ships with the server image, not with the app. Not tagged yet. |
 | 2026-09-19 | Roles of owners (user's decision): only the first owner may change another owner's roles (`canSetRolesOf`), and the member menu offers "Rollen" and single roles only where the server would accept them (`memberRank.ts`). Header controls of a voice lobby share the layout switch's height, icons centered, icon buttons keep no ground (`--head-control-h`). Notes: `docs/features/ui-admin.md`. |
 | 2026-09-19 | Desktop app version 0.1.6 (`apps/desktop/package.json`; user's request): carries the avatars of the directory account and their upload from the settings. Not tagged yet: the release follows `apps/desktop/AGENTS.md`, "Packaging and releases". |

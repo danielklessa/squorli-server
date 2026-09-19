@@ -2,6 +2,12 @@ import type { Messages } from "./index";
 
 /** English catalog: the same keys as `de.ts` (the type check fails when one is missing). */
 export const en: Messages = {
+  "mobile.back": "Back",
+  "mobile.minimizeVoice": "Minimize voice chat",
+  "mobile.joinVoice": "Connect",
+  "mobile.joiningVoice": "Connecting …",
+  "mobile.openVoice": "Open voice chat",
+  "mobile.emptyVoice": "Nobody is here yet.",
   // ---- common
   "common.cancel": "Cancel",
   "common.ok": "OK",

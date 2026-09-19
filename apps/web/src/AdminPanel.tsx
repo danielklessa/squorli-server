@@ -13,6 +13,7 @@ type Tab = "server" | "channels" | "radio" | "roles" | "invites" | "bans";
 /** Admin area: server, categories/channels, radio stations, roles, invites, bans. Changes come back via the structure event. */
 export function AdminPanel({ api, server, myUserId, directoryUrl, onClose }: { api: ServerApi; server: ServerState; myUserId: string; directoryUrl: string | null; onClose: () => void }) {
   const p = server.myPermissions;
+  const [mobileFocus] = useState(() => window.matchMedia("(max-width: 700px), (pointer: coarse)").matches);
   const allTabs: { id: Tab; label: string; icon: string; ok: boolean }[] = [
     { id: "server", label: t("admin.tab.server"), icon: "server", ok: hasPermission(p, Permission.MANAGE_SERVER) },
     { id: "channels", label: t("admin.tab.channels"), icon: "hash", ok: hasPermission(p, Permission.MANAGE_CHANNELS) },
@@ -28,16 +29,16 @@ export function AdminPanel({ api, server, myUserId, directoryUrl, onClose }: { a
   const run = async (fn: () => Promise<unknown>) => { setErr(null); try { await fn(); } catch (e) { setErr(String(e)); } };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal admin-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop admin-backdrop" onClick={onClose}>
+      <div className="modal admin-modal" role="dialog" aria-modal="true" aria-labelledby="admin-title" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
-          <h2>{t("admin.title")}</h2><span className="spacer" />
-          <button className="icon" onClick={onClose} title={t("common.close")}><Icon name="x" /></button>
+          <h2 id="admin-title">{t("admin.title")}</h2><span className="spacer" />
+          <button className="icon" autoFocus={mobileFocus} onClick={onClose} title={t("common.close")}><Icon name="x" /></button>
         </header>
         {/* categories always on the left (as the user specified for all categorized modals) */}
         <div className="settings-layout">
           <nav className="settings-nav">
-            {tabs.map((t) => <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => { setTab(t.id); setErr(null); }}><Icon name={t.icon} /> {t.label}</button>)}
+            {tabs.map((t) => <button key={t.id} className={tab === t.id ? "active" : ""} aria-current={tab === t.id ? "page" : undefined} onClick={() => { setTab(t.id); setErr(null); }}><Icon name={t.icon} /> <span>{t.label}</span></button>)}
           </nav>
           <div className="settings-body">
             {err && <p className="error">{err}</p>}

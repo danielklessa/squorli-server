@@ -74,6 +74,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
   onClose: () => void; onLogout: () => void; onForget: () => void;
 }) {
   const settings = useVoiceSettings();
+  const [mobileFocus] = useState(() => window.matchMedia("(max-width: 700px), (pointer: coarse)").matches);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const onServer = !!api && !!me;
@@ -199,16 +200,16 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
   const shownName = name.trim() || (withDirectory ? globalName.trim() : "") || displayName;
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className="modal settings-modal" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop settings-backdrop" onMouseDown={onClose}>
+      <div className="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title" onMouseDown={(e) => e.stopPropagation()}>
         <header className="modal-head">
-          <h2>{t("settings.title")}</h2>
+          <h2 id="settings-title">{t("settings.title")}</h2>
           <span className="spacer" />
-          <button className="icon" title={t("common.close")} onClick={onClose}><Icon name="x" /></button>
+          <button className="icon" title={t("common.close")} autoFocus={mobileFocus} onClick={onClose}><Icon name="x" /></button>
         </header>
         <div className="settings-layout">
           <nav className="settings-nav">
-            {tabs.map((t) => <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)}><Icon name={t.icon} /> {t.label}</button>)}
+            {tabs.map((t) => <button key={t.id} className={tab === t.id ? "active" : ""} aria-current={tab === t.id ? "page" : undefined} onClick={() => setTab(t.id)}><Icon name={t.icon} /> <span>{t.label}</span></button>)}
           </nav>
           <div className="settings-body stack">
             {err && <p className="error">{err}</p>}
@@ -230,7 +231,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
                   </>
                 )}
                 <h3>{t("profile.nameHere")}</h3>
-                <input value={name} maxLength={32} autoFocus onChange={(e) => { setName(e.target.value); setSaved(false); }} onKeyDown={(e) => { if (e.key === "Enter") void saveNames(); }} />
+                <input value={name} maxLength={32} autoFocus={!mobileFocus} onChange={(e) => { setName(e.target.value); setSaved(false); }} onKeyDown={(e) => { if (e.key === "Enter") void saveNames(); }} />
                 <span className="muted small">{withDirectory ? t("profile.nameHereHintDir") : t("profile.nameHereHint")}</span>
                 {withDirectory && (
                   <>

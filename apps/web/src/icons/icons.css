@@ -8,6 +8,7 @@
 .ic-bug::before { content: "\e20c"; }
 .ic-check::before { content: "\e06c"; }
 .ic-chevron-down::before { content: "\e06d"; }
+.ic-chevron-left::before { content: "\e06e"; }
 .ic-chevron-up::before { content: "\e070"; }
 .ic-clock::before { content: "\e087"; }
 .ic-cloud::before { content: "\e088"; }

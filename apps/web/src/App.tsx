@@ -10,6 +10,7 @@ import { DesktopLogin } from "./DesktopLogin";
 import { LoginScreen } from "./LoginScreen";
 import { MemberList } from "./MemberList";
 import { Sidebar } from "./Sidebar";
+import { MobileVoicePreview } from "./MobileVoicePreview";
 import { VoiceDock } from "./VoiceDock";
 import { VoiceStage } from "./VoiceStage";
 import { CameraPicker } from "./CameraPicker";
@@ -51,7 +52,15 @@ export function App() {
   const [state, setState] = useState<State>(store.state);
   const [voice, setVoice] = useState<VoiceState>(client.state);
   const [showAdmin, setShowAdmin] = useState(false);
-  const [navigationOpen, setNavigationOpen] = useState(false);
+  const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 700px)").matches);
+  const [mobileContent, setMobileContent] = useState(false);
+  const [voicePreview, setVoicePreview] = useState<string | null>(null);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 700px)");
+    const update = () => { setMobile(query.matches); setVoicePreview(null); setMobileContent(false); };
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
   /** Mini profile (click on your own name), anchored at the name in the dock. */
   const [miniProfile, setMiniProfile] = useState<MenuAnchor | null>(null);
   /** Settings dialog (gear): the category to open, null = closed. */
@@ -305,7 +314,7 @@ export function App() {
   const homeAvailable = state.friends !== null || state.directoryLink !== "idle";
   const homeOpen = homeAvailable && state.homeOpen;
   // The stage belongs to the voice connection's server; on another server or in the home view the dock shows "view" and switches there.
-  const showStage = stageOpen && voiceChannel !== null && voiceHost === activeHost && !homeOpen && !stageWindow.popped;
+  const showStage = stageOpen && voiceChannel !== null && voiceHost === activeHost && !homeOpen && !stageWindow.popped && (!mobile || mobileContent);
   // The stage shows the voice connection's server, which in its own window need not be the one on screen.
   const voiceApi = voiceHost ? store.connection(voiceHost)?.api ?? null : null;
   const stage = (detached: boolean) => voiceChannel && voiceServer?.server && voiceApi ? (
@@ -320,7 +329,7 @@ export function App() {
   const friendsMenu = homeAvailable ? {
     stateOf: (pk: string) => store.friendState(pk) ?? null,
     onRequest: (pk: string) => { store.requestFriend(pk); store.openHome(true); },
-    onMessage: (pk: string) => { const st = store.friendState(pk); if (st === "accepted") store.selectPeer(pk); else store.openHome(true); },
+    onMessage: (pk: string) => { const st = store.friendState(pk); if (st === "accepted") { store.selectPeer(pk); setMobileContent(true); } else store.openHome(true); },
   } : null;
 
   // Server rail: own server first, then the account's servers from the directory (without duplicating our own).
@@ -335,7 +344,7 @@ export function App() {
     iconOf: (s) => (state.directoryUrl ? directoryServerIconUrl(state.directoryUrl, s.host, s.iconUpdatedAt) : null),
     subOf: (name) => t("app.asName", { name }),
   });
-  const showRail = !!state.directoryUrl || homeless;
+  const showRail = !!state.directoryUrl || homeless || mobile;
   const addServer = async (initial = "") => {
     const input = await askInput({ title: t("add.title"), text: t("add.text"), label: t("add.label"), placeholder: t("add.placeholder"), initial, maxLength: 400, confirmLabel: t("add.confirm") });
     if (input === null) return;
@@ -366,36 +375,37 @@ export function App() {
       if (voice.status !== "disconnected" && !await askConfirm({ title: t("update.restartTitle"), text: t("update.restartInVoice"), confirmLabel: t("update.restart") })) return;
       platform.updates?.restartAndInstall();
     })(); }} />
-    <div className={`app ${showRail ? "with-rail" : ""} ${homeOpen ? "home" : ""} ${navigationOpen ? "navigation-open" : ""}`} style={{ "--left-w": `${layout.left}px`, "--members-w": `${layout.members}px` } as CSSProperties}>
+    <div className={`app ${showRail ? "with-rail" : ""} ${homeOpen ? "home" : ""} ${mobileContent ? "mobile-content" : ""} ${showStage ? "mobile-stage" : ""}`} style={{ "--left-w": `${layout.left}px`, "--members-w": `${layout.members}px` } as CSSProperties}>
       <ColumnHandle column="left" width={layout.left} label={t("layout.resizeLeft")} onChange={(w) => resizeColumn("left", w, false)} onCommit={(w) => resizeColumn("left", w, true)} />
       {!homeOpen && view && <ColumnHandle column="members" width={layout.members} label={t("layout.resizeMembers")} onChange={(w) => resizeColumn("members", w, false)} onCommit={(w) => resizeColumn("members", w, true)} />}
       {videoWindows.windows}
       {stageWindow.render(stage(true))}
       {embedSource && channelRadio && <EmbedPlayer source={embedSource} name={channelRadio.name} volume={radioState.volume} muted={voice.deafened} popout={playerWindow} sync={embedSync} onNotice={(text) => client.setNotice(text)} />}
-      <button className="mobile-navigation secondary" aria-expanded={navigationOpen} aria-controls="app-navigation" onClick={() => setNavigationOpen((open) => !open)}><Icon name={navigationOpen ? "x" : "hash"} />{t("app.navigation")}</button>
       {showRail && <ServerRail servers={railServers} serverState={railState} activeKey={homeOpen ? null : activeHost} onAdd={homeless ? () => { void addServer(); } : null}
-        onSelect={(key, host) => { if (key === state.homeHost) { store.openServer(homeDirHost); } else store.openServer(host); setStageOpen(key === voiceHost && stageOpen); }}
+        onSelect={(key, host) => { setMobileContent(false); setVoicePreview(null); if (key === state.homeHost) { store.openServer(homeDirHost); } else store.openServer(host); setStageOpen(key === voiceHost && stageOpen); }}
         onDiscover={state.directoryUrl ? () => setShowBrowser(true) : null} onLeave={(host, name) => { void leaveServer(host, name); }}
         onMute={(key, muted) => { void store.connection(key)?.setServerMuted(muted).catch(() => {}); }}
-        home={homeAvailable ? { open: homeOpen, badge: homeBadge, onToggle: () => store.openHome(!homeOpen) } : null} />}
+        home={homeAvailable ? { open: homeOpen, badge: homeBadge, onToggle: () => { setMobileContent(false); store.openHome(!homeOpen); } } : null} />}
       {showBrowser && state.directoryUrl && <ServerBrowser directoryUrl={state.directoryUrl} currentHost={homeless ? active?.serverDomain ?? null : home?.serverDomain ?? null} onClose={() => setShowBrowser(false)}
         onOpen={homeless ? (host) => { setShowBrowser(false); setStageOpen(false); void store.addServer(host); } : null} />}
       <div className="left" id="app-navigation">
-        {homeOpen ? <HomeSidebar state={state} store={store} members={server?.members ?? []} /> : view ? <Sidebar
+        {homeOpen ? <HomeSidebar state={state} store={store} members={server?.members ?? []} onOpenChat={() => setMobileContent(true)} /> : view ? <Sidebar
           server={view.server} api={view.conn.api} currentChannelId={showStage && voiceChannel ? voiceChannel.id : view.active.currentChannelId} voice={view.active.voice}
           voiceState={voiceHost === activeHost ? voice : null} client={client} radioTitles={view.active.radioTitles} unread={view.active.unread} mentions={view.active.mentions} muted={view.active.muted} canMute={view.active.readSync}
           onMuteChannel={(id, muted) => { void view.conn.setChannelMuted(id, muted).catch(() => {}); }}
-          connection={view.active.connection} onSelect={(id) => { view.conn.selectChannel(id); setStageOpen(false); setNavigationOpen(false); }}
-          onJoinVoice={(id) => { void joinVoice(view.active.host, id).catch(() => {}); }} onOpenAdmin={() => setShowAdmin(true)} myUserId={view.active.userId ?? ""}
+          connection={view.active.connection} onSelect={(id) => { view.conn.selectChannel(id); setStageOpen(false); setMobileContent(true); }}
+          onJoinVoice={(id) => { if (mobile) setVoicePreview(id); else void joinVoice(view.active.host, id).catch(() => {}); }} onOpenAdmin={() => setShowAdmin(true)} myUserId={view.active.userId ?? ""}
         /> : <nav className="sidebar"><header className="server-head"><img className="brand-mark" src="/brand/squorli-icon-small.svg" alt="" width="22" height="22" /><strong>{active?.serverName ?? active?.host ?? "Squorli"}</strong></header></nav>}
         <VoiceDock client={client} voice={voice} channel={voiceChannel} serverName={voiceHost && voiceHost !== activeHost ? voiceServer?.server?.settings.name ?? voiceHost : null}
           displayName={me?.displayName ?? active?.me?.displayName ?? home?.me?.displayName ?? state.directoryAccount?.displayName ?? (state.directoryAccount ? `@${state.directoryAccount.handle}` : "…")} avatarUrl={myAvatarUrl} onLeave={leaveVoice} onOpenProfile={setMiniProfile} onOpenSettings={() => setSettingsTab("profile")} pttSuspended={capturingPttKey}
-          onOpenStage={stageWindow.popped ? stageWindow.focus : voiceChannel && !showStage && voiceHost ? () => { store.openServer(voiceHost === state.homeHost ? homeDirHost : voiceHost); setStageOpen(true); } : null}
+          onOpenStage={stageWindow.popped ? stageWindow.focus : voiceChannel && !showStage && voiceHost ? () => { store.openServer(voiceHost === state.homeHost ? homeDirHost : voiceHost); setStageOpen(true); setMobileContent(true); } : null}
           canStream={!!voiceServer?.server && hasPermission(voiceServer.server.myPermissions, Permission.STREAM_VIDEO)} onToggleCamera={toggleCamera}
           afkReturn={afkReturn && voice.afkRoom ? { name: afkReturnChannel?.name ?? null, onReturn: () => { void joinVoice(afkReturn.host, afkReturn.channelId).catch(() => {}); } } : null} />
       </div>
 
-      <main className="main">
+      <main className={`main ${!view && !homeOpen ? "mobile-status" : ""}`}>
+        {mobile && mobileContent && <button className="mobile-back secondary" onClick={() => { setMobileContent(false); setStageOpen(false); }}><Icon name="chevron-left" />{t(showStage ? "mobile.minimizeVoice" : "mobile.back")}</button>}
+        {(!mobile || mobileContent || !view && !homeOpen) && <>
         {homeOpen ? (
           <HomeMain state={state} store={store} />
         ) : !active ? (
@@ -416,8 +426,15 @@ export function App() {
         )}
         {showDebug && <DebugPanel log={active?.log ?? []} client={client} voice={voice} />}
         <button className="debug-toggle icon" title={t("app.debug")} onClick={() => setShowDebug((v) => !v)}><Icon name="bug" /></button>
+        </>}
       </main>
 
+      {mobile && voicePreview && view && <MobileVoicePreview
+        channel={view.server.channels.find((c) => c.id === voicePreview) ?? null}
+        participants={view.active.voice[voicePreview] ?? []} members={view.server.members}
+        connected={voiceHost === activeHost && voice.channelId === voicePreview && voice.status !== "disconnected"}
+        onClose={() => setVoicePreview(null)}
+        onJoin={async () => { await joinVoice(view.active.host, voicePreview); setStageOpen(true); setMobileContent(true); setVoicePreview(null); }} />}
       {!homeOpen && view && <MemberList api={view.conn.api} members={view.server.members} roles={view.server.roles} myUserId={view.active.userId!} myPermissions={view.server.myPermissions} ownerId={view.server.settings.ownerId}
         voice={view.active.voice} channels={view.server.channels} friends={friendsMenu} client={client} />}
 
