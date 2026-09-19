@@ -148,7 +148,7 @@ export const de = {
   "login.passwordMin": "Passwort (mindestens {n} Zeichen)",
   "login.saving": "Sichere …",
   "login.setPassword": "Passwort festlegen",
-  "login.backupHint": "Der Schlüssel wird mit dem Passwort verschlüsselt beim Verzeichnis abgelegt; das Verzeichnis kennt das Passwort nicht. Ohne Backup ist das Konto weg, wenn dieser Browser-Speicher gelöscht wird.",
+  "login.backupHint": "Der Schlüssel wird mit dem Passwort verschlüsselt beim Verzeichnis abgelegt; das Verzeichnis kennt das Passwort nicht und kann es nicht zurücksetzen. Vergisst du es, ist das Konto auf anderen Geräten endgültig verloren, auch eine E-Mail-Adresse hilft dann nicht. Ohne Backup ist das Konto weg, wenn dieser Browser-Speicher gelöscht wird.",
   "login.chooseHandle": "Benutzername (Handle) wählen",
   "login.username": "Benutzername (Handle)",
   "login.usernameHint": "Dein eindeutiger Benutzername, z. B. @daniel. Nicht dein Anzeigename oder deine E-Mail-Adresse.",

@@ -147,7 +147,7 @@ export const en: Messages = {
   "login.passwordMin": "Password (at least {n} characters)",
   "login.saving": "Saving …",
   "login.setPassword": "Set password",
-  "login.backupHint": "The key is stored at the directory encrypted with the password; the directory does not know the password. Without a backup the account is lost when this browser's storage is cleared.",
+  "login.backupHint": "The key is stored at the directory encrypted with the password; the directory does not know the password and cannot reset it. If you forget it, the account is lost for good on other devices, and an e-mail address does not help. Without a backup the account is lost when this browser's storage is cleared.",
   "login.chooseHandle": "Choose a username (handle)",
   "login.username": "Username (handle)",
   "login.usernameHint": "Your unique username, e.g. @daniel. Not your display name or e-mail address.",
