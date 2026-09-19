@@ -35,6 +35,7 @@ Feature notes (dated entries: wishes, decisions, consequences, what was checked)
 | Settings dialog, mini profile, settings in the directory account | `docs/features/settings.md` |
 | Admin panel (role and channel ordering), context menus, UI refresh | `docs/features/ui-admin.md` |
 | Third-party licenses | `docs/features/licenses.md` |
+| The web client on a phone's home screen: Squorli icons, the manifest route with "Squorli - <server name>", Apple tags | `docs/features/home-screen.md` |
 | Directory integration: M6 phases, second factor, e-mail, account page | `docs/features/directory.md` |
 | Desktop app (M4): decisions, phases, platform interface (`apps/web/src/platform/`), client without a home server, the Electron shell `apps/desktop/` | `docs/features/desktop.md` |
 

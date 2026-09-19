@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ElementInfo } from "livekit-client";
-import { attachVideoView, fitVideoWindow, PopoutElementInfo, toggleVideoFullscreen, watchDocumentHidden } from "./videoDisplay";
+import { attachVideoView, fitVideoWindow, mirrorsOwnCamera, PopoutElementInfo, toggleVideoFullscreen, watchDocumentHidden } from "./videoDisplay";
+
+describe("mirroring the own camera", () => {
+  it("mirrors a webcam and a phone's front camera, not its rear camera", () => {
+    expect(mirrorsOwnCamera(undefined)).toBe(true);
+    expect(mirrorsOwnCamera("user")).toBe(true);
+    expect(mirrorsOwnCamera("environment")).toBe(false);
+  });
+});
 
 describe("video window sizing", () => {
   it("uses landscape, portrait and ultrawide video proportions", () => {

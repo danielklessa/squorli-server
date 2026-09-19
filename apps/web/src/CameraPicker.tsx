@@ -5,6 +5,7 @@ import { Icon } from "./Icon";
 import { VoiceClient } from "./voice/voiceClient";
 import { t } from "./i18n";
 import { retryCameraBusy } from "./voice/cameraRetry";
+import { mirrorsOwnCamera } from "./videoDisplay";
 
 type Props = {
   cameras: MediaDeviceInfo[];
@@ -91,7 +92,7 @@ export function CameraPicker({ cameras, initial, initialBlur, onPick, onCancel, 
       <div className="modal dialog camera-picker" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
         <h2>{t("camera.title")}</h2>
         <div className="camera-preview">
-          <video ref={videoRef} autoPlay playsInline muted className="mirror" />
+          <video ref={videoRef} autoPlay playsInline muted className={mirrorsOwnCamera(track?.mediaStreamTrack.getSettings().facingMode) ? "mirror" : ""} />
           {err && <p className="error small">{err}</p>}
         </div>
         <h3>{t("camera.camera")}</h3>

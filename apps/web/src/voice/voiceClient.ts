@@ -18,9 +18,10 @@ import {
 } from "livekit-client";
 import { BackgroundBlur, supportsBackgroundProcessors, type BackgroundProcessorWrapper } from "@livekit/track-processors";
 import { VoiceGate, rmsLevel } from "./gate";
-import type { MicBoostSettings } from "./micBoost";
-import { MicPipeline, type GateMode } from "./micPipeline";
+import { boostLimits, type MicBoostSettings } from "./micBoost";
+import { MicPipeline, openMic, type GateMode, type OpenedMic } from "./micPipeline";
 import { isCameraBusy, retryCameraBusy } from "./cameraRetry";
+import { cameraSwitch, type CameraRequest } from "./cameraSwitch";
 import type { VoiceSettings } from "./settings";
 import { DEFAULT_SOUND_SETTINGS, applyCueOutput, normalizeSoundSettings, playCue, shouldPlayCue, type SoundCue, type SoundSettings } from "./sounds";
 import { USER_VOLUME_MAX, clampUserVolume, loadUserVolumes, saveUserVolumes, withUserVolume, type UserVolumes } from "./userVolumes";
@@ -80,6 +81,8 @@ export type VoiceState = {
   level: number;
   /** Microphone boost applied right now (1 = none; micBoost.ts), for the settings and the debug view. */
   micBoost: number;
+  /** Raw microphone level in front of the boost (RMS 0..1), for the debug view: tells a quiet capture from a boost that does not reach. */
+  micInput: number;
   /** Microphone test running (Einstellungen): you hear yourself, and nothing of it is sent into the channel (the microphone counts as muted). */
   micTest: boolean;
   /** false = the browser blocks autoplay; the user has to click once. */
@@ -172,7 +175,7 @@ export class VoiceClient {
   private readonly screenListening = new Map<string, Set<string>>();
   private readonly listeners = new Set<(s: VoiceState) => void>();
   state: VoiceState = {
-    status: "disconnected", channelId: null, afkRoom: false, participants: [], micMuted: false, deafened: false, gateOpen: false, level: 0, micBoost: 1, micTest: false,
+    status: "disconnected", channelId: null, afkRoom: false, participants: [], micMuted: false, deafened: false, gateOpen: false, level: 0, micBoost: 1, micInput: 0, micTest: false,
     canPlayback: true, audioContext: "none", inputDeviceId: null, cameraOn: false, cameraBlur: 0, screenOn: false, screenAudio: null, tiles: [], notice: null, screenSink: { deviceId: null, tracks: 0, error: null }, audioProfile: null, rtcUrl: null, events: [], error: null,
   };
   private audioProfile: AudioProfile = DEFAULT_AUDIO_PROFILE;
@@ -187,11 +190,15 @@ export class VoiceClient {
   private micTestWanted = false;
   /** Last requested camera settings (for switching on again). */
   private camera: { deviceId: string | null; quality: "360p" | "720p"; blur: number } = { deviceId: null, quality: "720p", blur: 0 };
+  /** With which device and resolution the published camera track was opened (null = none published, or not by us); see cameraSwitch.ts. */
+  private cameraOpened: CameraRequest | null = null;
   /** Background processor (MediaPipe segmentation, running in the browser); kept around for toggling. */
   private blur: BackgroundProcessorWrapper | null = null;
   /** One AudioContext for everything (microphone gate, other participants' levels); created inside a user gesture, see prepareAudio(). */
   private audioCtx: AudioContext | null = null;
   private unlocked = false;
+  /** The microphone asked for inside the user's gesture, waiting for join() to take it over (prepareMic()). */
+  private preMic: { deviceId: string | null; stereo: boolean; opened: Promise<OpenedMic> } | null = null;
   /** Level meter per remote microphone track: speaker highlight without the delay of LiveKit's report (~0.5-1 s). */
   private readonly meters = new Map<string, { source: MediaStreamAudioSourceNode; analyser: AnalyserNode; gate: VoiceGate; samples: Float32Array<ArrayBuffer>; boost: GainNode | null }>();
   private meterTimer: number | null = null;
@@ -239,6 +246,29 @@ export class VoiceClient {
     }
     if (this.room && !this.room.canPlaybackAudio) void this.startAudio();
     this.patch({ audioContext: ctx.state });
+  }
+
+  /**
+   * Ask for the microphone INSIDE the user's gesture, before the first await of joining (`App.joinVoice()`), like prepareAudio().
+   *
+   * Why (user's report, 19 September 2026: no channel can be joined from the iPhone's home screen app, "Mikrofon: The request
+   * is not allowed by the user agent or the platform in the current context"): WebKit only shows its microphone prompt while
+   * the tap still counts, and join() opens the microphone after the token and the LiveKit connection, seconds later. In
+   * Safari itself the site's stored permission hid that; a home screen app has no stored permission and asks every time.
+   * join() takes this capture over when device and mode still match, and releases it otherwise; whoever calls this and
+   * then does not reach join() calls releasePreparedMic().
+   */
+  prepareMic(deviceId: string | null, stereo: boolean): void {
+    this.releasePreparedMic();
+    const opened = openMic((c) => navigator.mediaDevices.getUserMedia(c), deviceId, stereo);
+    opened.catch(() => { /* reported by join(), which awaits the same promise */ });
+    this.preMic = { deviceId, stereo, opened };
+  }
+
+  releasePreparedMic(): void {
+    const pre = this.preMic;
+    this.preMic = null;
+    void pre?.opened.then((o) => o.stream.getTracks().forEach((track) => track.stop())).catch(() => {});
   }
 
   private ensureCtx(): AudioContext {
@@ -367,7 +397,7 @@ export class VoiceClient {
           const audio = this.room?.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio)?.track;
           if (audio) void this.room?.localParticipant.unpublishTrack(audio).catch(() => {});
         }
-        if (pub.source === Track.Source.Camera) this.patch({ cameraOn: false });
+        if (pub.source === Track.Source.Camera) { this.cameraOpened = null; this.patch({ cameraOn: false }); }
         this.refreshTiles();
       })
       .on(RoomEvent.TrackStreamStateChanged, () => this.refreshTiles())
@@ -390,6 +420,7 @@ export class VoiceClient {
       this.applyVideoAccess();
       this.applyVideoSubscriptions();
       if (afk) {
+        this.releasePreparedMic(); // the AFK channel uses no microphone
         // AFK channel: nothing to publish and nothing to hear. Shown as muted and deafened, also to the others in the room.
         this.micMutedByUser = false;
         this.patch({ status: mapState(room.state), canPlayback: true, inputDeviceId: null, micMuted: true, deafened: true });
@@ -398,17 +429,21 @@ export class VoiceClient {
         this.cueJoined = true;
         return;
       }
-      // Microphone only after connecting, so a connection error does not also cost a permission prompt.
-      const mic = new MicPipeline(settings.vadThreshold, settings.vadHangoverMs, this.ensureCtx());
+      // The capture starts only after connecting; the permission prompt came with the user's tap already (prepareMic()).
+      const mic = new MicPipeline(settings.vadThreshold, settings.vadHangoverMs, this.ensureCtx(), boostLimits(this.media?.mobile ?? false));
       this.mic = mic;
       mic.onState = (s) => {
         const changed = s.open !== this.state.gateOpen;
-        this.patch({ level: s.level, gateOpen: s.open, micBoost: s.boost });
+        this.patch({ level: s.level, gateOpen: s.open, micBoost: s.boost, micInput: s.input });
         if (changed) this.refreshParticipants(); // own speaker highlight immediately, not only once LiveKit reports it
       };
       mic.setMode(settings.mode);
       mic.setBoost(settings.micBoost);
-      const track = await mic.start(settings.inputDeviceId, this.audioProfile.stereo).catch((err) => { micFailed = true; throw err; });
+      // The capture opened inside the user's gesture, if it is the one wanted here (prepareMic()); otherwise it is released.
+      const pre = this.preMic?.deviceId === settings.inputDeviceId && this.preMic.stereo === this.audioProfile.stereo ? this.preMic.opened : undefined;
+      if (pre) this.preMic = null;
+      else this.releasePreparedMic();
+      const track = await mic.start(settings.inputDeviceId, this.audioProfile.stereo, pre).catch((err) => { micFailed = true; throw err; });
       if (mic.deviceFallback) this.log("gewaehltes mikrofon nicht gefunden, nutze das standardmikrofon");
       this.publication = await room.localParticipant.publishTrack(track, this.micPublishOptions());
       this.log(`opus ${this.audioProfile.bitrate} kbit/s ${this.audioProfile.stereo ? "stereo" : "mono, dtx+red"}`);
@@ -425,6 +460,7 @@ export class VoiceClient {
       this.peerCuesFrom = Date.now() + PEER_CUE_GRACE_MS;
     } catch (err) {
       const message = errorText(err);
+      this.releasePreparedMic();
       await this.leave();
       this.patch({ error: micFailed ? t("voice.errMic", { err: message }) : explainConnectError(message, url, this.media?.blocksInsecureMedia ?? false), rtcUrl: url });
       throw err;
@@ -440,6 +476,7 @@ export class VoiceClient {
     if (wasJoined && !this.switchingRoom) this.playSound("selfLeave");
     this.room = null;
     this.publication = null;
+    this.cameraOpened = null;
     this.stopMeters();
     await this.stopMicTest();
     await this.mic?.stop();
@@ -455,7 +492,7 @@ export class VoiceClient {
     this.videoWatch.clear();
     this.audioHost.replaceChildren();
     this.micMutedByUser = false;
-    this.patch({ status: "disconnected", channelId: null, afkRoom: false, participants: [], gateOpen: false, level: 0, micBoost: 1, micMuted: false, deafened: false, inputDeviceId: null, cameraOn: false, screenOn: false, screenAudio: null, tiles: [] });
+    this.patch({ status: "disconnected", channelId: null, afkRoom: false, participants: [], gateOpen: false, level: 0, micBoost: 1, micInput: 0, micMuted: false, deafened: false, inputDeviceId: null, cameraOn: false, screenOn: false, screenAudio: null, tiles: [] });
   }
 
   // ---------- Permission VIEW_VIDEO: who receives camera and screen
@@ -538,8 +575,22 @@ export class VoiceClient {
       const resolution = (this.camera.quality === "360p" ? VideoPresets.h360 : VideoPresets.h720).resolution;
       if (!on) this.blur = null; // the track is ended, and the processor with it
       const options = on ? { resolution, ...(this.camera.deviceId ? { deviceId: this.camera.deviceId } : {}) } : undefined;
+      // A camera switched off is a muted track that stays published, and LiveKit's setCameraEnabled(true, options) only
+      // unmutes it with its OLD constraints: the camera picked in the dialog was ignored (user's report, 19 September 2026).
+      // So a track of another camera or resolution is dealt with first (cameraSwitch.ts).
+      const existing = room.localParticipant.getTrackPublication(Track.Source.Camera)?.track;
+      const wanted: CameraRequest = { deviceId: this.camera.deviceId, quality: this.camera.quality };
+      const change = on ? cameraSwitch(existing instanceof LocalVideoTrack ? { muted: existing.isMuted, opened: this.cameraOpened } : null, wanted) : "enable";
+      if (change === "republish" && existing instanceof LocalVideoTrack) {
+        this.blur = null; // the track is ended, and the processor with it
+        await room.localParticipant.unpublishTrack(existing, true);
+        this.log("kamera gewechselt: spur neu veroeffentlicht");
+      } else if (change === "restart" && existing instanceof LocalVideoTrack) {
+        await retryCameraBusy(() => existing.restartTrack({ resolution, ...(wanted.deviceId ? { deviceId: { exact: wanted.deviceId } } : {}) }));
+      }
       // Firefox may still be releasing the camera (picker preview, or off -> on); one retry after a pause covers that.
       await retryCameraBusy(() => room.localParticipant.setCameraEnabled(on, options));
+      if (on) this.cameraOpened = { deviceId: this.activeCameraId() ?? wanted.deviceId, quality: wanted.quality };
       this.patch({ cameraOn: on, cameraBlur: 0, error: null });
       if (on && this.camera.blur > 0) await this.setCameraBlur(this.camera.blur);
     } catch (err) {
@@ -551,6 +602,9 @@ export class VoiceClient {
     this.refreshTiles();
     this.refreshParticipants();
   }
+
+  /** Can this browser share a screen at all? Phones and tablets cannot (no getDisplayMedia); the stage then shows no button. */
+  static supportsScreenShare(): boolean { return typeof navigator !== "undefined" && typeof navigator.mediaDevices?.getDisplayMedia === "function"; }
 
   /** Can this browser blur the background (WebGL2/WASM, MediaStreamTrackProcessor)? */
   static supportsBlur(): boolean { try { return supportsBackgroundProcessors(); } catch { return false; } }
@@ -613,7 +667,16 @@ export class VoiceClient {
 
   async setCameraDevice(deviceId: string | null): Promise<void> {
     this.camera.deviceId = deviceId;
-    if (this.state.cameraOn && this.room) await this.room.switchActiveDevice("videoinput", deviceId ?? "default").catch(() => {});
+    if (this.state.cameraOn && this.room) {
+      await this.room.switchActiveDevice("videoinput", deviceId ?? "default").catch(() => {});
+      if (this.cameraOpened) this.cameraOpened = { ...this.cameraOpened, deviceId: this.activeCameraId() ?? deviceId };
+    }
+  }
+
+  /** The camera the published track really captures from, as the browser reports it (null = no track, or the browser does not say). */
+  private activeCameraId(): string | null {
+    const track = this.room?.localParticipant.getTrackPublication(Track.Source.Camera)?.track;
+    return track instanceof LocalVideoTrack ? track.mediaStreamTrack.getSettings().deviceId || null : null;
   }
 
   /** Share the screen; audio is always requested and published as its own track (PLAN 3.6). Whether it arrives is up to the browser. */
@@ -825,14 +888,14 @@ export class VoiceClient {
     let own: MicPipeline | null = null;
     try {
       if (!this.mic) {
-        own = new MicPipeline(settings.vadThreshold, settings.vadHangoverMs, ctx);
-        own.onState = (s) => this.patch({ level: s.level, micBoost: s.boost });
+        own = new MicPipeline(settings.vadThreshold, settings.vadHangoverMs, ctx, boostLimits(this.media?.mobile ?? false));
+        own.onState = (s) => this.patch({ level: s.level, micBoost: s.boost, micInput: s.input });
         own.setBoost(settings.micBoost);
         this.testMic = own;
         await own.start(settings.inputDeviceId);
       }
       // Ended while the browser asked for the microphone: the capture that opened after all is closed again.
-      if (!this.micTestWanted) { await own?.stop(); this.patch({ level: 0, micBoost: 1 }); return; }
+      if (!this.micTestWanted) { await own?.stop(); this.patch({ level: 0, micBoost: 1, micInput: 0 }); return; }
       // Mute first, listen second: not a word of the test goes out.
       this.patch({ micTest: true });
       if (!this.state.afkRoom) await this.applyMic();
@@ -864,7 +927,7 @@ export class VoiceClient {
     this.testMic = null;
     await own?.stop();
     const was = this.state.micTest;
-    this.patch({ micTest: false, ...(own ? { level: 0, micBoost: 1 } : {}) });
+    this.patch({ micTest: false, ...(own ? { level: 0, micBoost: 1, micInput: 0 } : {}) });
     if (was && !this.state.afkRoom) await this.applyMic();
   }
 

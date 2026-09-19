@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SOUND_SETTINGS } from "./sounds";
-import { DEFAULT_VOICE_SETTINGS, loadVoiceSettings, sameSoundSettings, saveVoiceSettings, subscribeVoiceSettings, type VoiceSettingsSource } from "./settings";
+import { DEFAULT_VOICE_SETTINGS, withDeviceDefaults, loadVoiceSettings, sameSoundSettings, saveVoiceSettings, subscribeVoiceSettings, type VoiceSettingsSource } from "./settings";
 
 describe("voice settings", () => {
   it("falls back to the defaults without localStorage", () => {
@@ -16,6 +16,14 @@ describe("voice settings", () => {
     saveVoiceSettings(DEFAULT_VOICE_SETTINGS);
     expect(seen).toEqual(["user", "directory"]);
     expect(loadVoiceSettings()).toBe(DEFAULT_VOICE_SETTINGS);
+  });
+
+  it("applies the defaults for a phone once and then leaves the user's choice alone", () => {
+    expect(withDeviceDefaults(DEFAULT_VOICE_SETTINGS, false)).toBe(DEFAULT_VOICE_SETTINGS);
+    const phone = withDeviceDefaults(DEFAULT_VOICE_SETTINGS, true);
+    expect(phone).toMatchObject({ cameraQuality: "360p", mobileDefaults: true });
+    const chosen = { ...phone, cameraQuality: "720p" as const };
+    expect(withDeviceDefaults(chosen, true)).toBe(chosen);
   });
 
   it("compares cue settings field by field", () => {

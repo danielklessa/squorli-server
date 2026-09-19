@@ -12,6 +12,7 @@ import type { WebSocket } from "ws";
 import { registerAuthRoutes } from "./auth/routes";
 import { bootstrap } from "./bootstrap";
 import { loadConfig } from "./config";
+import { webAppManifest } from "./webManifest";
 import { createDb, runMigrations } from "./db";
 import { channels } from "./db/schema";
 import { Hub } from "./hub";
@@ -96,6 +97,11 @@ async function main() {
     const r = await leaveHandler(body.data.publicKey);
     if (r === "deleted" || r === "not_found") return reply.code(204).send();
     return reply.code(r === "unavailable" ? 502 : 409).send({ error: r });
+  });
+  // Web app manifest for "add to home screen": the name carries the server's name, so it cannot be a static file (webManifest.ts).
+  app.get("/api/manifest.webmanifest", async (_req, reply) => {
+    const name = await loadSettings(db).then((st) => st.name).catch(() => null);
+    return reply.header("cache-control", "no-cache").type("application/manifest+json; charset=utf-8").send(JSON.stringify(webAppManifest(name)));
   });
   app.get("/api/health", async () => ({
     ok: true,

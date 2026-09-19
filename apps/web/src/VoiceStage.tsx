@@ -217,8 +217,9 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
         {voice.cameraOn && VoiceClient.supportsBlur() && (
           <button className={`bar-btn ${voice.cameraBlur > 0 ? "on" : ""}`} title={voice.cameraBlur > 0 ? t("stage.unblur") : t("stage.blur")} onClick={() => { void onToggleBlur(); }}><Icon name="wand-sparkles" /></button>
         )}
-        <button className={`bar-btn ${voice.screenOn ? "on" : ""}`} disabled={!canStream} title={voice.afkRoom ? t("dock.afkChannel") : canStream ? (voice.screenOn ? t("stage.stopShare") : isChromium() ? t("stage.shareWithAudio") : t("stage.shareNoAudio")) : t("stage.noStreamPermission")}
-          onClick={() => client.setScreenShareEnabled(!voice.screenOn)}><Icon name={voice.screenOn ? "screen-share-off" : "screen-share"} /></button>
+        {/* Phones and tablets cannot share a screen (no getDisplayMedia): no button instead of one that only fails. */}
+        {VoiceClient.supportsScreenShare() && <button className={`bar-btn ${voice.screenOn ? "on" : ""}`} disabled={!canStream} title={voice.afkRoom ? t("dock.afkChannel") : canStream ? (voice.screenOn ? t("stage.stopShare") : isChromium() ? t("stage.shareWithAudio") : t("stage.shareNoAudio")) : t("stage.noStreamPermission")}
+          onClick={() => client.setScreenShareEnabled(!voice.screenOn)}><Icon name={voice.screenOn ? "screen-share-off" : "screen-share"} /></button>}
         <button className="bar-btn leave" title={t("voice.leave")} onClick={() => onLeave()}><Icon name="phone" rotate={135} /></button>
       </footer>
     </section>

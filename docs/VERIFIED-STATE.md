@@ -4,6 +4,12 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 Base check of the complete workflow: 14 September 2026, Windows 11, Node 25.2.1, pnpm 10.15.0, Docker 29, LiveKit 1.13.6.
 
+- **Home screen icon and name (19 September 2026):** root typecheck, tests (protocol 57, server 55 with 2 new, web 259, desktop 18) and build passed; client with `app-icons/` copied to `apps/server/public`. Dev server: `/api/manifest.webmanifest` answers `application/manifest+json`, `no-cache`, "Squorli - Test Server", also through Vite; icons served; the four PNGs inspected. Not checked: a real iPhone or Android phone, the smoke test.
+
+- **Microphone prompt inside the joining tap (19 September 2026):** root typecheck, tests (protocol 57, server 53, web 259, desktop 18) and build passed; client copied to `apps/server/public`. Real `VoiceClient` against the dev LiveKit in headless Chrome: the prepared capture is taken over (one `getUserMedia` for a join), released when the join does not happen or wants another mode. Not checked: the iPhone (Safari and home screen app), which is where the fault was reported.
+
+- **Camera choice and mobile devices (19 September 2026):** root typecheck, tests (protocol 57, server 53, web 259, desktop 18) and build passed; client copied to `apps/server/public`. The real `VoiceClient` against the dev LiveKit in headless Chrome with two fake cameras: the camera picked after switching off is opened (new publication), the same camera keeps its publication, resolution and device change on a running camera take effect, no error. Not checked: any real phone (whether the iPhone now reaches the voice activation threshold is open; the debug view's "Eingang" gives the raw level), Firefox with the republish path, smoke test (no server or protocol change).
+
 - **Mobile dialog opening focus (19 September 2026):** root typecheck, tests and build passed. Settings input autofocus disabled for narrow/coarse-pointer devices; both dialogs focus Close instead. Real-device keyboard behavior not tested.
 
 - **Mobile administration (19 September 2026):** root typecheck, tests and build passed. Real AdminPanel in an isolated Chrome harness with populated example data: all six categories fit 320x640, 390x844 and 700x400 without horizontal content overflow; full-viewport bounds, no page errors. Channel screenshot reviewed. Real phone keyboard and administrative writes not tested.

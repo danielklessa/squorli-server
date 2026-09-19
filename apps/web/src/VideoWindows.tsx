@@ -6,7 +6,7 @@ import { VideoAudioControls } from "./VideoAudioControls";
 import { t } from "./i18n";
 import { platform } from "./platform";
 import { activity, watchActivity } from "./activity";
-import { attachVideoView, fitVideoWindow, toggleVideoFullscreen, watchDocumentHidden } from "./videoDisplay";
+import { attachVideoView, fitVideoWindow, mirrorsOwnCamera, toggleVideoFullscreen, watchDocumentHidden } from "./videoDisplay";
 
 export function TrackVideo({ tile }: { tile: VideoTile }) {
   const ref = useRef<HTMLVideoElement>(null);
@@ -18,7 +18,8 @@ export function TrackVideo({ tile }: { tile: VideoTile }) {
     const element = ref.current!;
     return attachVideoView(tile.track, element);
   }, [tile.track, unseen]);
-  return <video ref={ref} className={tile.isLocal && tile.source === "camera" ? "mirror" : ""} autoPlay playsInline muted />;
+  const mirror = tile.isLocal && tile.source === "camera" && mirrorsOwnCamera(tile.track.mediaStreamTrack?.getSettings().facingMode);
+  return <video ref={ref} className={mirror ? "mirror" : ""} autoPlay playsInline muted />;
 }
 
 export function FullscreenButton({ target, onError }: { target: () => HTMLElement | null; onError: (message: string) => void }) {

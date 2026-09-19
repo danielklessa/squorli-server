@@ -4,6 +4,7 @@
  * follows the directory account (store.ts): a change here is reported to subscribers with its source, so the store can
  * push user changes to the directory and apply the account's settings without echoing them back.
  */
+import { detectMobile } from "../platform/mobile";
 import { DEFAULT_MIC_BOOST, normalizeMicBoost, type MicBoostSettings } from "./micBoost";
 import { DEFAULT_SOUND_SETTINGS, normalizeSoundSettings, type SoundSettings } from "./sounds";
 
@@ -37,6 +38,8 @@ export type VoiceSettings = {
   sounds: SoundSettings;
   /** Speaker view of the stage: may you yourself be shown large as the active speaker? Off = only others are featured. */
   featureSelfInSpeakerView: boolean;
+  /** The defaults for a phone or tablet were applied once (`withDeviceDefaults`); what the user chooses afterwards stays. */
+  mobileDefaults: boolean;
 };
 
 /** Who changed the settings: the user on this device, or the directory account (applied from the account, not pushed back). */
@@ -59,17 +62,29 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   cameraBlur: 0,
   sounds: { ...DEFAULT_SOUND_SETTINGS },
   featureSelfInSpeakerView: true,
+  mobileDefaults: false,
 };
+
+/**
+ * Defaults that fit a phone or tablet (platform/mobile.ts), applied ONCE per device, also to settings stored before this
+ * existed (19 September 2026, user's wish): the camera sends 360p, because three simulcast layers up to 720p cost battery
+ * and a mobile connection's upload. The user can set 720p again and it stays. The microphone needs no setting here: its
+ * boost gets wider limits on a phone by itself (micBoost.ts).
+ */
+export function withDeviceDefaults(s: VoiceSettings, mobile: boolean): VoiceSettings {
+  if (!mobile || s.mobileDefaults) return s;
+  return { ...s, cameraQuality: "360p", mobileDefaults: true };
+}
 
 function readStored(): VoiceSettings {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return { ...DEFAULT_VOICE_SETTINGS };
+    if (!raw) return withDeviceDefaults({ ...DEFAULT_VOICE_SETTINGS }, detectMobile());
     const stored = JSON.parse(raw) as Partial<VoiceSettings>;
     // `sounds` is nested, so it needs its own merge: settings stored before the cues existed have no such field.
-    return { ...DEFAULT_VOICE_SETTINGS, ...stored, sounds: normalizeSoundSettings(stored.sounds), micBoost: normalizeMicBoost(stored.micBoost) };
+    return withDeviceDefaults({ ...DEFAULT_VOICE_SETTINGS, ...stored, sounds: normalizeSoundSettings(stored.sounds), micBoost: normalizeMicBoost(stored.micBoost) }, detectMobile());
   } catch {
-    return { ...DEFAULT_VOICE_SETTINGS };
+    return withDeviceDefaults({ ...DEFAULT_VOICE_SETTINGS }, detectMobile());
   }
 }
 

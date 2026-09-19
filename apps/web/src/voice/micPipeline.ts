@@ -1,5 +1,5 @@
 import { VoiceGate, rmsLevel } from "./gate";
-import { AutoGain, DEFAULT_MIC_BOOST, SOFT_CLIP_RANGE, clampBoost, softClipCurve, type MicBoostSettings } from "./micBoost";
+import { AutoGain, DEFAULT_MIC_BOOST, DESKTOP_BOOST_LIMITS, MOBILE_BOOST_LIMITS, SOFT_CLIP_RANGE, clampBoost, softClipCurve, type MicBoostLimits, type MicBoostSettings } from "./micBoost";
 
 /**
  * Microphone pipeline: getUserMedia -> AudioContext -> boost (gain + clipping guard, micBoost.ts) -> [analyser for the level]
@@ -23,9 +23,10 @@ const isDeviceGone = (err: unknown) => {
  * while it exists; when it is gone, the default microphone takes over (`fellBack`) instead of the join failing
  * with "Constraints could not be satisfied". The stored choice stays, so the device is used again once it is back.
  */
+export type OpenedMic = { stream: MediaStream; fellBack: boolean };
 export async function openMic(
   getUserMedia: (c: MediaStreamConstraints) => Promise<MediaStream>, deviceId: string | null, stereo: boolean,
-): Promise<{ stream: MediaStream; fellBack: boolean }> {
+): Promise<OpenedMic> {
   const audio = (id: string | null): MediaTrackConstraints => ({
     ...(id ? { deviceId: { exact: id } } : {}),
     // Use the browser's own processing (PLAN 7: "browser-native echo/noise suppression").
@@ -46,7 +47,7 @@ export async function openMic(
 /** The automatic boost's last gain per microphone, so a quiet microphone is not quiet again for the first seconds of every join. */
 const BOOST_KEY = "chat.micBoost.v1";
 function rememberedBoost(key: string): number {
-  try { return clampBoost((JSON.parse(localStorage.getItem(BOOST_KEY) ?? "{}") as Record<string, unknown>)[key]); } catch { return 1; }
+  try { return clampBoost((JSON.parse(localStorage.getItem(BOOST_KEY) ?? "{}") as Record<string, unknown>)[key], MOBILE_BOOST_LIMITS.max); } catch { return 1; }
 }
 function rememberBoost(key: string, gain: number): void {
   try {
@@ -79,16 +80,19 @@ export class MicPipeline {
   private mode: GateMode = "vad";
   private pttHeld = false;
   private forcedOpen = false;
-  /** Current level (0..1, behind the boost), whether the gate is open, and the boost applied right now (1 = none); for the display. */
-  readonly state = { level: 0, open: false, boost: 1 };
-  onState: ((s: { level: number; open: boolean; boost: number }) => void) | null = null;
+  /** Current level (0..1, behind the boost), the raw level in front of it, whether the gate is open, and the boost applied right now (1 = none); for the display. */
+  readonly state = { level: 0, input: 0, open: false, boost: 1 };
+  onState: ((s: { level: number; input: number; open: boolean; boost: number }) => void) | null = null;
   /** The last start() used the default microphone because the chosen device was gone. */
   deviceFallback = false;
 
   private ownsCtx: boolean;
 
-  /** @param ctx shared AudioContext (created by the VoiceClient inside a user gesture); without it the pipeline creates its own. */
-  constructor(threshold: number, hangoverMs: number, ctx?: AudioContext) {
+  /**
+   * @param ctx shared AudioContext (created by the VoiceClient inside a user gesture); without it the pipeline creates its own.
+   * @param limits how far the boost may go on this device (a phone needs more, micBoost.ts)
+   */
+  constructor(threshold: number, hangoverMs: number, ctx?: AudioContext, private readonly limits: MicBoostLimits = DESKTOP_BOOST_LIMITS) {
     this.gate = new VoiceGate(threshold, hangoverMs);
     this.ctx = ctx ?? null;
     this.ownsCtx = !ctx;
@@ -97,10 +101,13 @@ export class MicPipeline {
   /** State of the AudioContext ("running" is required, otherwise the microphone stays silent). */
   contextState(): string { return this.ctx?.state ?? "none"; }
 
-  /** Starts the capture. Returns the track that is published to LiveKit. */
-  async start(deviceId: string | null, stereo = false): Promise<MediaStreamTrack> {
+  /**
+   * Starts the capture. Returns the track that is published to LiveKit.
+   * @param preopened a microphone already asked for inside the user's gesture (`VoiceClient.prepareMic()`), opened with the same device and mode
+   */
+  async start(deviceId: string | null, stereo = false, preopened?: Promise<OpenedMic>): Promise<MediaStreamTrack> {
     await this.stopCapture();
-    const opened = await openMic((c) => navigator.mediaDevices.getUserMedia(c), deviceId, stereo);
+    const opened = await (preopened ?? openMic((c) => navigator.mediaDevices.getUserMedia(c), deviceId, stereo));
     this.stream = opened.stream;
     this.deviceFallback = opened.fellBack;
     if (!this.ctx || this.ctx.state === "closed") { this.ctx = new AudioContext(); this.ownsCtx = true; }
@@ -132,7 +139,7 @@ export class MicPipeline {
     this.shaper.connect(this.gain);
     this.boostKey = `${this.activeDeviceId() ?? "default"}${stereo ? "|stereo" : ""}`;
     this.rememberedGain = rememberedBoost(this.boostKey);
-    this.autoGain = new AutoGain(this.rememberedGain);
+    this.autoGain = new AutoGain(this.rememberedGain, this.limits);
     this.applyBoost(true);
     this.gain.connect(this.dest);
     if (this.monitor && this.monitor.context !== this.ctx) this.monitor = null;
@@ -173,7 +180,7 @@ export class MicPipeline {
   }
 
   /** Boost settings (Einstellungen > Sprache und Audio); takes effect at once. */
-  setBoost(b: MicBoostSettings) { this.boost = { auto: b.auto, gain: clampBoost(b.gain) }; this.applyBoost(true); }
+  setBoost(b: MicBoostSettings) { this.boost = { auto: b.auto, gain: clampBoost(b.gain, this.limits.max) }; this.applyBoost(true); }
 
   /** Sets the boost's gain: learned (automatic) or by hand. The node gets gain / SOFT_CLIP_RANGE, see micBoost.ts. */
   private applyBoost(immediately = false) {
@@ -186,9 +193,9 @@ export class MicPipeline {
 
   private tick() {
     if (!this.analyser) return;
+    if (this.inputAnalyser) { this.inputAnalyser.getFloatTimeDomainData(this.samples); this.state.input = rmsLevel(this.samples); }
     if (this.inputAnalyser && this.autoGain && this.boost.auto) {
-      this.inputAnalyser.getFloatTimeDomainData(this.samples);
-      const g = this.autoGain.update(rmsLevel(this.samples));
+      const g = this.autoGain.update(this.state.input);
       if (g !== this.state.boost) this.applyBoost();
       if (Math.abs(g - this.rememberedGain) >= 0.1) { this.rememberedGain = g; rememberBoost(this.boostKey, g); }
     }
@@ -207,7 +214,7 @@ export class MicPipeline {
       this.gain.gain.setTargetAtTime(open ? 1 : 0, t, 0.01);
     }
     if (open !== this.state.open) this.state.open = open;
-    this.onState?.({ level: this.state.level, open, boost: this.state.boost });
+    this.onState?.({ level: this.state.level, input: this.state.input, open, boost: this.state.boost });
   }
 
   private async stopCapture() {
@@ -217,7 +224,7 @@ export class MicPipeline {
     this.source = this.inputAnalyser = this.pre = this.shaper = this.analyser = this.gain = this.dest = null;
     this.autoGain = null;
     this.stream = null;
-    this.state.level = 0; this.state.open = false;
+    this.state.level = 0; this.state.input = 0; this.state.open = false;
   }
 
   async stop() {

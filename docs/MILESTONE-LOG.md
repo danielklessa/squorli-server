@@ -4,6 +4,9 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 | Date | Change |
 |---|---|
+| 2026-09-19 | The web client on a phone's home screen: Squorli icons (`tools/web-app-icons.mjs`, `apps/web/public/app-icons/`), manifest as the server route `/api/manifest.webmanifest` with the name "Squorli - <server name>", Apple tags in `index.html`. Not tested on a phone. Notes: `docs/features/home-screen.md`. |
+| 2026-09-19 | The microphone is asked for inside the tap that joins (`VoiceClient.prepareMic()` in `App.joinVoice()`), and `join()` takes that capture over: WebKit refuses a prompt seconds after the tap, so an iPhone's home screen app could join no channel. Not tested on an iPhone. Notes: `docs/features/voice-video.md`. |
+| 2026-09-19 | Camera picked in the dialog is really opened (LiveKit ignored the choice once a switched-off camera track existed: `voice/cameraSwitch.ts`); a changed send resolution takes effect on a running camera. Phones and tablets recognised by the device (`platform/mobile.ts`, `Platform.mobile`): wider microphone boost limits (x40, the iPhone never reached the threshold), 360p as the default applied once, rear camera not mirrored, no screen share button without `getDisplayMedia`, raw microphone level in the debug view. Not tested on a real phone. Notes: `docs/features/voice-video.md`. |
 | 2026-09-19 | Settings and server administration focus Close on mobile opening; desktop profile autofocus retained. |
 | 2026-09-19 | Server administration adopts the mobile settings layout: full viewport, categories on the left, independent scrolling, stacked role/channel forms and larger touch controls. |
 | 2026-09-19 | Mobile settings use the full viewport, compact categories on the left, independent scrolling, larger touch controls and wrapping session/license content. Desktop unchanged. |

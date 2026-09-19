@@ -11,7 +11,7 @@ import { activity } from "./activity";
 import { platform, type WindowAppearance } from "./platform";
 import { DOWNLOAD_URL, describeUpdate, useUpdateState } from "./appUpdates";
 import { idleDetectionSupported, idleDetectionWanted, setIdleDetection } from "./idleDetection";
-import { MIC_BOOST_MAX } from "./voice/micBoost";
+import { boostLimits } from "./voice/micBoost";
 import { saveVoiceSettings, type VoiceSettings } from "./voice/settings";
 import { SOUND_CUES, type SoundCue, type SoundSettings } from "./voice/sounds";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
@@ -347,11 +347,11 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
                 {!settings.micBoost.auto && (
                   <label className="stack">
                     {t("settings.micBoostGain", { pct: Math.round(settings.micBoost.gain * 100) })}
-                    <input type="range" min={1} max={MIC_BOOST_MAX} step={0.25} value={settings.micBoost.gain} onChange={(e) => update({ micBoost: { ...settings.micBoost, gain: Number(e.target.value) } })} />
+                    <input type="range" min={1} max={boostLimits(platform.mobile).max} step={0.25} value={settings.micBoost.gain} onChange={(e) => update({ micBoost: { ...settings.micBoost, gain: Number(e.target.value) } })} />
                   </label>
                 )}
                 <span className="muted small">
-                  {(joined || voice.micTest) && settings.micBoost.auto && (!voice.afkRoom || voice.micTest) ? `${t("settings.micBoostNow", { pct: Math.round(voice.micBoost * 100) })} ` : ""}{t("settings.micBoostHint", { max: MIC_BOOST_MAX * 100 })}
+                  {(joined || voice.micTest) && settings.micBoost.auto && (!voice.afkRoom || voice.micTest) ? `${t("settings.micBoostNow", { pct: Math.round(voice.micBoost * 100) })} ` : ""}{t("settings.micBoostHint", { max: boostLimits(platform.mobile).max * 100 })}
                 </span>
                 <h3>{t("settings.output")}</h3>
                 <label className="stack">
@@ -429,7 +429,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
                     <option value="720p">{t("settings.q720")}</option>
                     <option value="360p">{t("settings.q360")}</option>
                   </select>
-                  <span className="muted small">{t("settings.qualityHint")}</span>
+                  <span className="muted small">{t("settings.qualityHint")}{platform.mobile ? ` ${t("settings.qualityMobile")}` : ""}</span>
                 </label>
                 <label className="stack">
                   {t("settings.background")}

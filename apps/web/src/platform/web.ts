@@ -1,3 +1,4 @@
+import { detectMobile } from "./mobile";
 import type { Platform, PlatformOs } from "./types";
 
 export function osFromUserAgent(ua: string): PlatformOs {
@@ -15,14 +16,16 @@ export function webPlatform(): Platform {
   // Development only: `VITE_HOMELESS=1 pnpm --filter @squorli/web dev` runs the client as the desktop app would, without a
   // home server and against the local directory, so that mode can be tried in a browser (docs/features/desktop.md).
   const homeless = import.meta.env.DEV && import.meta.env.VITE_HOMELESS === "1";
+  const mobile = detectMobile();
   return {
     kind: "web",
     os: osFromUserAgent(navigator.userAgent),
+    mobile,
     app: null,
     home: homeless ? null : { host: window.location.host, signDomain: window.location.hostname },
     systemIdle: "permission",
     defaultDirectoryUrl: homeless ? (import.meta.env.VITE_DIRECTORY_URL as string | undefined) ?? "http://localhost:3100" : null,
-    media: { blocksInsecureMedia: window.location.protocol === "https:", screenSharePublishOverrides: () => null, takeScreenAudio: async () => null, stopScreenAudio: () => {} },
+    media: { mobile, blocksInsecureMedia: window.location.protocol === "https:", screenSharePublishOverrides: () => null, takeScreenAudio: async () => null, stopScreenAudio: () => {} },
     links: {
       openExternal: (url) => { window.open(url, "_blank", "noopener"); },
       onDeepLink: () => () => {},

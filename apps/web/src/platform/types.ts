@@ -12,6 +12,8 @@ export type ScreenPicker = (sources: ScreenSource[]) => Promise<ScreenPick | nul
 
 /** What the voice core needs from the platform (handed to `VoiceClient`, which imports no platform module). */
 export interface PlatformMedia {
+  /** A phone or tablet (platform/mobile.ts): its microphone arrives far quieter, so the boost gets wider limits (voice/micBoost.ts). */
+  readonly mobile: boolean;
   /** The page may not load http/ws resources (https page, desktop app); only changes what hints say. */
   readonly blocksInsecureMedia: boolean;
   /** Publish options that replace the client's defaults for a screen share (codec test on the desktop); null = none. */
@@ -34,6 +36,8 @@ export interface PlatformMedia {
 export interface Platform {
   readonly kind: "web" | "desktop";
   readonly os: PlatformOs;
+  /** A phone or tablet, told by the device and not by the window's width (platform/mobile.ts); the desktop app never is one. */
+  readonly mobile: boolean;
   /** Desktop: versions for the settings; web: null (the server's version is shown). */
   readonly app: { version: string; electron: string; chrome: string } | null;
   /** The server that serves the page; null = none (desktop app: the client starts from the directory account). */

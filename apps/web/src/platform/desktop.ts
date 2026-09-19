@@ -42,12 +42,13 @@ export function desktopPlatform(bridge: DesktopBridge): Platform {
   return {
     kind: "desktop",
     os: info.os,
+    mobile: false,
     app: { version: info.version, electron: info.electron, chrome: info.chrome },
     home: null,
     defaultDirectoryUrl: info.directoryUrl,
     systemIdle: "always",
     // app:// is a secure scheme; only the development window (Vite over http) may load http resources.
-    media: { blocksInsecureMedia: window.location.protocol !== "http:", screenSharePublishOverrides: () => null, takeScreenAudio: () => audio.take(), stopScreenAudio: () => audio.stop() },
+    media: { mobile: false, blocksInsecureMedia: window.location.protocol !== "http:", screenSharePublishOverrides: () => null, takeScreenAudio: () => audio.take(), stopScreenAudio: () => audio.stop() },
     links: {
       openExternal: (url) => bridge.openExternal(url),
       onDeepLink: (cb) => bridge.onDeepLink((raw) => { const link = parseDeepLink(raw); if (link) cb(link); }),

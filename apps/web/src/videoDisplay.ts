@@ -63,6 +63,12 @@ export function attachVideoView<T>(track: ViewTrack<T>, element: T) {
  * a while: a track without an attached element is paused by adaptiveStream, one that still shows in a visible window plays on.
  * Calls `onChange(true)` once the document has been hidden for `delayMs`, `onChange(false)` as soon as it is visible again.
  */
+/**
+ * Is the own camera shown mirrored? Yes, like a mirror, as every video app does, EXCEPT a phone's rear camera
+ * (`facingMode: "environment"` in the track's settings): what it shows is in front of the user, and mirrored text there reads backwards.
+ */
+export const mirrorsOwnCamera = (facingMode: string | undefined): boolean => facingMode !== "environment";
+
 export const HIDDEN_PAUSE_DELAY_MS = 5000;
 export function watchDocumentHidden(doc: { hidden: boolean; addEventListener: (type: "visibilitychange", fn: () => void) => void; removeEventListener: (type: "visibilitychange", fn: () => void) => void },
   onChange: (hiddenForLong: boolean) => void, delayMs = HIDDEN_PAUSE_DELAY_MS): () => void {

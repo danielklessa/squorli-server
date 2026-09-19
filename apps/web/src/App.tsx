@@ -19,7 +19,7 @@ import { askConfirm, askInput } from "./dialogs";
 import type { MenuAnchor } from "./ContextMenu";
 import { MiniProfile } from "./MiniProfile";
 import { SettingsDialog, type SettingsTab } from "./SettingsDialog";
-import { applyBranding } from "./branding";
+import { applyBranding, applyHomeScreenName } from "./branding";
 import { ServerBrowser } from "./ServerBrowser";
 import { ServerRail } from "./ServerRail";
 import { buildRailServers } from "./railServers";
@@ -179,17 +179,28 @@ export function App() {
     if (!conn) return;
     if (!opts.auto) { setStageOpen(true); setAfkReturn(null); }
     if (voiceHostRef.current === host && voice.channelId === channelId && !opts.force) return;
-    if (voiceHostRef.current && voiceHostRef.current !== host) await leaveVoice();
-    const { url, token } = await conn.api.rtcToken(channelId);
-    const ice = new URLSearchParams(window.location.search).get("ice");
     const srv = conn.state.server;
     const ch = srv?.channels.find((c) => c.id === channelId);
-    await client.join(channelId, url, token, loadVoiceSettings(), {
-      ...(ice === "relay" ? { iceTransportPolicy: "relay" as const } : {}),
-      audio: { bitrate: ch?.audioBitrate ?? 64, stereo: ch?.audioStereo ?? false },
-      ...(srv ? { video: { access: videoAccessOf(srv), mayView: hasPermission(srv.myPermissions, Permission.VIEW_VIDEO) }, peerKeys: peerKeysOf(srv.members) } : {}),
-      afk: !!srv && srv.settings.afkChannelId === channelId,
-    });
+    const afk = !!srv && srv.settings.afkChannelId === channelId;
+    const settings = loadVoiceSettings();
+    // Also still inside the gesture: WebKit shows its microphone prompt only while the tap counts, and the capture itself
+    // starts seconds later, after the token and the connection (an iPhone's home screen app could join no channel).
+    // Not for the AFK channel (no microphone there). A join without a gesture loses nothing: the request is the same one, only earlier.
+    if (!afk) client.prepareMic(settings.inputDeviceId, ch?.audioStereo ?? false);
+    try {
+      if (voiceHostRef.current && voiceHostRef.current !== host) await leaveVoice();
+      const { url, token } = await conn.api.rtcToken(channelId);
+      const ice = new URLSearchParams(window.location.search).get("ice");
+      await client.join(channelId, url, token, settings, {
+        ...(ice === "relay" ? { iceTransportPolicy: "relay" as const } : {}),
+        audio: { bitrate: ch?.audioBitrate ?? 64, stereo: ch?.audioStereo ?? false },
+        ...(srv ? { video: { access: videoAccessOf(srv), mayView: hasPermission(srv.myPermissions, Permission.VIEW_VIDEO) }, peerKeys: peerKeysOf(srv.members) } : {}),
+        afk,
+      });
+    } catch (err) {
+      client.releasePreparedMic(); // the token or the connection failed before the capture was taken over
+      throw err;
+    }
     setVoiceHost(host);
     conn.send({ type: "voice.join", channelId });
   }, [client, store, voice.channelId, leaveVoice]);
@@ -294,6 +305,8 @@ export function App() {
   const title = active?.server?.settings.name ?? active?.serverName ?? "Squorli";
   const iconUrl = active?.server && conn ? (active.server.settings.iconUrl ? conn.api.abs(active.server.settings.iconUrl) : null) : active?.iconUrl ?? null;
   useEffect(() => applyBranding(title, iconUrl), [title, iconUrl]);
+  const homeName = home?.server?.settings.name ?? home?.serverName ?? null;
+  useEffect(() => applyHomeScreenName(homeName), [homeName]);
 
   // With a home server the client hangs off the session there; without one (desktop app) it has a login of its own.
   const homeless = state.homeHost === null;

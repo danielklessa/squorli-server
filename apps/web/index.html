@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Squorli</title>
     <link rel="icon" type="image/svg+xml" href="/brand/squorli-icon-small.svg" />
+    <!-- On a phone's home screen: the Squorli mark as the icon, "Squorli - <server name>" as the name. The manifest is a route
+         of the app server because of that name (apps/server/src/webManifest.ts); iOS reads the two Apple tags instead, the
+         title is completed by branding.ts once the server's name is known. Icons: tools/web-app-icons.mjs; after regenerating
+         them raise ?v= here and APP_ICON_VERSION there (static files are cached for a year). -->
+    <link rel="manifest" href="/api/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/app-icons/apple-touch-icon.png?v=1" />
+    <meta name="apple-mobile-web-app-title" content="Squorli" />
+    <meta name="theme-color" content="#0C1424" />
     <link rel="stylesheet" href="/brand/squorli-tokens.css" />
   </head>
   <body>

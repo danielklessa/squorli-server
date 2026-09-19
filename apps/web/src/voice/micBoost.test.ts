@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AutoGain, MIC_BOOST_MAX, MIC_BOOST_TARGET, SOFT_CLIP_RANGE, normalizeMicBoost, softClip, softClipCurve } from "./micBoost";
+import { AutoGain, DESKTOP_BOOST_LIMITS, MIC_BOOST_MAX, MIC_BOOST_TARGET, MOBILE_BOOST_LIMITS, SOFT_CLIP_RANGE, boostLimits, normalizeMicBoost, softClip, softClipCurve } from "./micBoost";
 
 /** `seconds` of frames (50 ms each): speech at `speech` with short pauses at `noise`, like talking. */
 function talk(g: AutoGain, seconds: number, speech: number, noise: number): number {
@@ -22,6 +22,24 @@ describe("AutoGain", () => {
   it("stops at the maximum for a very quiet microphone", () => {
     expect(talk(new AutoGain(), 20, 0.004, 0.0003)).toBeLessThanOrEqual(MIC_BOOST_MAX);
     expect(talk(new AutoGain(), 20, 0.004, 0.0003)).toBeGreaterThan(MIC_BOOST_MAX * 0.9);
+  });
+  it("a phone's very quiet capture: a computer's limits never start, the phone's reach the voice activation threshold", () => {
+    // The reported iPhone case as assumed (not measured): speech far below the 0.003 a computer takes for the quietest speech.
+    const speech = 0.002;
+    expect(talk(new AutoGain(), 20, speech, 0.0001)).toBe(1);
+    const gain = talk(new AutoGain(1, MOBILE_BOOST_LIMITS), 20, speech, 0.0001);
+    expect(gain).toBeLessThanOrEqual(MOBILE_BOOST_LIMITS.max);
+    expect(gain * speech).toBeGreaterThan(0.04); // DEFAULT_VOICE_SETTINGS.vadThreshold
+  });
+  it("a phone does not learn from steady noise either", () => {
+    const g = new AutoGain(1, MOBILE_BOOST_LIMITS);
+    for (let i = 0; i < 600; i++) g.update(0.002);
+    expect(g.gain).toBe(1);
+  });
+  it("picks the limits by device", () => {
+    expect(boostLimits(false)).toBe(DESKTOP_BOOST_LIMITS);
+    expect(boostLimits(true)).toBe(MOBILE_BOOST_LIMITS);
+    expect(DESKTOP_BOOST_LIMITS.max).toBe(MIC_BOOST_MAX);
   });
   it("does not learn from silence or steady noise", () => {
     const g = new AutoGain();
@@ -67,6 +85,7 @@ describe("normalizeMicBoost", () => {
   it("defaults to automatic and repairs rubbish", () => {
     expect(normalizeMicBoost(undefined)).toEqual({ auto: true, gain: 1 });
     expect(normalizeMicBoost({ auto: false, gain: 3 })).toEqual({ auto: false, gain: 3 });
-    expect(normalizeMicBoost({ auto: "yes", gain: 40 })).toEqual({ auto: true, gain: MIC_BOOST_MAX });
+    // Stored settings keep what a phone may set; the pipeline clamps to the limits of the device it runs on.
+    expect(normalizeMicBoost({ auto: "yes", gain: 400 })).toEqual({ auto: true, gain: MOBILE_BOOST_LIMITS.max });
   });
 });
