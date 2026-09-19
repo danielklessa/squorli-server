@@ -20,6 +20,7 @@ import { BackgroundBlur, supportsBackgroundProcessors, type BackgroundProcessorW
 import { VoiceGate, rmsLevel } from "./gate";
 import { boostLimits, type MicBoostSettings } from "./micBoost";
 import { MicPipeline, openMic, type GateMode, type OpenedMic } from "./micPipeline";
+import { micPermissionState, micRefusal } from "./micPermission";
 import { isCameraBusy, retryCameraBusy } from "./cameraRetry";
 import { cameraSwitch, type CameraRequest } from "./cameraSwitch";
 import type { VoiceSettings } from "./settings";
@@ -462,7 +463,10 @@ export class VoiceClient {
       const message = errorText(err);
       this.releasePreparedMic();
       await this.leave();
-      this.patch({ error: micFailed ? t("voice.errMic", { err: message }) : explainConnectError(message, url, this.media?.blocksInsecureMedia ?? false), rtcUrl: url });
+      // A refused microphone: WebKit has one text for every cause, so the browser's permission state picks ours (micPermission.ts).
+      const refused = micFailed && isPermissionRefused(err) ? micRefusal(await micPermissionState()) : null;
+      const text = refused === "denied" ? t("voice.errMicDenied") : refused === "notAsked" ? t("voice.errMicNotAsked") : refused === "system" ? t("voice.errMicSystem") : micFailed ? t("voice.errMic", { err: message }) : explainConnectError(message, url, this.media?.blocksInsecureMedia ?? false);
+      this.patch({ error: text, rtcUrl: url });
       throw err;
     }
   }

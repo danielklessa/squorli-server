@@ -174,19 +174,21 @@ export function App() {
    * `force` joins again although already there (a fresh token with the grants that fit the channel now).
    */
   const joinVoice = useCallback(async (host: string, channelId: string, opts: { auto?: boolean; force?: boolean } = {}) => {
-    client.prepareAudio(); // still inside the user gesture, before the first await (browsers' autoplay/AudioContext rules)
     const conn = store.connection(host);
-    if (!conn) return;
-    if (!opts.auto) { setStageOpen(true); setAfkReturn(null); }
-    if (voiceHostRef.current === host && voice.channelId === channelId && !opts.force) return;
-    const srv = conn.state.server;
+    const srv = conn?.state.server;
     const ch = srv?.channels.find((c) => c.id === channelId);
     const afk = !!srv && srv.settings.afkChannelId === channelId;
     const settings = loadVoiceSettings();
-    // Also still inside the gesture: WebKit shows its microphone prompt only while the tap counts, and the capture itself
-    // starts seconds later, after the token and the connection (an iPhone's home screen app could join no channel).
+    const joinsNow = !!conn && (voiceHostRef.current !== host || voice.channelId !== channelId || !!opts.force);
+    // Inside the user gesture, before the first await, and the microphone FIRST: WebKit shows its microphone prompt only
+    // while the tap counts, and the capture itself starts seconds later, after the token and the connection (an iPhone's
+    // home screen app could join no channel). Nothing that starts audio comes before the request.
     // Not for the AFK channel (no microphone there). A join without a gesture loses nothing: the request is the same one, only earlier.
-    if (!afk) client.prepareMic(settings.inputDeviceId, ch?.audioStereo ?? false);
+    if (joinsNow && !afk) client.prepareMic(settings.inputDeviceId, ch?.audioStereo ?? false);
+    client.prepareAudio(); // the same gesture (browsers' autoplay/AudioContext rules)
+    if (!conn) return;
+    if (!opts.auto) { setStageOpen(true); setAfkReturn(null); }
+    if (!joinsNow) return;
     try {
       if (voiceHostRef.current && voiceHostRef.current !== host) await leaveVoice();
       const { url, token } = await conn.api.rtcToken(channelId);
@@ -447,7 +449,11 @@ export function App() {
         participants={view.active.voice[voicePreview] ?? []} members={view.server.members}
         connected={voiceHost === activeHost && voice.channelId === voicePreview && voice.status !== "disconnected"}
         onClose={() => setVoicePreview(null)}
-        onJoin={async () => { await joinVoice(view.active.host, voicePreview); setStageOpen(true); setMobileContent(true); setVoicePreview(null); }} />}
+        onJoin={async () => {
+          // The sheet shows what went wrong; the voice client's text explains it, the bare error does not.
+          try { await joinVoice(view.active.host, voicePreview); } catch (err) { throw new Error(client.state.error ?? (err instanceof Error ? err.message : String(err))); }
+          setStageOpen(true); setMobileContent(true); setVoicePreview(null);
+        }} />}
       {!homeOpen && view && <MemberList api={view.conn.api} members={view.server.members} roles={view.server.roles} myUserId={view.active.userId!} myPermissions={view.server.myPermissions} ownerId={view.server.settings.ownerId}
         voice={view.active.voice} channels={view.server.channels} friends={friendsMenu} client={client} />}
 
