@@ -81,6 +81,8 @@ export const DirectoryAccount = z.object({
   displayName: DisplayName.nullable().default(null),
   /** Display name for exactly the server from `?server=<host>` (only with its token); null if there is no entry. Takes precedence over `displayName`. */
   serverDisplayName: DisplayName.nullable().default(null),
+  /** Avatar (19 September 2026): when the account last stored an image, null = none. Public like the handle; the image is at `directoryAvatarUrl`. */
+  avatarUpdatedAt: Iso.nullable().default(null),
 });
 
 // ---- M6b: password-encrypted key backup (crypto in backup.ts)
@@ -122,7 +124,7 @@ export const BackupBlob = z.object({ handle: Handle, publicKey: PublicKey, ciphe
 
 // ---- M6c: signed account actions (authenticator, recovery codes, account status). Same pattern as registration
 // and backup: challenge + signature over host, nonce and payload (for actions with a code, the code is the payload).
-export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends", "server-leave", "sound-settings", "email-set", "email-verify", "email-code", "settings"]);
+export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends", "server-leave", "sound-settings", "email-set", "email-verify", "email-code", "settings", "avatar-set"]);
 export type DirectoryAction = z.infer<typeof DirectoryAction>;
 export function directoryActionMessage(directoryHost: string, action: DirectoryAction, nonce: string, payload = ""): string {
   return `community-directory-${action}\n${directoryHost}\n${nonce}\n${payload}`;
@@ -154,6 +156,42 @@ export function directoryProfilePayload(server: string | null, displayName: stri
   return `${server ?? ""}\n${displayName ?? ""}`;
 }
 export const ProfileUpdateRequest = SignedActionRequest.extend({ server: ServerHost.nullable(), displayName: DisplayName.nullable() });
+
+// ---- Avatars (19 September 2026): one image per handle, shown instead of the initials. The clients crop to a square and scale to
+// AVATAR_SIZE before the upload, so the service (which has no image library) only checks type and size. The image is public like the
+// handle (GET /api/avatars/<key>). Signed action `avatar-set`, payload "<mime>\n<sha256 hex of the image bytes>" (empty = remove),
+// so the image cannot be swapped under the signature. `avatar: null` removes it.
+export const AVATAR_MAX_BYTES = 512 * 1024;
+export const AVATAR_SIZE = 256;
+export const AvatarMime = z.enum(["image/png", "image/jpeg", "image/webp"]);
+export type AvatarMime = z.infer<typeof AvatarMime>;
+export function directoryAvatarPayload(mime: AvatarMime | null, sha256Hex: string | null): string {
+  return mime && sha256Hex ? `${mime}\n${sha256Hex}` : "";
+}
+export const AvatarUpdateRequest = SignedActionRequest.extend({
+  avatar: z.object({ mime: AvatarMime, data: z.string().min(1).max(Math.ceil(AVATAR_MAX_BYTES / 3) * 4).regex(/^[A-Za-z0-9+/]+={0,2}$/, "base64") }).nullable(),
+});
+export type AvatarUpdateRequest = z.infer<typeof AvatarUpdateRequest>;
+export const AvatarUpdateResponse = z.object({ ok: z.literal(true), avatarUpdatedAt: Iso.nullable() });
+export type AvatarUpdateResponse = z.infer<typeof AvatarUpdateResponse>;
+/** The image type by its first bytes (PNG, JPEG, WebP); null for anything else. The service stores only what it recognizes. */
+export function sniffAvatarMime(b: Uint8Array): AvatarMime | null {
+  const at = (i: number) => b[i] ?? -1;
+  if (at(0) === 0x89 && at(1) === 0x50 && at(2) === 0x4e && at(3) === 0x47 && at(4) === 0x0d && at(5) === 0x0a && at(6) === 0x1a && at(7) === 0x0a) return "image/png";
+  if (at(0) === 0xff && at(1) === 0xd8 && at(2) === 0xff) return "image/jpeg";
+  if (at(0) === 0x52 && at(1) === 0x49 && at(2) === 0x46 && at(3) === 0x46 && at(8) === 0x57 && at(9) === 0x45 && at(10) === 0x42 && at(11) === 0x50) return "image/webp";
+  return null;
+}
+/** SHA-256 of the image bytes as hex (WebCrypto: browser and Node), the second line of the `avatar-set` payload. */
+export async function avatarDigest(bytes: Uint8Array): Promise<string> {
+  const hash = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", bytes as BufferSource));
+  return Array.from(hash, (x) => x.toString(16).padStart(2, "0")).join("");
+}
+/** Address of an account's avatar; `updatedAt` (from DirectoryAccount/Friend/AccountStatus) is the cache version, null = no avatar. */
+export function directoryAvatarUrl(directoryUrl: string, publicKey: string, updatedAt: string | null): string | null {
+  if (!updatedAt) return null;
+  return `${directoryUrl.replace(/\/+$/, "")}/api/avatars/${publicKey}?v=${Date.parse(updatedAt)}`;
+}
 
 // ---- Voice cue settings in the account (16 September 2026): the switches for the four join/leave cues plus one volume follow the
 // account across chat servers and devices. The chat client keeps a per-device copy (its "local profile") so servers without a
@@ -321,8 +359,8 @@ export const DirectoryHealth = z.object({
   service: z.literal("directory"),
   /** Host that registration signatures are bound to. */
   host: z.string(),
-  /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. `email`: SMTP configured (address, notices, e-mail code). `settings`: the account stores all client settings (action `settings`). `afk`: the socket takes `activity` and friends carry `afk` (AFK detection). `emailRequired`: new handles need a confirmed e-mail address (REQUIRE_EMAIL; registration in two steps, see DirectoryRegisterRequest). */
-  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false), settings: z.boolean().default(false), afk: z.boolean().default(false), emailRequired: z.boolean().default(false) }),
+  /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. `email`: SMTP configured (address, notices, e-mail code). `settings`: the account stores all client settings (action `settings`). `afk`: the socket takes `activity` and friends carry `afk` (AFK detection). `emailRequired`: new handles need a confirmed e-mail address (REQUIRE_EMAIL; registration in two steps, see DirectoryRegisterRequest). `avatars`: the account stores one avatar image (action `avatar-set`, GET /api/avatars/<key>). */
+  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false), settings: z.boolean().default(false), afk: z.boolean().default(false), emailRequired: z.boolean().default(false), avatars: z.boolean().default(false) }),
   time: Iso,
 });
 

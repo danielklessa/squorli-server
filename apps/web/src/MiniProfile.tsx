@@ -8,10 +8,11 @@ import { t } from "./i18n";
  * Mini profile, opened by clicking your own name in the dock: who you are here (name, handle) and the one thing that can be
  * changed on the spot, your display name on the server shown. Everything else lives in the settings (gear, or the button here).
  */
-export function MiniProfile({ anchor, displayName, serverName, handle, storedName, withDirectory, onSave, onOpenSettings, onClose }: {
+export function MiniProfile({ anchor, displayName, avatarUrl, serverName, handle, storedName, withDirectory, onSave, onOpenSettings, onClose }: {
   anchor: MenuAnchor;
   /** Your name as the server shows it right now. */
   displayName: string;
+  avatarUrl: string | null;
   /** The name set for this server (null = none, the global name or the handle applies). */
   storedName: string | null;
   serverName: string | null; handle: string | null;
@@ -36,7 +37,7 @@ export function MiniProfile({ anchor, displayName, serverName, handle, storedNam
   return (
     <ContextMenu anchor={anchor} label={t("mini.title")} onClose={onClose}>
       <div className="context-identity">
-        <Avatar name={name.trim() || displayName} size="medium" />
+        <Avatar name={name.trim() || displayName} src={avatarUrl} size="medium" />
         <div><strong>{name.trim() || displayName}</strong><span className="muted small">{handle ? `@${handle}` : t("profile.noHandle")}</span></div>
       </div>
       <div className="mini-profile stack">

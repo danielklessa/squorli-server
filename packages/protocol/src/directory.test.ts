@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  ACCOUNT_SETTINGS_MAX_LENGTH, AccountSettings, AccountSettingsUpdateRequest, DirectoryHealth, DirectoryRegisterRequest, Handle, directoryRegisterMessage, parseAccountSettings,
+  ACCOUNT_SETTINGS_MAX_LENGTH, AVATAR_MAX_BYTES, AccountSettings, AccountSettingsUpdateRequest, AvatarUpdateRequest, DirectoryAccount, DirectoryHealth, avatarDigest, directoryAvatarPayload, directoryAvatarUrl, sniffAvatarMime, DirectoryRegisterRequest, Handle, directoryRegisterMessage, parseAccountSettings,
 } from "./directory";
 
 describe("registration", () => {
@@ -57,5 +57,33 @@ describe("account settings", () => {
     const base = { publicKey: "a".repeat(64), challengeId: "6f1c2a4e-1b2c-4d3e-8f90-123456789abc", signature: "b".repeat(128) };
     expect(AccountSettingsUpdateRequest.safeParse({ ...base, settings: "{}" }).success).toBe(true);
     expect(AccountSettingsUpdateRequest.safeParse({ ...base, settings: "x".repeat(ACCOUNT_SETTINGS_MAX_LENGTH + 1) }).success).toBe(false);
+  });
+});
+
+describe("avatars", () => {
+  const base = { publicKey: "a".repeat(64), challengeId: "6f1c2a4e-1b2c-4d3e-8f90-123456789abc", signature: "b".repeat(128) };
+  it("recognizes PNG, JPEG and WebP by their first bytes and nothing else", () => {
+    expect(sniffAvatarMime(Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]))).toBe("image/png");
+    expect(sniffAvatarMime(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0]))).toBe("image/jpeg");
+    expect(sniffAvatarMime(new TextEncoder().encode("RIFF0000WEBPVP8 "))).toBe("image/webp");
+    for (const bad of ["GIF89a", "<svg xmlns=", "RIFF0000WAVEfmt ", ""]) expect(sniffAvatarMime(new TextEncoder().encode(bad))).toBeNull();
+  });
+  it("signs type and digest, and nothing for a removal", async () => {
+    expect(await avatarDigest(new TextEncoder().encode("abc"))).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    expect(directoryAvatarPayload("image/webp", "ab12")).toBe("image/webp\nab12");
+    expect(directoryAvatarPayload(null, null)).toBe("");
+  });
+  it("takes base64 up to the size limit, null to remove, and no other type", () => {
+    expect(AvatarUpdateRequest.parse({ ...base, avatar: null }).avatar).toBeNull();
+    expect(AvatarUpdateRequest.safeParse({ ...base, avatar: { mime: "image/png", data: "iVBORw0KGgo=" } }).success).toBe(true);
+    expect(AvatarUpdateRequest.safeParse({ ...base, avatar: { mime: "image/gif", data: "R0lGODlh" } }).success).toBe(false);
+    expect(AvatarUpdateRequest.safeParse({ ...base, avatar: { mime: "image/png", data: "not base64!" } }).success).toBe(false);
+    expect(AvatarUpdateRequest.safeParse({ ...base, avatar: { mime: "image/png", data: "A".repeat(Math.ceil(AVATAR_MAX_BYTES / 3) * 4 + 4) } }).success).toBe(false);
+  });
+  it("builds the address with the cache version and none without an avatar", () => {
+    expect(directoryAvatarUrl("https://id.example.org/", "a".repeat(64), "2026-09-19T10:00:00.000Z")).toBe(`https://id.example.org/api/avatars/${"a".repeat(64)}?v=${Date.parse("2026-09-19T10:00:00.000Z")}`);
+    expect(directoryAvatarUrl("https://id.example.org", "a".repeat(64), null)).toBeNull();
+    expect(DirectoryAccount.parse({ handle: "daniel", publicKey: "a".repeat(64), createdAt: "2026-09-19T10:00:00.000Z" }).avatarUpdatedAt).toBeNull();
+    expect(DirectoryHealth.parse({ ok: true, service: "directory", host: "h", features: { backup: true, totp: true, email: false }, time: "2026-09-19T10:00:00.000Z" }).features.avatars).toBe(false);
   });
 });

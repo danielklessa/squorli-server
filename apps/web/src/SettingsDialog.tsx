@@ -49,12 +49,13 @@ const fmt = fmtDateTime;
  * the directory's account page, sign out, discard identity) and licenses (our own and the third-party notices, LicensesTab.tsx). With a directory account everything except the device selection
  * is stored there (store.ts pushes every change); sessions and the name on this server belong to the server shown.
  */
-export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, directoryAccount, serverDomain, clientVersion, syncError, client, voice, initialTab, onSaveServerName, onSaveGlobalName, onSetLocale, localePending, onCapturingKey, onClose, onLogout, onForget }: {
+export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, directoryUrl, directoryAccount, serverDomain, clientVersion, syncError, client, voice, initialTab, onSaveServerName, onSaveGlobalName, onSetAvatar, onSetLocale, localePending, onCapturingKey, onClose, onLogout, onForget }: {
   /** The server on screen and who you are there; null = none is shown (client without a home server): the dialog then has
    *  no profile and no sessions, which belong to a server, and the account page names the directory account and `publicKey`. */
   api: ServerApi | null; me: Me | null; publicKey: string | null;
   /** Your name as the server shows it right now (member list); the preview falls back to it. */
   displayName: string;
+  avatarUrl: string | null;
   directoryUrl: string | null; directoryAccount: DirectoryAccount | null | undefined; serverDomain: string | null;
   /** Version of the server that serves this client (from its /api/health), shown with the licenses. */
   clientVersion: string | null;
@@ -63,6 +64,8 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
   client: VoiceClient; voice: VoiceState; initialTab?: SettingsTab;
   onSaveServerName: (displayName: string | null) => Promise<void>;
   onSaveGlobalName: (displayName: string | null) => Promise<void>;
+  /** Upload (null = remove) the avatar of the directory account; null = no account or a directory without avatars. */
+  onSetAvatar: ((file: Blob | null) => Promise<void>) | null;
   onSetLocale: (pref: LocalePreference) => Promise<void>;
   /** The chosen language waits for the end of the voice connection (store.ts `reloadForLocale`). */
   localePending: boolean;
@@ -161,6 +164,14 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
       setErr(null); setSaved(true);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   }
+  const avatarInput = useRef<HTMLInputElement>(null);
+  const [avatarNote, setAvatarNote] = useState<string | null>(null);
+  async function changeAvatar(file: Blob | null) {
+    if (!onSetAvatar) return;
+    setBusy(true); setAvatarNote(file ? t("profile.avatarUploading") : null);
+    try { await onSetAvatar(file); setErr(null); setAvatarNote(t(file ? "profile.avatarSaved" : "profile.avatarRemoved")); }
+    catch (e) { setAvatarNote(null); setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  }
   async function changeLocale(pref: LocalePreference) {
     setBusy(true);
     try { await onSetLocale(pref); } finally { setBusy(false); }
@@ -204,7 +215,20 @@ export function SettingsDialog({ api, me, publicKey, displayName, directoryUrl, 
 
             {tab === "profile" && onServer && (
               <>
-                <div className="profile-preview"><Avatar name={shownName || "?"} size="large" /><div><strong>{shownName}</strong>{handle && <div className="muted small">@{handle}</div>}</div></div>
+                <div className="profile-preview"><Avatar name={shownName || "?"} src={avatarUrl} size="large" /><div><strong>{shownName}</strong>{handle && <div className="muted small">@{handle}</div>}</div></div>
+                {onSetAvatar && (
+                  <>
+                    <h3>{t("profile.avatar")}</h3>
+                    {/* The chosen image is cropped, scaled and uploaded right away; the value is cleared so the same file can be chosen again. */}
+                    <input ref={avatarInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={(e) => { const file = e.target.files?.[0] ?? null; e.target.value = ""; if (file) void changeAvatar(file); }} />
+                    <div className="row">
+                      <button className="secondary" disabled={busy} onClick={() => avatarInput.current?.click()}><Icon name="image" /> {t("profile.avatarChoose")}</button>
+                      {avatarUrl && <button className="danger" disabled={busy} onClick={() => void changeAvatar(null)}>{t("profile.avatarRemove")}</button>}
+                      {avatarNote && <span className="muted small" role="status">{avatarNote}</span>}
+                    </div>
+                    <span className="muted small">{t("profile.avatarHint", { host: dirHost ?? "" })}</span>
+                  </>
+                )}
                 <h3>{t("profile.nameHere")}</h3>
                 <input value={name} maxLength={32} autoFocus onChange={(e) => { setName(e.target.value); setSaved(false); }} onKeyDown={(e) => { if (e.key === "Enter") void saveNames(); }} />
                 <span className="muted small">{withDirectory ? t("profile.nameHereHintDir") : t("profile.nameHereHint")}</span>

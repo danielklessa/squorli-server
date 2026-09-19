@@ -14,17 +14,17 @@ export async function registerUserRoutes(app: FastifyInstance, db: Db, directory
   app.get("/api/me", async (req, reply) => {
     const s = await requireSession(db, req, reply);
     if (!s) return;
-    let { displayName, handle } = s;
+    let { displayName, handle, avatarUrl } = s;
     // Adopt the display name from the directory (global or for this server) without a new sign-in: the client calls /api/me on open.
     if (directory.enabled && directoryStale(s.handleCheckedAt)) {
       const fresh = await directory.refresh({ id: s.userId, publicKey: s.publicKey, displayName: s.displayName });
-      if (fresh && (fresh.displayName !== s.displayName || fresh.handle !== s.handle)) {
-        ({ displayName, handle } = fresh);
+      if (fresh && (fresh.displayName !== s.displayName || fresh.handle !== s.handle || fresh.avatarUrl !== s.avatarUrl)) {
+        ({ displayName, handle, avatarUrl } = fresh);
         presence.rename(s.userId, { displayName, publicKey: s.publicKey, handle });
         await broadcastStructure(db, hub, ["members"]);
       }
     }
-    const me: Me = { userId: s.userId, publicKey: s.publicKey, displayName, handle };
+    const me: Me = { userId: s.userId, publicKey: s.publicKey, displayName, handle, avatarUrl };
     return me;
   });
 
@@ -39,7 +39,7 @@ export async function registerUserRoutes(app: FastifyInstance, db: Db, directory
     presence.rename(s.userId, { displayName: body.data.displayName, publicKey: s.publicKey, handle: s.handle });
     await broadcastStructure(db, hub, ["members"]);
 
-    const me: Me = { userId: s.userId, publicKey: s.publicKey, displayName: body.data.displayName, handle: s.handle };
+    const me: Me = { userId: s.userId, publicKey: s.publicKey, displayName: body.data.displayName, handle: s.handle, avatarUrl: s.avatarUrl };
     return me;
   });
 

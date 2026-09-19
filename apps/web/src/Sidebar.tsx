@@ -41,6 +41,8 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, clie
   const [channelMenu, setChannelMenu] = useState<({ channelId: string } & MenuAnchor) | null>(null);
   const menuChannel = channelMenu ? server.channels.find((c) => c.id === channelMenu.channelId) ?? null : null;
   const menuMember = menu ? server.members.find((m) => m.userId === menu.userId) ?? null : null;
+  // Voice rows carry only id and name (VoiceMember); the avatar comes from the member list.
+  const avatarOf = new Map(server.members.map((m) => [m.userId, m.avatarUrl]));
   // Drag & drop: drag a voice participant onto another voice channel (yourself always, others with MODERATE_VOICE).
   const canModerate = hasPermission(server.myPermissions, Permission.MODERATE_VOICE);
   const [dragging, setDragging] = useState<{ userId: string; from: string } | null>(null);
@@ -94,7 +96,7 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, clie
                 draggable={draggable} title={draggable ? t("sidebar.dragHint") : undefined}
                 onContextMenu={(e) => { if (m.userId === myUserId) return; e.preventDefault(); setMenu({ userId: m.userId, trigger: e.currentTarget, x: e.clientX, y: e.clientY }); }}
                 onDragStart={(e) => { if (!draggable) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", m.userId); setDragging({ userId: m.userId, from: c.id }); }}
-                onDragEnd={() => { setDragging(null); setDropTarget(null); }}><Avatar name={m.displayName} size="small" /><span className="member-name">{m.displayName}</span>{afkOf.has(m.userId) && <Icon name="moon" className="afk" title={t("members.afk")} />}{p?.micMuted && <Icon name="mic-off" className="muted" title={t("voice.micMuted")} />}{p?.deafened && <Icon name="headphone-off" className="muted" title={t("voice.deafened")} />}{p?.cameraOn && <Icon name="video" title={t("voice.cameraOn")} />}{p?.screenOn && <Icon name="screen-share" title={t("voice.sharingScreen")} />}</li>;
+                onDragEnd={() => { setDragging(null); setDropTarget(null); }}><Avatar name={m.displayName} src={avatarOf.get(m.userId)} size="small" /><span className="member-name">{m.displayName}</span>{afkOf.has(m.userId) && <Icon name="moon" className="afk" title={t("members.afk")} />}{p?.micMuted && <Icon name="mic-off" className="muted" title={t("voice.micMuted")} />}{p?.deafened && <Icon name="headphone-off" className="muted" title={t("voice.deafened")} />}{p?.cameraOn && <Icon name="video" title={t("voice.cameraOn")} />}{p?.screenOn && <Icon name="screen-share" title={t("voice.sharingScreen")} />}</li>;
             })}
           </ul>
         )}
@@ -119,7 +121,7 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, clie
       )}
       {menu && menuMember && (
         <ContextMenu anchor={menu} label={menuMember.displayName} onClose={() => setMenu(null)}>
-          <div className="context-identity" role="presentation"><Avatar name={menuMember.displayName} online={menuMember.online} /><strong>{menuMember.displayName}</strong></div>
+          <div className="context-identity" role="presentation"><Avatar name={menuMember.displayName} src={menuMember.avatarUrl} online={menuMember.online} /><strong>{menuMember.displayName}</strong></div>
           <UserVolumeControl client={client} publicKey={menuMember.publicKey} />
         </ContextMenu>
       )}

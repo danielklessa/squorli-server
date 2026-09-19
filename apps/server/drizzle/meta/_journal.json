@@ -155,6 +155,13 @@
       "when": 1789673349772,
       "tag": "0021_neat_scarlet_witch",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1789819327162,
+      "tag": "0022_tan_marten_broadcloak",
+      "breakpoints": true
     }
   ]
 }

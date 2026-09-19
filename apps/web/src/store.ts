@@ -5,6 +5,7 @@ import {
 import { activity } from "./activity";
 import { chooseInitialServer, loadClientData, parseServerAddress, saveClientData } from "./clientHome";
 import * as api from "./api";
+import { AvatarImageError, prepareAvatar, type AvatarImage } from "./avatarImage";
 import { DirectoryLink, type LinkStatus } from "./directoryLink";
 import { loadOrCreateIdentity, storeIdentity, type Identity } from "./identity";
 import { ServerConnection, type ServerConnState } from "./serverConnection";
@@ -46,6 +47,8 @@ export type State = {
   directoryError: string | null;
   /** The directory wants a confirmed e-mail address for a new handle (its `features.emailRequired`); asked only while the key has no handle. */
   directoryEmailRequired: boolean;
+  /** The directory stores avatars (`features.avatars`): the settings offer the upload. False until the signed status was read. */
+  directoryAvatars: boolean;
   /** Servers the handle has signed in on (directory, AccountStatus.servers): the server rail. null = unknown/no account. */
   accountServers: AccountServer[] | null;
   /** Last failure while saving the settings in the directory account (shown in the settings dialog); null = fine. */
@@ -126,7 +129,7 @@ export class Store {
     this.state = {
       identity: null, homeHost: this.homeHost, activeHost: this.homeHost, servers: home ? { [home.state.host]: home.state } : {},
       signedIn: false, localHosts: [], clientLogin: { busy: false, error: null }, joinInvites: {},
-      directoryUrl: null, directoryAccount: undefined, directoryError: null, directoryEmailRequired: false, accountServers: null, settingsSyncError: null, localeReloadPending: false,
+      directoryUrl: null, directoryAccount: undefined, directoryError: null, directoryEmailRequired: false, directoryAvatars: false, accountServers: null, settingsSyncError: null, localeReloadPending: false,
       directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null, friendsError: null,
     };
     subscribeVoiceSettings((_s, source) => { if (source === "user") this.scheduleSettingsPush(); });
@@ -560,7 +563,8 @@ export class Store {
       this.settingsSupported = health.features.settings;
       // The public key lookup (refreshDirectory) never carries names; the signed status does: the global display name for the settings.
       const acc = this.state.directoryAccount;
-      this.set({ accountServers: status.servers, ...(acc ? { directoryAccount: { ...acc, displayName: status.displayName } } : {}) });
+      // The avatar's version comes along: an image changed on the account page shows in the settings without a reload of the lookup.
+      this.set({ accountServers: status.servers, directoryAvatars: health.features.avatars, ...(acc ? { directoryAccount: { ...acc, displayName: status.displayName, avatarUpdatedAt: status.avatarUpdatedAt } } : {}) });
       this.adoptAccountSettings(status);
       // Without a home server: a server added by address that the account's list names by now is the account's from here on.
       const local = this.state.localHosts.filter((h) => !status.servers.some((s) => this.hostFor(s.host) === h));
@@ -716,6 +720,26 @@ export class Store {
     catch (err) { throw new Error(api.explainDirectoryError(err)); }
     const acc = this.state.directoryAccount;
     if (acc && server === null) this.set({ directoryAccount: { ...acc, displayName } });
+  }
+
+  /**
+   * Store (null = remove) the avatar of the directory account from a file the user picked: normalized here (avatarImage.ts), signed,
+   * uploaded. The own account's state is updated at once; the chat servers get the directory's push and broadcast the member
+   * list, friends get a `friends.update`. Throws with a translated message.
+   */
+  async setAvatar(file: Blob | null): Promise<void> {
+    const id = this.state.identity; const url = this.state.directoryUrl;
+    if (!id || !url || !this.state.directoryAccount) throw new Error(t("dir.none"));
+    let image: AvatarImage | null = null;
+    if (file) {
+      try { image = await prepareAvatar(file); }
+      catch (err) { throw new Error(err instanceof AvatarImageError ? t(err.reason === "too_large" ? "dir.avatar_too_large" : "profile.avatarUnreadable") : String(err)); }
+    }
+    let res: Awaited<ReturnType<typeof api.directorySetAvatar>>;
+    try { res = await api.directorySetAvatar(url, id, image); }
+    catch (err) { throw new Error(api.explainDirectoryError(err)); }
+    const acc = this.state.directoryAccount;
+    if (acc) this.set({ directoryAccount: { ...acc, avatarUpdatedAt: res.avatarUpdatedAt } });
   }
 
   /**

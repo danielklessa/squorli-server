@@ -71,7 +71,7 @@ export function useMentionSuggest({ inputRef, value, onChange, members, below = 
       {hits.map((m, i) => (
         // mousedown, not click: the input must keep the focus (and its caret).
         <li key={m.userId} role="option" aria-selected={i === index} className={i === index ? "active" : ""} onMouseDown={(e) => { e.preventDefault(); accept(m); }} onMouseEnter={() => setIndex(i)}>
-          <Avatar name={m.displayName} /><span className="mention-suggest-name">{mentionLabel(m)}</span>
+          <Avatar name={m.displayName} src={m.avatarUrl} /><span className="mention-suggest-name">{mentionLabel(m)}</span>
           {m.handle && m.handle !== mentionLabel(m) && <span className="muted small">@{m.handle}</span>}
         </li>
       ))}

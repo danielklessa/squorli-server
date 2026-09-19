@@ -15,6 +15,8 @@ type Props = {
   /** Name of the voice connection's server when a different server is currently displayed (multi-server client); otherwise null. */
   serverName: string | null;
   displayName: string;
+  /** Own avatar (directory account), null = initials. */
+  avatarUrl: string | null;
   onLeave: () => Promise<void>;
   /** Click on your own name: the mini profile, anchored at the name. */
   onOpenProfile: (anchor: MenuAnchor) => void;
@@ -31,7 +33,7 @@ type Props = {
 };
 
 /** Bottom area of the sidebar: voice status with mute and leave, below it your own name (mini profile) and the gear (settings). */
-export function VoiceDock({ client, voice, channel, serverName, displayName, onLeave, onOpenProfile, onOpenSettings, pttSuspended, onOpenStage, canStream, onToggleCamera, afkReturn }: Props) {
+export function VoiceDock({ client, voice, channel, serverName, displayName, avatarUrl, onLeave, onOpenProfile, onOpenSettings, pttSuspended, onOpenStage, canStream, onToggleCamera, afkReturn }: Props) {
   const settings = useVoiceSettings();
   const joined = voice.status !== "disconnected";
   const openProfile = (event: MouseEvent<HTMLButtonElement>) => {
@@ -89,7 +91,7 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, onL
       )}
       {!joined && voice.error && <p className="error small">{voice.error}</p>}
       <div className="dock-row">
-        <button className="dock-name" aria-haspopup="menu" onClick={openProfile} title={t("dock.profile")}><Avatar name={displayName} /><span className="dock-identity"><strong>{displayName}</strong><small>{t("profile.tab.profile")}</small></span></button>
+        <button className="dock-name" aria-haspopup="menu" onClick={openProfile} title={t("dock.profile")}><Avatar name={displayName} src={avatarUrl} /><span className="dock-identity"><strong>{displayName}</strong><small>{t("profile.tab.profile")}</small></span></button>
         <button className="icon" title={t("dock.settings")} onClick={onOpenSettings}><Icon name="settings" /></button>
       </div>
 

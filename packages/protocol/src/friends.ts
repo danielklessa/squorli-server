@@ -41,6 +41,8 @@ export const Friend = z.object({
   online: z.boolean().default(false),
   /** Online but absent: every socket of the account has reported `activity` idle. Only for confirmed friends, otherwise false. */
   afk: z.boolean().default(false),
+  /** Avatar: when the friend last stored an image, null = none (address: `directoryAvatarUrl`). Default for directories from before it. */
+  avatarUpdatedAt: Iso.nullable().default(null),
 });
 export type Friend = z.infer<typeof Friend>;
 

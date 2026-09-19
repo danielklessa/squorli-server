@@ -8,7 +8,7 @@ const ADMIN = "00000000-0000-4000-8000-000000000003";
 const BASE = Permission.VIEW_CHANNELS | Permission.CONNECT_VOICE;
 
 const member = (userId: string, roleIds: string[], isOwner = false) =>
-  ({ userId, displayName: userId, publicKey: "k", roleIds, joinedAt: "2026-09-17T00:00:00.000Z", online: true, afk: false, streamBlocked: false, handle: null, isOwner });
+  ({ userId, displayName: userId, publicKey: "k", roleIds, joinedAt: "2026-09-17T00:00:00.000Z", online: true, afk: false, streamBlocked: false, handle: null, avatarUrl: null, isOwner });
 
 function server(guestMask: number, ownerId: string | null = null): Pick<ServerState, "settings" | "roles" | "members"> {
   return {

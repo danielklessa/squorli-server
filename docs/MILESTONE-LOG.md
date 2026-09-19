@@ -4,6 +4,9 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 | Date | Change |
 |---|---|
+| 2026-09-19 | Desktop app version 0.1.6 (`apps/desktop/package.json`; user's request): carries the avatars of the directory account and their upload from the settings. Not tagged yet: the release follows `apps/desktop/AGENTS.md`, "Packaging and releases". |
+| 2026-09-19 | Avatar upload from the client (user's wish): the settings' profile tab chooses, uploads and removes the avatar of the directory account (`avatarImage.ts`, `api.directorySetAvatar`, `store.setAvatar`, `state.directoryAvatars`); own avatar comes from the directory account, so it changes at once. Notes: `docs/features/directory.md`. |
+| 2026-09-19 | Avatars from the directory account (user's request): protocol `avatar-set`, `AvatarUpdateRequest`, `directoryAvatarUrl`, `DirectoryAccount.avatarUpdatedAt`, `Friend.avatarUpdatedAt`, `Member.avatarUrl`, `Me.avatarUrl` (defaults, no version bump; copied to the directory repo); server caches the address in `users.avatar_url` (migration 0022) at sign-in, on the 5-minute sync and on the directory's push; the web client shows the image instead of the initials everywhere (`Avatar.tsx` `src`). Upload, storage and the public image route live in `../squorli-directory`. Notes: `docs/features/directory.md`. |
 | 2026-09-19 | Login (user's wish): on a server that takes new members by invite only the invite code field is shown from the start (`inviteRequired` in `/api/health`, no protocol bump); an invite link's code stands in the field and "In der App öffnen" carries it (both already worked, now checked). Desktop app version 0.1.5. |
 | 2026-09-19 | Web login password eye buttons moved inside the input edge, with text padding and preserved 44 px targets. |
 | 2026-09-19 | Web sign-in handle field now shows a fixed @ prefix and removes typed/pasted leading @ characters to avoid duplicates. |

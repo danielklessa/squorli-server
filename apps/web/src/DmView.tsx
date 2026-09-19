@@ -16,7 +16,7 @@ import { fmtDay, fmtTime, t } from "./i18n";
  */
 const GROUP_MS = 5 * 60_000;
 
-export function DmView({ friend, thread, myKey, store }: { friend: Friend; thread: DmThread; myKey: string; store: Store }) {
+export function DmView({ friend, thread, myKey, store, avatarUrl, myAvatarUrl }: { friend: Friend; thread: DmThread; myKey: string; store: Store; avatarUrl: string | null; myAvatarUrl: string | null }) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -63,7 +63,7 @@ export function DmView({ friend, thread, myKey, store }: { friend: Friend; threa
   return (
     <section className="chat">
       <header className="chat-head">
-        <Avatar name={name} online={friend.online} /><strong>{name}</strong>
+        <Avatar name={name} src={avatarUrl} online={friend.online} /><strong>{name}</strong>
         <span className="muted topic">@{friend.handle}{friend.online ? ` · ${t("dm.online")}` : ""}</span>
         <span className="spacer" />
         <button className="icon" title={t("dm.clearTitle")} onClick={() => { void askConfirm({ title: t("dm.clearConfirmTitle", { name }), text: t("dm.clearConfirmText"), confirmLabel: t("common.delete"), danger: true }).then((ok) => { if (ok) store.clearDm(friend.publicKey); }); }}><Icon name="trash-2" /></button>
@@ -84,7 +84,7 @@ export function DmView({ friend, thread, myKey, store }: { friend: Friend; threa
               <article className={`msg ${grouped && !newDay ? "grouped" : ""}`}>
                 {!(grouped && !newDay) && (
                   <div className="msg-head">
-                    <Avatar name={mine ? t("dm.you") : name} />
+                    <Avatar name={mine ? t("dm.you") : name} src={mine ? myAvatarUrl : avatarUrl} />
                     <strong>{mine ? t("dm.you") : name}</strong>
                     <time className="muted" dateTime={m.sentAt}>{fmtTime(m.sentAt)}</time>
                   </div>

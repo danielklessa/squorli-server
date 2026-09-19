@@ -1,5 +1,5 @@
 import { Avatar } from "./Avatar";
-import type { Friend, FriendSearchResult, Member } from "@squorli/protocol";
+import { directoryAvatarUrl, type Friend, type FriendSearchResult, type Member } from "@squorli/protocol";
 import { useEffect, useMemo, useState } from "react";
 import { DmView } from "./DmView";
 import { Icon } from "./Icon";
@@ -12,6 +12,8 @@ import { t } from "./i18n";
  * voice keeps running in the dock below. Names: the friend exposes their global display name, otherwise the handle.
  */
 export const friendName = (f: Friend) => f.displayName ?? `@${f.handle}`;
+/** Address of a friend's avatar at the directory (null = none, or no directory known). */
+export const friendAvatar = (directoryUrl: string | null, f: { publicKey: string; avatarUpdatedAt: string | null }) => (directoryUrl ? directoryAvatarUrl(directoryUrl, f.publicKey, f.avatarUpdatedAt) : null);
 
 export function HomeSidebar({ state, store, members }: { state: State; store: Store; members: Member[] }) {
   const [q, setQ] = useState("");
@@ -84,7 +86,7 @@ export function HomeSidebar({ state, store, members }: { state: State; store: St
             return (
               <li key={f.publicKey} className={`channel friend ${state.currentPeer === f.publicKey ? "active" : ""} ${unread ? "unread" : ""} ${f.online ? "" : "offline"}`}>
                 <button className="channel-btn" onClick={() => store.selectPeer(f.publicKey)} title={`@${f.handle}`}>
-                  <Avatar name={friendName(f)} online={f.online} afk={f.afk} />
+                  <Avatar name={friendName(f)} src={friendAvatar(state.directoryUrl, f)} online={f.online} afk={f.afk} />
                   <span className="channel-name">{friendName(f)}</span>
                   {f.online && f.afk && <Icon name="moon" className="afk" title={t("members.afk")} />}
                   {unread > 0 && <span className="count">{unread}</span>}
@@ -143,5 +145,6 @@ export function HomeMain({ state, store }: { state: State; store: Store }) {
       </section>
     );
   }
-  return <DmView key={friend.publicKey} friend={friend} thread={state.dms[friend.publicKey] ?? { list: [], hasMore: true, loaded: false, loading: false }} myKey={state.identity?.publicKey ?? ""} store={store} />;
+  return <DmView key={friend.publicKey} friend={friend} thread={state.dms[friend.publicKey] ?? { list: [], hasMore: true, loaded: false, loading: false }} myKey={state.identity?.publicKey ?? ""} store={store}
+    avatarUrl={friendAvatar(state.directoryUrl, friend)} myAvatarUrl={state.directoryAccount ? friendAvatar(state.directoryUrl, state.directoryAccount) : null} />;
 }

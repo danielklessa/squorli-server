@@ -1,4 +1,4 @@
-import { ChallengeResponse, DirectoryAccount, ServerLeavesResponse, ServerRegisterResponse, ServerResolveResponse, directoryServerRegisterMessage } from "@squorli/protocol";
+import { ChallengeResponse, DirectoryAccount, ServerLeavesResponse, ServerRegisterResponse, ServerResolveResponse, directoryAvatarUrl, directoryServerRegisterMessage } from "@squorli/protocol";
 import * as ed from "@noble/ed25519";
 import { count, eq, inArray } from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
@@ -14,7 +14,7 @@ export const SYNC_INTERVAL_MS = 5 * 60_000;
 const SYNC_CHUNK = 200;
 const TIMEOUT_MS = 2500;
 
-export type DirectoryProfile = { handle: string | null; displayName: string | null };
+export type DirectoryProfile = { handle: string | null; displayName: string | null; avatarUrl: string | null };
 const hexToBytes = (h: string) => Uint8Array.from(Buffer.from(h, "hex"));
 
 /**
@@ -94,7 +94,8 @@ export class DirectoryClient {
 
   /**
    * Look up key -> handle and display name and cache it on the user. Display name: the one set in the directory for this
-   * server, otherwise the global one; if none is set (or there is no token), the local name stays unchanged.
+   * server, otherwise the global one; if none is set (or there is no token), the local name stays unchanged. The avatar is public
+   * at the directory; cached is only its address (with the cache version), the clients load the image from there.
    */
   async refresh(user: { id: string; publicKey: string; displayName: string | null }): Promise<DirectoryProfile | null> {
     const url = this.config.DIRECTORY_URL;
@@ -115,13 +116,15 @@ export class DirectoryClient {
       }
       let handle: string | null = null;
       let displayName = user.displayName;
+      let avatarUrl: string | null = null;
       if (res.status === 200) {
         const acc = DirectoryAccount.parse(await res.json());
         handle = acc.handle;
         displayName = acc.serverDisplayName ?? acc.displayName ?? user.displayName;
+        avatarUrl = directoryAvatarUrl(url, acc.publicKey, acc.avatarUpdatedAt);
       } else if (res.status !== 404) { this.log.warn({ status: res.status }, "Verzeichnisdienst antwortet unerwartet"); return null; }
-      await this.db.update(users).set({ handle, displayName, handleCheckedAt: new Date() }).where(eq(users.id, user.id));
-      return { handle, displayName };
+      await this.db.update(users).set({ handle, displayName, avatarUrl, handleCheckedAt: new Date() }).where(eq(users.id, user.id));
+      return { handle, displayName, avatarUrl };
     } catch (err) {
       this.log.warn({ err: err instanceof Error ? err.message : String(err) }, "Verzeichnisdienst nicht erreichbar; Handle und Name bleiben wie zuletzt bekannt");
       return null;
@@ -135,7 +138,7 @@ export class DirectoryClient {
     const url = this.config.DIRECTORY_URL;
     if (!url) return 0;
     if (!this.token && !(await this.register())) return 0;
-    const all = await this.db.select({ id: users.id, publicKey: users.publicKey, handle: users.handle, displayName: users.displayName }).from(users);
+    const all = await this.db.select({ id: users.id, publicKey: users.publicKey, handle: users.handle, displayName: users.displayName, avatarUrl: users.avatarUrl }).from(users);
     let changed = 0;
     try {
       for (let i = 0; i < all.length; i += SYNC_CHUNK) {
@@ -149,8 +152,9 @@ export class DirectoryClient {
           const acc = byKey.get(u.publicKey);
           if (!acc) continue; // no account: the local state stays
           const displayName = acc.serverDisplayName ?? acc.displayName ?? u.displayName;
-          if (acc.handle === u.handle && displayName === u.displayName) continue;
-          await this.db.update(users).set({ handle: acc.handle, displayName, handleCheckedAt: now }).where(eq(users.id, u.id));
+          const avatarUrl = directoryAvatarUrl(url, acc.publicKey, acc.avatarUpdatedAt);
+          if (acc.handle === u.handle && displayName === u.displayName && avatarUrl === u.avatarUrl) continue;
+          await this.db.update(users).set({ handle: acc.handle, displayName, avatarUrl, handleCheckedAt: now }).where(eq(users.id, u.id));
           onChanged({ userId: u.id, publicKey: u.publicKey, handle: acc.handle, displayName });
           changed++;
         }
@@ -167,7 +171,7 @@ export class DirectoryClient {
   async syncOne(publicKey: string, onChanged: (u: { userId: string; publicKey: string; handle: string | null; displayName: string | null }) => void): Promise<boolean> {
     const url = this.config.DIRECTORY_URL;
     if (!url) return false;
-    const [u] = await this.db.select({ id: users.id, publicKey: users.publicKey, handle: users.handle, displayName: users.displayName }).from(users).where(eq(users.publicKey, publicKey)).limit(1);
+    const [u] = await this.db.select({ id: users.id, publicKey: users.publicKey, handle: users.handle, displayName: users.displayName, avatarUrl: users.avatarUrl }).from(users).where(eq(users.publicKey, publicKey)).limit(1);
     if (!u) return false;
     try {
       if (!this.token && !(await this.register())) return false;
@@ -177,8 +181,9 @@ export class DirectoryClient {
       const acc = ServerResolveResponse.parse(await res.json())[0];
       if (!acc) return false;
       const displayName = acc.serverDisplayName ?? acc.displayName ?? u.displayName;
-      await this.db.update(users).set({ handle: acc.handle, displayName, handleCheckedAt: new Date() }).where(eq(users.id, u.id));
-      if (acc.handle === u.handle && displayName === u.displayName) return false;
+      const avatarUrl = directoryAvatarUrl(url, acc.publicKey, acc.avatarUpdatedAt);
+      await this.db.update(users).set({ handle: acc.handle, displayName, avatarUrl, handleCheckedAt: new Date() }).where(eq(users.id, u.id));
+      if (acc.handle === u.handle && displayName === u.displayName && avatarUrl === u.avatarUrl) return false;
       onChanged({ userId: u.id, publicKey, handle: acc.handle, displayName });
       return true;
     } catch (err) {

@@ -5,7 +5,7 @@ import type { Db } from "../db";
 import { sessions, users } from "../db/schema";
 import { actorOf } from "../state";
 
-export type SessionUser = { userId: string; sessionId: string; publicKey: string; displayName: string | null; handle: string | null; handleCheckedAt: Date | null };
+export type SessionUser = { userId: string; sessionId: string; publicKey: string; displayName: string | null; handle: string | null; handleCheckedAt: Date | null; avatarUrl: string | null };
 
 /** Write last_used_at at most every 5 minutes (device list, M6c); not on every request. */
 const TOUCH_INTERVAL_MS = 5 * 60_000;
@@ -13,7 +13,7 @@ const TOUCH_INTERVAL_MS = 5 * 60_000;
 /** Used by the WS handshake and by protected routes. Returns the user behind a session token. */
 export async function resolveSession(db: Db, token: string): Promise<SessionUser | null> {
   const [row] = await db
-    .select({ userId: sessions.userId, sessionId: sessions.id, expiresAt: sessions.expiresAt, lastUsedAt: sessions.lastUsedAt, publicKey: users.publicKey, displayName: users.displayName, handle: users.handle, handleCheckedAt: users.handleCheckedAt })
+    .select({ userId: sessions.userId, sessionId: sessions.id, expiresAt: sessions.expiresAt, lastUsedAt: sessions.lastUsedAt, publicKey: users.publicKey, displayName: users.displayName, handle: users.handle, handleCheckedAt: users.handleCheckedAt, avatarUrl: users.avatarUrl })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
     .where(eq(sessions.token, token))
@@ -22,7 +22,7 @@ export async function resolveSession(db: Db, token: string): Promise<SessionUser
   if (!row.lastUsedAt || Date.now() - row.lastUsedAt.getTime() > TOUCH_INTERVAL_MS) {
     void db.update(sessions).set({ lastUsedAt: new Date() }).where(eq(sessions.token, token)).catch(() => { /* display only, no reason to abort */ });
   }
-  return { userId: row.userId, sessionId: row.sessionId, publicKey: row.publicKey, displayName: row.displayName, handle: row.handle, handleCheckedAt: row.handleCheckedAt };
+  return { userId: row.userId, sessionId: row.sessionId, publicKey: row.publicKey, displayName: row.displayName, handle: row.handle, handleCheckedAt: row.handleCheckedAt, avatarUrl: row.avatarUrl };
 }
 
 function bearer(req: FastifyRequest): string | null {

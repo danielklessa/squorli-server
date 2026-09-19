@@ -5,6 +5,7 @@
 // The owner key is remembered in scripts/.smoke-owner.json (gitignored) so the test
 // is repeatable against the same database. On the very first run it automatically becomes the owner.
 import * as ed from "@noble/ed25519";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -136,6 +137,31 @@ if (health0.directoryUrl) {
   await new Promise((r) => setTimeout(r, 800));
   const [, stPush] = await api("GET", "/api/state", undefined, owner.token);
   check("directory: name change is pushed to the server without a new login", spush === 200 && stPush.members.find((m) => m.userId === owner.userId)?.displayName === "Smoke Push", stPush.members.find((m) => m.userId === owner.userId)?.displayName);
+  // Avatar of the directory account (signed avatar-set there, payload "<mime>\n<sha256>"): the directory pushes the change like a
+  // name change, the member then carries the address of the image at the directory (with its cache version); removed -> null again.
+  if (dh.features?.avatars) {
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+    const setAvatar = async (bytes) => {
+      const [, ch] = await dj("POST", "/api/challenge", { publicKey: ownerKey.publicKey });
+      const payload = bytes ? `image/png\n${createHash("sha256").update(bytes).digest("hex")}` : "";
+      const signature = Buffer.from(await ed.signAsync(new TextEncoder().encode(`community-directory-avatar-set\n${dh.host}\n${ch.nonce}\n${payload}`), ownerKey.priv)).toString("hex");
+      return dj("POST", "/api/avatar", { publicKey: ownerKey.publicKey, challengeId: ch.challengeId, signature, avatar: bytes ? { mime: "image/png", data: bytes.toString("base64") } : null });
+    };
+    const avatarOfOwner = async () => { const [, st] = await api("GET", "/api/state", undefined, owner.token); return st.members.find((m) => m.userId === owner.userId)?.avatarUrl; };
+    check("directory: no avatar -> member.avatarUrl null", (await avatarOfOwner()) === null);
+    const [sav, rav] = await setAvatar(png);
+    await new Promise((r) => setTimeout(r, 800));
+    const url = await avatarOfOwner();
+    const expected = `${dir}/api/avatars/${ownerKey.publicKey}?v=${Date.parse(rav.avatarUpdatedAt)}`;
+    check("directory: avatar change is pushed, member carries its address", sav === 200 && url === expected, `${sav} ${url}`);
+    const img = url ? await fetch(url) : null;
+    check("directory: the address serves the image", img?.status === 200 && img.headers.get("content-type") === "image/png" && Buffer.from(await img.arrayBuffer()).equals(png));
+    const [, meAv] = await api("GET", "/api/me", undefined, owner.token);
+    check("directory: /api/me carries the avatar", meAv.avatarUrl === expected, meAv.avatarUrl);
+    const [srm] = await setAvatar(null);
+    await new Promise((r) => setTimeout(r, 800));
+    check("directory: avatar removed -> null again", srm === 200 && (await avatarOfOwner()) === null);
+  }
   await setName(health0.domain.toLowerCase(), null);
   await setName(null, null);
   await new Promise((r) => setTimeout(r, 800)); // wait for the pushes before clearing the local name

@@ -38,6 +38,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
   const stickToBottom = useRef(true);
   const lastTyping = useRef(0);
   const nameOf = useMemo(() => new Map(members.map((m) => [m.userId, m.displayName])), [members]);
+  const avatarOf = useMemo(() => new Map(members.map((m) => [m.userId, m.avatarUrl])), [members]);
   const mentionCtx = useMemo(() => ({ names: nameOf, me: myUserId }), [nameOf, myUserId]);
   const mention = useMentionSuggest({ inputRef, value: draft, onChange: setDraft, members });
   // The edit field has its own list; its `picked` starts with the people the message already mentions (startEdit).
@@ -130,7 +131,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
               <article className={`msg ${grouped && !newDay ? "grouped" : ""} ${mentioned ? "mentions-me" : ""}`}>
                 {!(grouped && !newDay) && (
                   <div className="msg-head">
-                    <Avatar name={nameOf.get(m.authorId) ?? t("chat.formerMember")} />
+                    <Avatar name={nameOf.get(m.authorId) ?? t("chat.formerMember")} src={avatarOf.get(m.authorId)} />
                     <strong>{nameOf.get(m.authorId) ?? t("chat.formerMember")}</strong>
                     <time className="muted" dateTime={m.createdAt}>{fmtTime(m.createdAt)}</time>
                   </div>

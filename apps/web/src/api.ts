@@ -1,10 +1,12 @@
 import {
   AccountStatus, Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, DirectoryRegisterPending, EmailAddress, EmailCode, EmailCodeResponse, FriendSearchResponse, ServerLeaveResponse, ServerListResponse, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
+  AvatarUpdateResponse, avatarDigest, directoryAvatarPayload,
   BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryActionMessage, directoryBackupMessage, directoryProfilePayload,
   directoryRegisterMessage, directorySoundSettingsPayload, openBackup, type AccountSettings, type SoundSettings,
   MuteState, ReadStateResponse, type Attachment, type Category, type Channel, type RadioStation, type Role,
 } from "@squorli/protocol";
 import { z } from "zod";
+import { toBase64, type AvatarImage } from "./avatarImage";
 import { type Identity, identityFromPrivateKey, sign } from "./identity";
 import { t } from "./i18n";
 
@@ -230,6 +232,20 @@ export async function directorySetDisplayName(dirUrl: string, id: Identity, serv
   const signature = await sign(id, directoryActionMessage(health.host, "profile-update", ch.nonce, directoryProfilePayload(server, displayName)));
   await directoryFetch(dirUrl, "POST", "/api/profile", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, server, displayName });
 }
+/**
+ * Avatar of the directory account (signed over the type and the SHA-256 of the image bytes; null = remove). The image is already
+ * normalized (avatarImage.ts). A directory from before the avatars has no such route: said in words instead of a bare 404.
+ */
+export async function directorySetAvatar(dirUrl: string, id: Identity, image: AvatarImage | null): Promise<AvatarUpdateResponse> {
+  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  if (!health.features.avatars) throw new Error(t("dir.avatars_unsupported"));
+  const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
+  const payload = directoryAvatarPayload(image?.mime ?? null, image ? await avatarDigest(image.bytes) : null);
+  const signature = await sign(id, directoryActionMessage(health.host, "avatar-set", ch.nonce, payload));
+  return AvatarUpdateResponse.parse(await directoryFetch(dirUrl, "POST", "/api/avatar", {
+    publicKey: id.publicKey, challengeId: ch.challengeId, signature, avatar: image ? { mime: image.mime, data: toBase64(image.bytes) } : null,
+  }));
+}
 /** Voice cue settings in the account (signed): follow the account across chat servers and devices; read back via directoryAccountStatus(). */
 export async function directorySetSoundSettings(dirUrl: string, id: Identity, soundSettings: SoundSettings): Promise<void> {
   const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
@@ -270,7 +286,7 @@ export function explainDirectoryError(err: unknown): string {
       case "auth_invalid": case "no_backup": case "no_account": case "not_found": case "bad_handle": case "handle_taken": case "rate_limited":
       case "signature_invalid": case "challenge_invalid": case "totp_required": case "totp_invalid": case "totp_reused": case "server_unknown": case "totp_unavailable":
       case "founder": case "server_refused": case "email_unavailable": case "no_email": case "mail_failed": case "totp_disabled":
-      case "email_required": case "email_code_invalid": case "email_taken":
+      case "email_required": case "email_code_invalid": case "email_taken": case "avatar_too_large": case "avatar_invalid":
         return t(`dir.${err.code}`);
       case "key_registered": return t("dir.key_registered", { handle: String(err.body.handle ?? "?") });
       case "bad_request": return t("dir.bad_request", { detail: String(err.body.detail ?? t("dir.handleRules")) });

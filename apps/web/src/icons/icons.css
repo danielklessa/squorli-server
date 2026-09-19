@@ -25,6 +25,7 @@
 .ic-headphone-off::before { content: "\e62d"; }
 .ic-headphones::before { content: "\e0f1"; }
 .ic-heart::before { content: "\e0f2"; }
+.ic-image::before { content: "\e0f6"; }
 .ic-key-round::before { content: "\e4a7"; }
 .ic-languages::before { content: "\e0fe"; }
 .ic-leaf::before { content: "\e2de"; }

@@ -13,6 +13,11 @@ export const users = pgTable("users", {
   /** Verified handle from the directory service (M6), looked up at sign-in and cached here. */
   handle: text("handle"),
   handleCheckedAt: ts("handle_checked_at"),
+  /**
+   * Avatar of the directory account (19 September 2026): address of the image at the directory incl. its cache version, cached here
+   * together with handle and name; null = none. The image itself never passes through this server: the clients load it from the directory.
+   */
+  avatarUrl: text("avatar_url"),
 });
 
 export const sessions = pgTable("sessions", {

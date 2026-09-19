@@ -56,6 +56,8 @@ export const Me = z.object({
   displayName: DisplayName.nullable(),
   /** Verified handle from the directory service (M6), null without a service or without a registration. */
   handle: z.string().nullable(),
+  /** Avatar from the directory account (address of the image incl. cache version), null = none, no directory or a server from before it. */
+  avatarUrl: z.string().url().nullable().default(null),
 });
 export const UpdateMeRequest = z.object({ displayName: DisplayName.nullable() });
 
@@ -274,6 +276,8 @@ export const Member = z.object({
   streamBlocked: z.boolean(),
   /** Verified handle from the directory service (M6), otherwise null. */
   handle: z.string().nullable(),
+  /** Avatar from the directory account (address of the image incl. cache version), null = none; shown instead of the initials. Default for servers from before it. */
+  avatarUrl: z.string().url().nullable().default(null),
   /** Owner (several possible): always has every permission, sits at the very top, cannot be kicked or banned. */
   isOwner: z.boolean(),
 });

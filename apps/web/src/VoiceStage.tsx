@@ -49,7 +49,9 @@ type Props = {
 
 type Layout = "grid" | "focus";
 /** `off`: the participant sends this feed, the user may see it and does not watch it (voiceClient.setVideoWatching): the tile offers to turn it on. */
-type Item = { key: string; participant: VoiceParticipant; tile: VideoTile | null; kind: "camera" | "screen"; off: boolean } | { key: string; participant: null; tile: null; kind: "player"; off: false };
+/** A participant with the avatar of the matching member (null for identities that are no members: bots, "external"). */
+type StageParticipant = VoiceParticipant & { avatarUrl: string | null };
+type Item = { key: string; participant: StageParticipant; tile: VideoTile | null; kind: "camera" | "screen"; off: boolean } | { key: string; participant: null; tile: null; kind: "player"; off: false };
 
 /**
  * Stage of a voice channel (M3): one tile per participant (camera or avatar) plus one per screen share.
@@ -66,7 +68,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
   // which is only created on joining. Unknown identities (bots, "external") keep the LiveKit name.
   const participants = voice.participants.map((p) => {
     const m = members.find((x) => x.userId === p.identity);
-    return m ? { ...p, name: displayNameOf(m) } : p;
+    return m ? { ...p, name: displayNameOf(m), avatarUrl: m.avatarUrl } : { ...p, avatarUrl: null };
   });
   const [layout, setLayout] = useState<Layout>("grid"); // always start with tiles
   const [pinned, setPinned] = useState<string | null>(null);
@@ -197,7 +199,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
 
       {menu && menuMember && (
         <ContextMenu anchor={menu} label={displayNameOf(menuMember)} onClose={() => setMenu(null)}>
-          <div className="context-identity" role="presentation"><Avatar name={displayNameOf(menuMember)} /><strong>{displayNameOf(menuMember)}</strong></div>
+          <div className="context-identity" role="presentation"><Avatar name={displayNameOf(menuMember)} src={menuMember.avatarUrl} /><strong>{displayNameOf(menuMember)}</strong></div>
           <UserVolumeControl client={client} publicKey={menuMember.publicKey} />
           {menuParticipant && mayView && (["camera", "screen"] as const).filter((source) => source === "camera" ? menuParticipant.cameraOn : menuParticipant.screenOn).map((source) => {
             const id = feedId(menuParticipant.identity, source);
@@ -272,7 +274,7 @@ function PlayerTile({ big, popped, elsewhere, onRestore }: { big?: boolean; popp
   );
 }
 
-function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onRestore, onMenu }: { item: Extract<Item, { participant: VoiceParticipant }>; client: VoiceClient; big?: boolean; pinned: boolean; onClick: () => void; onPopout: (tile: VideoTile, opener?: Window) => void; poppedIds: Set<string>; onRestore: (id: string) => void; onMenu: (item: Item, event: ReactMouseEvent<HTMLElement>) => void }) {
+function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onRestore, onMenu }: { item: Extract<Item, { participant: StageParticipant }>; client: VoiceClient; big?: boolean; pinned: boolean; onClick: () => void; onPopout: (tile: VideoTile, opener?: Window) => void; poppedIds: Set<string>; onRestore: (id: string) => void; onMenu: (item: Item, event: ReactMouseEvent<HTMLElement>) => void }) {
   const { participant: p, tile } = item;
   const ref = useRef<HTMLDivElement>(null);
   const target = useCallback(() => ref.current, []);
@@ -296,7 +298,7 @@ function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onResto
   return (
     <div ref={ref} className={cls} onClick={() => { if (shareOff) watch(true); else if (!ref.current?.ownerDocument.fullscreenElement) onClick(); }} onContextMenu={(event) => onMenu(item, event)} title={shareOff ? t("stage.screenOn") : big ? t("stage.backToGrid") : t("stage.enlarge")}>
       {shareOff ? <div className="tile-popped"><Icon name="monitor" /><span>{t("stage.shareOffered", { name: p.name })}</span><button className="small" onClick={(event) => { event.stopPropagation(); watch(true); }}><Icon name="eye" /> {t("stage.watch")}</button></div>
-        : popped ? <div className="tile-popped"><Icon name="external-link" /><span>{t("stage.poppedOut")}</span><button className="secondary small" onClick={(event) => { event.stopPropagation(); onRestore(tile!.id); }}>{t("stage.restoreVideo")}</button></div> : tile ? <TrackVideo tile={tile} /> : <Avatar name={p.name} size="large" />}
+        : popped ? <div className="tile-popped"><Icon name="external-link" /><span>{t("stage.poppedOut")}</span><button className="secondary small" onClick={(event) => { event.stopPropagation(); onRestore(tile!.id); }}>{t("stage.restoreVideo")}</button></div> : tile ? <TrackVideo tile={tile} /> : <Avatar name={p.name} src={p.avatarUrl} size="large" />}
       {item.kind === "camera" && item.off && <div className="tile-window-actions" onClick={(event) => event.stopPropagation()}>
         <button className="icon" title={t("stage.cameraOn")} aria-label={t("stage.cameraOn")} onClick={() => watch(true)}><Icon name="eye" /></button>
       </div>}

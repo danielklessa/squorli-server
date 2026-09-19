@@ -18,6 +18,7 @@ Part of the project description. The entry point is the root [AGENTS.md](../../A
 | `emoji/`, `EmojiPicker.tsx` | `docs/features/emoji.md` |
 | `SettingsDialog.tsx`, `MiniProfile.tsx`, `accountSettings.ts`, `voice/settings.ts` | `docs/features/settings.md` |
 | `AdminPanel.tsx`, `ChannelsTab.tsx`, `roleOrder.ts`, `channelOrder.ts`, `ContextMenu.tsx`, `Avatar.tsx`, general look | `docs/features/ui-admin.md`, brand: `docs/brand/AGENTS.md` |
+| `Avatar.tsx` `src` (avatar image of the directory account instead of the initials) and everything that passes it: `ChatView`, `MemberList`, `MentionSuggest`, `Sidebar`, `VoiceStage`, `VoiceDock`, `MiniProfile`, `SettingsDialog`, `Home`, `DmView`, `App.tsx` (`myAvatarUrl`); upload from the settings' profile tab: `avatarImage.ts` (crop/scale/encode, the same steps as the directory's account page: change both together), `api.directorySetAvatar`, `store.setAvatar`, `state.directoryAvatars` | `docs/features/directory.md` (entries "Avatars" and "Avatar upload from the client") |
 | `LicensesTab.tsx`, `licenses/` | `docs/features/licenses.md` |
 | `LoginScreen.tsx`, directory functions in `api.ts`, `directoryLink.ts`, `Home.tsx`, `DmView.tsx` | `docs/features/directory.md` |
 | `platform/` | `docs/features/desktop.md` |

@@ -4,6 +4,10 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 Base check of the complete workflow: 14 September 2026, Windows 11, Node 25.2.1, pnpm 10.15.0, Docker 29, LiveKit 1.13.6.
 
+- **Avatar upload from the client (19 September 2026):** all four packages typechecked, web tests 240 (`avatarImage.test.ts` 2 new), root build green. Built client on :3001 (fresh `chat_avatar` database, dropped afterwards) with a directory instance on :3101, driven in headless Chrome over the DevTools protocol: sign-in with a planted key that has a handle, settings, upload through the file input, preview/dock/member list show the image, removal brings the initials back; screenshot reviewed. Not checked: desktop app, Safari, client without a home server.
+
+- **Avatars from the directory account (19 September 2026):** all four packages typechecked; tests green (protocol 57 with 4 new avatar tests in `directory.test.ts`, server 51, web 238, desktop 18); migration 0022 via `pnpm db:generate`. Smoke test against a server on :3001 (`chat_smoke`, `DIRECTORY_URL=http://localhost:3101`, a directory smoke instance of `../squorli-directory` with the new routes): 127 green, 5 new for the avatar (null before, push after an upload, the address serves the image, `/api/me`, null after removal). Directory side: see its `docs/VERIFIED-STATE.md`. Not checked: the logged-in web client in a browser with a real avatar, the desktop app.
+
 - **Password eye placement (19 September 2026):** CSS places the visibility toggle inside the right edge of both server-login password fields, reserving text space and a 44 px target. All four packages typechecked, 360 tests passed and root build copied the updated client to `apps/server/public`. Visual browser verification remains unavailable (no connected browser).
 
 - **Login handle prefix (19 September 2026):** all four packages typechecked; all 360 tests and the full root build passed. Current client copied to `apps/server/public`. Sign-in now uses a fixed @ prefix and strips leading @ characters from typed/pasted values; API calls still use the bare handle. Browser interaction remains unchecked (no connected browser).

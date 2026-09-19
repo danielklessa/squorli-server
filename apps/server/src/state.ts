@@ -64,7 +64,7 @@ export async function loadRoles(db: Db): Promise<Role[]> {
 
 export async function loadMembers(db: Db, hub: Hub): Promise<Member[]> {
   const rows = await db
-    .select({ userId: members.userId, joinedAt: members.joinedAt, streamBlocked: members.streamBlocked, isOwner: members.isOwner, publicKey: users.publicKey, displayName: users.displayName, handle: users.handle })
+    .select({ userId: members.userId, joinedAt: members.joinedAt, streamBlocked: members.streamBlocked, isOwner: members.isOwner, publicKey: users.publicKey, displayName: users.displayName, handle: users.handle, avatarUrl: users.avatarUrl })
     .from(members)
     .innerJoin(users, eq(users.id, members.userId))
     .orderBy(asc(members.joinedAt));
@@ -83,6 +83,7 @@ export async function loadMembers(db: Db, hub: Hub): Promise<Member[]> {
     afk: hub.isAfk(r.userId),
     streamBlocked: r.streamBlocked,
     handle: r.handle,
+    avatarUrl: r.avatarUrl,
     isOwner: r.isOwner,
   }));
 }

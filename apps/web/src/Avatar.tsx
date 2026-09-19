@@ -3,8 +3,11 @@ import { t } from "./i18n";
 
 type Props = {
   name: string;
-  /** Reserved for a future, validated profile-image URL supplied by the API. */
-  src?: string | null;
+  /**
+   * Avatar of the directory account: `Member.avatarUrl` / `Me.avatarUrl` from the chat server, or `directoryAvatarUrl` for friends.
+   * Without one, and when the image cannot be loaded, the initials show.
+   */
+  src?: string | null | undefined;
   size?: "small" | "medium" | "large";
   online?: boolean;
   /** Online but absent (AFK detection): an amber crescent instead of the green dot. */

@@ -29,7 +29,7 @@ import { ScreenPicker } from "./ScreenPicker";
 import { TitleBar } from "./TitleBar";
 import { loadVoiceSettings, saveVoiceSettings } from "./voice/settings";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
-import { Permission, directoryServerIconUrl, directoryServerUrl, displayNameOf, hasPermission, type Member } from "@squorli/protocol";
+import { Permission, directoryAvatarUrl, directoryServerIconUrl, directoryServerUrl, displayNameOf, hasPermission, type Member } from "@squorli/protocol";
 import { Store, activeState, homeState, type ServerConnState, type State } from "./store";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 import { RadioPlayer, type RadioState } from "./voice/radioPlayer";
@@ -295,6 +295,11 @@ export function App() {
   const view = active && conn && server ? { active, conn, server } : null;
   const current = view?.server.channels.find((c) => c.id === view.active.currentChannelId && c.kind === "text") ?? null;
   const me = view?.server.members.find((m) => m.userId === view.active.userId);
+  // Own avatar: the directory account knows it first (an upload from the settings updates it at once, the member list follows
+  // with the directory's push); without an account whatever the open server says.
+  const myAvatarUrl = state.directoryUrl && state.directoryAccount
+    ? directoryAvatarUrl(state.directoryUrl, state.directoryAccount.publicKey, state.directoryAccount.avatarUpdatedAt)
+    : me ? me.avatarUrl : active?.me?.avatarUrl ?? null;
   const canStream = !!server && hasPermission(server.myPermissions, Permission.STREAM_VIDEO);
   // M7: home view with friends and direct messages as soon as the directory socket exists (an account at the directory).
   const homeAvailable = state.friends !== null || state.directoryLink !== "idle";
@@ -384,7 +389,7 @@ export function App() {
           onJoinVoice={(id) => { void joinVoice(view.active.host, id).catch(() => {}); }} onOpenAdmin={() => setShowAdmin(true)} myUserId={view.active.userId ?? ""}
         /> : <nav className="sidebar"><header className="server-head"><img className="brand-mark" src="/brand/squorli-icon-small.svg" alt="" width="22" height="22" /><strong>{active?.serverName ?? active?.host ?? "Squorli"}</strong></header></nav>}
         <VoiceDock client={client} voice={voice} channel={voiceChannel} serverName={voiceHost && voiceHost !== activeHost ? voiceServer?.server?.settings.name ?? voiceHost : null}
-          displayName={me?.displayName ?? active?.me?.displayName ?? home?.me?.displayName ?? state.directoryAccount?.displayName ?? (state.directoryAccount ? `@${state.directoryAccount.handle}` : "…")} onLeave={leaveVoice} onOpenProfile={setMiniProfile} onOpenSettings={() => setSettingsTab("profile")} pttSuspended={capturingPttKey}
+          displayName={me?.displayName ?? active?.me?.displayName ?? home?.me?.displayName ?? state.directoryAccount?.displayName ?? (state.directoryAccount ? `@${state.directoryAccount.handle}` : "…")} avatarUrl={myAvatarUrl} onLeave={leaveVoice} onOpenProfile={setMiniProfile} onOpenSettings={() => setSettingsTab("profile")} pttSuspended={capturingPttKey}
           onOpenStage={stageWindow.popped ? stageWindow.focus : voiceChannel && !showStage && voiceHost ? () => { store.openServer(voiceHost === state.homeHost ? homeDirHost : voiceHost); setStageOpen(true); } : null}
           canStream={!!voiceServer?.server && hasPermission(voiceServer.server.myPermissions, Permission.STREAM_VIDEO)} onToggleCamera={toggleCamera}
           afkReturn={afkReturn && voice.afkRoom ? { name: afkReturnChannel?.name ?? null, onReturn: () => { void joinVoice(afkReturn.host, afkReturn.channelId).catch(() => {}); } } : null} />
@@ -421,14 +426,14 @@ export function App() {
         onPick={(pick) => { screenPick.resolve(pick); setScreenPick(null); }} onCancel={() => { screenPick.resolve(null); setScreenPick(null); }} />)}
       {cameraPick && inPickWindow(<CameraPicker cameras={cameraPick} initial={voiceSettings.cameraDeviceId} initialBlur={voiceSettings.cameraBlur} win={pickWindow ?? window} onPick={(id, b) => { void pickCamera(id, b); }} onCancel={() => setCameraPick(null)} />)}
       {miniProfile && active?.me && (
-        <MiniProfile anchor={miniProfile} displayName={me?.displayName ?? active.me.displayName ?? "…"} storedName={active.me.displayName} handle={active.me.handle}
+        <MiniProfile anchor={miniProfile} displayName={me?.displayName ?? active.me.displayName ?? "…"} avatarUrl={myAvatarUrl} storedName={active.me.displayName} handle={active.me.handle}
           serverName={server?.settings.name ?? active.serverName} withDirectory={!!state.directoryAccount && !!active.serverDomain}
           onSave={(n) => store.setServerDisplayName(n)} onOpenSettings={() => setSettingsTab("profile")} onClose={() => setMiniProfile(null)} />
       )}
       {settingsTab && (homeless || (active?.me && conn)) && (
-        <SettingsDialog api={active?.me && conn ? conn.api : null} me={active?.me ?? null} publicKey={state.identity?.publicKey ?? null} displayName={me?.displayName ?? active?.me?.displayName ?? state.directoryAccount?.displayName ?? "…"} directoryUrl={state.directoryUrl} directoryAccount={state.directoryAccount}
+        <SettingsDialog api={active?.me && conn ? conn.api : null} me={active?.me ?? null} publicKey={state.identity?.publicKey ?? null} displayName={me?.displayName ?? active?.me?.displayName ?? state.directoryAccount?.displayName ?? "…"} avatarUrl={myAvatarUrl} directoryUrl={state.directoryUrl} directoryAccount={state.directoryAccount}
           serverDomain={active?.serverDomain ?? null} clientVersion={platform.app?.version ?? home?.serverVersion ?? null} syncError={state.settingsSyncError} client={client} voice={voice} initialTab={settingsTab}
-          onSaveServerName={(n) => store.setServerDisplayName(n)} onSaveGlobalName={(n) => store.setDirectoryName(null, n)} onSetLocale={(pref) => store.setLocale(pref)} localePending={state.localeReloadPending}
+          onSaveServerName={(n) => store.setServerDisplayName(n)} onSaveGlobalName={(n) => store.setDirectoryName(null, n)} onSetAvatar={state.directoryAccount && state.directoryAvatars ? (file) => store.setAvatar(file) : null} onSetLocale={(pref) => store.setLocale(pref)} localePending={state.localeReloadPending}
           onCapturingKey={setCapturingPttKey} onClose={() => setSettingsTab(null)}
           onLogout={() => { setSettingsTab(null); void client.leave(); store.logout(); }}
           onForget={() => { setSettingsTab(null); void client.leave(); void store.forgetIdentity(); }} />
