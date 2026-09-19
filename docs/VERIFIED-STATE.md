@@ -4,6 +4,8 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 Base check of the complete workflow: 14 September 2026, Windows 11, Node 25.2.1, pnpm 10.15.0, Docker 29, LiveKit 1.13.6.
 
+- **Stereo capture on phones, one-sided input (19 September 2026):** root typecheck, tests (web 268, 5 new in `oneSided.test.ts`; protocol 57, server 55, desktop 18) and build passed. Real `MicPipeline` in headless Chrome with a synthetic two-channel capture: left only becomes both sides after half a second, real stereo returns to stereo. Not checked: the iPhone (echo on the loudspeaker, both ears), a real audio interface.
+
 - **Interrupted AudioContext on iOS (19 September 2026):** root typecheck, tests (web 263, 1 new in `gate.test.ts`; protocol 57, server 55, desktop 18) and build passed. Not checked: the iPhone; no desktop browser has the state "interrupted", so nothing but the unit test covers it.
 
 - **Refused microphone explained (19 September 2026):** root typecheck, tests (web 262, 3 new in `micPermission.test.ts`; protocol 57, server 55, desktop 18) and build passed. Headless Chrome without the fake permission UI against the dev LiveKit: permission state "denied", the join fails with the explained text. Not checked: the iPhone, where the refusal was reported and whose cause is still open.

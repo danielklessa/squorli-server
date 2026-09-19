@@ -732,6 +732,7 @@ export const en: Messages = {
   "debug.iceRow": "send {pub} · receive {sub}",
   "debug.levelGate": "Level / gate",
   "debug.micInput": "input {level}",
+  "debug.micOneSided": "channel {side} only, put on both sides",
   "debug.open": "open",
   "debug.closed": "closed",
   "debug.microphone": "Microphone",

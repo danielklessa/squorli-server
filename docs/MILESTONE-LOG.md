@@ -4,6 +4,7 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 | Date | Change |
 |---|---|
+| 2026-09-19 | Stereo channels: phones and tablets capture with the browser's echo cancellation instead of raw stereo (the others heard themselves back from an iPhone on its loudspeaker, and heard the iPhone in one ear); on computers a stereo capture with the signal on one channel only is put on both sides (`voice/oneSided.ts`). Not tested on an iPhone. |
 | 2026-09-19 | An AudioContext that iOS left "interrupted" (microphone prompt, start of the capture) is resumed like a suspended one (`contextNeedsResume()` in `voice/gate.ts`; pipeline, gestures, cues, `onstatechange`): the iPhone showed no microphone level after the prompt. Not tested on an iPhone. |
 | 2026-09-19 | A refused microphone says why (`voice/micPermission.ts`: stored refusal, refused without asking, kept back by the system) instead of WebKit's one text; the microphone request is the first thing in the joining tap; the mobile join sheet shows the explained text. The iPhone home screen refusal itself is still open. |
 | 2026-09-19 | The web client on a phone's home screen: Squorli icons (`tools/web-app-icons.mjs`, `apps/web/public/app-icons/`), manifest as the server route `/api/manifest.webmanifest` with the name "Squorli - <server name>", Apple tags in `index.html`. Not tested on a phone. Notes: `docs/features/home-screen.md`. |

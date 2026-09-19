@@ -1,8 +1,9 @@
 import { VoiceGate, contextNeedsResume, rmsLevel } from "./gate";
+import { OneSidedDetector, type SideVerdict } from "./oneSided";
 import { AutoGain, DEFAULT_MIC_BOOST, DESKTOP_BOOST_LIMITS, MOBILE_BOOST_LIMITS, SOFT_CLIP_RANGE, clampBoost, softClipCurve, type MicBoostLimits, type MicBoostSettings } from "./micBoost";
 
 /**
- * Microphone pipeline: getUserMedia -> AudioContext -> boost (gain + clipping guard, micBoost.ts) -> [analyser for the level]
+ * Microphone pipeline: getUserMedia -> AudioContext -> [stereo only: one-sided input onto both channels, oneSided.ts] -> boost (gain + clipping guard, micBoost.ts) -> [analyser for the level]
  * + [gain as the gate] -> output track. Level meter, voice activation and the published track all sit behind the boost, so
  * the threshold means what the others hear. Stereo channels run without the browser's processing but WITH the boost (see start()).
  *
@@ -60,6 +61,20 @@ export class MicPipeline {
   private ctx: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
+  /**
+   * Stereo capture only: what feeds the boost and the raw level. Normally the source itself; when only one channel carries
+   * a signal (an iPhone's mono microphone in a two-channel stream, oneSided.ts), that channel on both sides.
+   */
+  private bus: GainNode | null = null;
+  private splitter: ChannelSplitterNode | null = null;
+  private merger: ChannelMergerNode | null = null;
+  private sideLeft: AnalyserNode | null = null;
+  private sideRight: AnalyserNode | null = null;
+  private sides: OneSidedDetector | null = null;
+  private routed: SideVerdict = "stereo";
+  private sideSamples = new Float32Array(1024);
+  /** Which channel of a stereo capture carries the signal ("stereo" = both, or a mono channel); for the debug view. */
+  inputSide: SideVerdict = "stereo";
   /** Level of the raw input, for the automatic boost (the `analyser` below sits behind the boost). */
   private inputAnalyser: AnalyserNode | null = null;
   private pre: GainNode | null = null;
@@ -82,7 +97,7 @@ export class MicPipeline {
   private forcedOpen = false;
   /** Current level (0..1, behind the boost), the raw level in front of it, whether the gate is open, and the boost applied right now (1 = none); for the display. */
   readonly state = { level: 0, input: 0, open: false, boost: 1 };
-  onState: ((s: { level: number; input: number; open: boolean; boost: number }) => void) | null = null;
+  onState: ((s: { level: number; input: number; open: boolean; boost: number; side: SideVerdict }) => void) | null = null;
   /** The last start() used the default microphone because the chosen device was gone. */
   deviceFallback = false;
 
@@ -134,8 +149,29 @@ export class MicPipeline {
     this.pre = this.ctx.createGain();
     this.shaper = this.ctx.createWaveShaper();
     this.shaper.curve = softClipCurve();
-    this.source.connect(this.inputAnalyser);
-    this.source.connect(this.pre);
+    // Stereo: the raw level and the boost hang on a bus, so a one-sided input can be re-routed onto both channels while it
+    // runs (tick()). Mono channels need none of it: one channel is spread to both sides by Web Audio itself.
+    let input: AudioNode = this.source;
+    if (stereo) {
+      this.bus = this.ctx.createGain();
+      this.bus.channelCount = 2;
+      this.bus.channelCountMode = "explicit";
+      this.splitter = this.ctx.createChannelSplitter(2);
+      this.merger = this.ctx.createChannelMerger(2);
+      this.sideLeft = this.ctx.createAnalyser();
+      this.sideRight = this.ctx.createAnalyser();
+      this.sideLeft.fftSize = this.sideRight.fftSize = 1024;
+      this.source.connect(this.splitter);
+      this.splitter.connect(this.sideLeft, 0);
+      this.splitter.connect(this.sideRight, 1);
+      this.merger.connect(this.bus);
+      this.source.connect(this.bus);
+      this.sides = new OneSidedDetector();
+      input = this.bus;
+    }
+    this.routed = this.inputSide = "stereo";
+    input.connect(this.inputAnalyser);
+    input.connect(this.pre);
     this.pre.connect(this.shaper);
     this.shaper.connect(this.analyser);
     this.shaper.connect(this.gain);
@@ -193,8 +229,25 @@ export class MicPipeline {
     else this.pre.gain.setTargetAtTime(g / SOFT_CLIP_RANGE, this.ctx.currentTime, 0.1);
   }
 
+  /** Stereo capture: put a one-sided input on both channels, and take that back when the second channel comes alive. */
+  private routeSides() {
+    if (!this.sides || !this.sideLeft || !this.sideRight || !this.source || !this.bus || !this.splitter || !this.merger) return;
+    this.sideLeft.getFloatTimeDomainData(this.sideSamples);
+    const left = rmsLevel(this.sideSamples);
+    this.sideRight.getFloatTimeDomainData(this.sideSamples);
+    const verdict = this.sides.update(left, rmsLevel(this.sideSamples));
+    if (verdict === this.routed) return;
+    // Take the old route away, then set the new one: the source itself, or its live channel into both inputs of the merger.
+    if (this.routed === "stereo") this.source.disconnect(this.bus);
+    else { const was = this.routed === "left" ? 0 : 1; this.splitter.disconnect(this.merger, was, 0); this.splitter.disconnect(this.merger, was, 1); }
+    if (verdict === "stereo") this.source.connect(this.bus);
+    else { const live = verdict === "left" ? 0 : 1; this.splitter.connect(this.merger, live, 0); this.splitter.connect(this.merger, live, 1); }
+    this.routed = this.inputSide = verdict;
+  }
+
   private tick() {
     if (!this.analyser) return;
+    this.routeSides();
     if (this.inputAnalyser) { this.inputAnalyser.getFloatTimeDomainData(this.samples); this.state.input = rmsLevel(this.samples); }
     if (this.inputAnalyser && this.autoGain && this.boost.auto) {
       const g = this.autoGain.update(this.state.input);
@@ -216,12 +269,15 @@ export class MicPipeline {
       this.gain.gain.setTargetAtTime(open ? 1 : 0, t, 0.01);
     }
     if (open !== this.state.open) this.state.open = open;
-    this.onState?.({ level: this.state.level, input: this.state.input, open, boost: this.state.boost });
+    this.onState?.({ level: this.state.level, input: this.state.input, open, boost: this.state.boost, side: this.inputSide });
   }
 
   private async stopCapture() {
     if (this.timer !== null) { clearInterval(this.timer); this.timer = null; }
-    this.source?.disconnect(); this.inputAnalyser?.disconnect(); this.pre?.disconnect(); this.shaper?.disconnect(); this.analyser?.disconnect(); this.gain?.disconnect();
+    this.source?.disconnect(); this.bus?.disconnect(); this.splitter?.disconnect(); this.merger?.disconnect(); this.sideLeft?.disconnect(); this.sideRight?.disconnect();
+    this.bus = this.splitter = this.merger = this.sideLeft = this.sideRight = null;
+    this.sides = null;
+    this.inputAnalyser?.disconnect(); this.pre?.disconnect(); this.shaper?.disconnect(); this.analyser?.disconnect(); this.gain?.disconnect();
     this.stream?.getTracks().forEach((t) => t.stop());
     this.source = this.inputAnalyser = this.pre = this.shaper = this.analyser = this.gain = this.dest = null;
     this.autoGain = null;

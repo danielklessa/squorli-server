@@ -82,6 +82,8 @@ export type VoiceState = {
   level: number;
   /** Microphone boost applied right now (1 = none; micBoost.ts), for the settings and the debug view. */
   micBoost: number;
+  /** Stereo channel: the one channel of the capture that carries the signal and is put on both sides (oneSided.ts); "stereo" = both do, or a mono channel. */
+  micSide: "stereo" | "left" | "right";
   /** Raw microphone level in front of the boost (RMS 0..1), for the debug view: tells a quiet capture from a boost that does not reach. */
   micInput: number;
   /** Microphone test running (Einstellungen): you hear yourself, and nothing of it is sent into the channel (the microphone counts as muted). */
@@ -176,7 +178,7 @@ export class VoiceClient {
   private readonly screenListening = new Map<string, Set<string>>();
   private readonly listeners = new Set<(s: VoiceState) => void>();
   state: VoiceState = {
-    status: "disconnected", channelId: null, afkRoom: false, participants: [], micMuted: false, deafened: false, gateOpen: false, level: 0, micBoost: 1, micInput: 0, micTest: false,
+    status: "disconnected", channelId: null, afkRoom: false, participants: [], micMuted: false, deafened: false, gateOpen: false, level: 0, micBoost: 1, micInput: 0, micSide: "stereo", micTest: false,
     canPlayback: true, audioContext: "none", inputDeviceId: null, cameraOn: false, cameraBlur: 0, screenOn: false, screenAudio: null, tiles: [], notice: null, screenSink: { deviceId: null, tracks: 0, error: null }, audioProfile: null, rtcUrl: null, events: [], error: null,
   };
   private audioProfile: AudioProfile = DEFAULT_AUDIO_PROFILE;
@@ -259,12 +261,22 @@ export class VoiceClient {
    * join() takes this capture over when device and mode still match, and releases it otherwise; whoever calls this and
    * then does not reach join() calls releasePreparedMic().
    */
-  prepareMic(deviceId: string | null, stereo: boolean): void {
+  prepareMic(deviceId: string | null, channelStereo: boolean): void {
     this.releasePreparedMic();
+    const stereo = this.capturesStereo(channelStereo);
     const opened = openMic((c) => navigator.mediaDevices.getUserMedia(c), deviceId, stereo);
     opened.catch(() => { /* reported by join(), which awaits the same promise */ });
     this.preMic = { deviceId, stereo, opened };
   }
+
+  /**
+   * Is the microphone captured in stereo, that is raw, without the browser's echo cancellation, noise suppression and gain
+   * control? Only in a stereo channel and never on a phone or tablet (user's reports, 19 September 2026: with the iPhone on
+   * its loudspeaker the others heard themselves back, and its mono microphone arrived on one side only). A phone has one
+   * microphone next to its loudspeaker: nothing is gained by raw stereo there and the echo cancellation is needed. The
+   * channel's Opus settings stay as they are (publish options); the mono capture is spread to both sides.
+   */
+  private capturesStereo(channelStereo: boolean): boolean { return channelStereo && !(this.media?.mobile ?? false); }
 
   releasePreparedMic(): void {
     const pre = this.preMic;
@@ -443,16 +455,16 @@ export class VoiceClient {
       this.mic = mic;
       mic.onState = (s) => {
         const changed = s.open !== this.state.gateOpen;
-        this.patch({ level: s.level, gateOpen: s.open, micBoost: s.boost, micInput: s.input });
+        this.patch({ level: s.level, gateOpen: s.open, micBoost: s.boost, micInput: s.input, micSide: s.side });
         if (changed) this.refreshParticipants(); // own speaker highlight immediately, not only once LiveKit reports it
       };
       mic.setMode(settings.mode);
       mic.setBoost(settings.micBoost);
       // The capture opened inside the user's gesture, if it is the one wanted here (prepareMic()); otherwise it is released.
-      const pre = this.preMic?.deviceId === settings.inputDeviceId && this.preMic.stereo === this.audioProfile.stereo ? this.preMic.opened : undefined;
+      const pre = this.preMic?.deviceId === settings.inputDeviceId && this.preMic.stereo === this.capturesStereo(this.audioProfile.stereo) ? this.preMic.opened : undefined;
       if (pre) this.preMic = null;
       else this.releasePreparedMic();
-      const track = await mic.start(settings.inputDeviceId, this.audioProfile.stereo, pre).catch((err) => { micFailed = true; throw err; });
+      const track = await mic.start(settings.inputDeviceId, this.capturesStereo(this.audioProfile.stereo), pre).catch((err) => { micFailed = true; throw err; });
       if (mic.deviceFallback) this.log("gewaehltes mikrofon nicht gefunden, nutze das standardmikrofon");
       this.publication = await room.localParticipant.publishTrack(track, this.micPublishOptions());
       this.log(`opus ${this.audioProfile.bitrate} kbit/s ${this.audioProfile.stereo ? "stereo" : "mono, dtx+red"}`);
@@ -504,7 +516,7 @@ export class VoiceClient {
     this.videoWatch.clear();
     this.audioHost.replaceChildren();
     this.micMutedByUser = false;
-    this.patch({ status: "disconnected", channelId: null, afkRoom: false, participants: [], gateOpen: false, level: 0, micBoost: 1, micInput: 0, micMuted: false, deafened: false, inputDeviceId: null, cameraOn: false, screenOn: false, screenAudio: null, tiles: [] });
+    this.patch({ status: "disconnected", channelId: null, afkRoom: false, participants: [], gateOpen: false, level: 0, micBoost: 1, micInput: 0, micSide: "stereo", micMuted: false, deafened: false, inputDeviceId: null, cameraOn: false, screenOn: false, screenAudio: null, tiles: [] });
   }
 
   // ---------- Permission VIEW_VIDEO: who receives camera and screen
@@ -668,7 +680,7 @@ export class VoiceClient {
     try {
       const wasMuted = this.state.micMuted;
       if (pub.track) await room.localParticipant.unpublishTrack(pub.track, false);
-      const track = await mic.start(this.micSettings.inputDeviceId, profile.stereo);
+      const track = await mic.start(this.micSettings.inputDeviceId, this.capturesStereo(profile.stereo));
       this.publication = await room.localParticipant.publishTrack(track, this.micPublishOptions());
       if (wasMuted && this.publication.track instanceof LocalAudioTrack) await this.publication.track.mute();
       this.log(`opus umgestellt: ${profile.bitrate} kbit/s ${profile.stereo ? "stereo" : "mono"}`);
@@ -973,7 +985,7 @@ export class VoiceClient {
     }
     if (!this.mic || !this.publication) return;
     try {
-      const track = await this.mic.start(deviceId, this.audioProfile.stereo);
+      const track = await this.mic.start(deviceId, this.capturesStereo(this.audioProfile.stereo));
       if (this.mic.deviceFallback) this.log("gewaehltes mikrofon nicht gefunden, nutze das standardmikrofon");
       const local = this.publication.track;
       if (local instanceof LocalAudioTrack) await local.replaceTrack(track, true);

@@ -733,6 +733,7 @@ export const de = {
   "debug.iceRow": "senden {pub} · empfangen {sub}",
   "debug.levelGate": "Pegel / Tor",
   "debug.micInput": "Eingang {level}",
+  "debug.micOneSided": "nur Kanal {side}, auf beide Seiten gelegt",
   "debug.open": "offen",
   "debug.closed": "zu",
   "debug.microphone": "Mikrofon",
