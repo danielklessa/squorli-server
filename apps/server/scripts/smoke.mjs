@@ -304,6 +304,12 @@ check("grant owner -> isOwner + ADMINISTRATOR", so1 === 200 && stOwn.members.fin
 const [so2, ro2] = await api("PUT", `/api/members/${owner.userId}/owner`, { owner: false }, B.token);
 const [so2b, ro2b] = await api("PUT", `/api/members/${B.userId}/owner`, { owner: false }, B.token);
 check("founder cannot be demoted, not self", so2 === 403 && ro2.error === "founder" && so2b === 400 && ro2b.error === "self");
+// Roles of an owner: only the first owner may change them (19 September 2026); B is an owner here, with its roles from above.
+const [sor1] = await api("PUT", `/api/members/${B.userId}/roles`, { roleIds: [memberRole.id] }, owner.token);
+const [, stOr] = await api("GET", "/api/state", undefined, owner.token);
+const [sor2, ror2] = await api("PUT", `/api/members/${owner.userId}/roles`, { roleIds: [memberRole.id] }, B.token);
+check("first owner sets another owner's roles, a further owner cannot set the first owner's", sor1 === 200 && JSON.stringify(stOr.members.find((m) => m.userId === B.userId)?.roleIds) === JSON.stringify([memberRole.id]) && sor2 === 403 && ror2.error === "target_above_you", `${sor1} ${sor2} ${ror2.error ?? ""}`);
+await api("PUT", `/api/members/${B.userId}/roles`, { roleIds: [memberRole.id, modRole.id] }, owner.token);
 const [so3] = await api("PUT", `/api/members/${B.userId}/owner`, { owner: false }, owner.token);
 const [, stOwn2] = await api("GET", "/api/state", undefined, B.token);
 check("revoke owner -> back to role permissions", so3 === 200 && stOwn2.members.find((m) => m.userId === B.userId)?.isOwner === false && (stOwn2.myPermissions & P.ADMINISTRATOR) === 0 && stOwn2.members.find((m) => m.userId === owner.userId)?.isOwner === true);

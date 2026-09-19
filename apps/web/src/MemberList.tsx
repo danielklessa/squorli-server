@@ -8,6 +8,7 @@ import { Icon } from "./Icon";
 import { UserVolumeControl } from "./UserVolumeControl";
 import type { VoiceClient } from "./voice/voiceClient";
 import { t } from "./i18n";
+import { assignableRoles, canSetRolesOf } from "./memberRank";
 
 type Props = {
   api: ServerApi;
@@ -47,7 +48,10 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
   const canBan = hasPermission(myPermissions, Permission.BAN_MEMBERS);
   const canRoles = hasPermission(myPermissions, Permission.MANAGE_ROLES);
   const canModerate = hasPermission(myPermissions, Permission.MODERATE_VOICE);
-  const iAmOwner = members.find((m) => m.userId === myUserId)?.isOwner ?? false;
+  const meMember = members.find((m) => m.userId === myUserId) ?? null;
+  const iAmOwner = meMember?.isOwner ?? false;
+  // Only what the server would accept is offered (memberRank.ts): roles below my own, and members I may act on.
+  const myRoles = meMember && canRoles ? assignableRoles(meMember, roles) : [];
   const voiceChannels = channels.filter((c) => c.kind === "voice");
   const voiceChannelOf = (userId: string) => Object.keys(voice).find((cid) => (voice[cid] ?? []).some((m) => m.userId === userId)) ?? null;
 
@@ -96,9 +100,9 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
                         );
                       })()}
                       {!isMe && <UserVolumeControl client={client} publicKey={m.publicKey} />}
-                      {canRoles && !isMe && roles.some((role) => !role.isDefault) && (
+                      {meMember && !isMe && myRoles.length > 0 && canSetRolesOf(meMember, m, roles, ownerId) && (
                         <ContextSubmenu label={t("members.roles")}>
-                          {roles.filter((x) => !x.isDefault).map((x) => (
+                          {myRoles.map((x) => (
                             <button key={x.id} role="menuitemcheckbox" aria-checked={m.roleIds.includes(x.id)} onClick={() => run(() => api.setMemberRoles(m.userId, m.roleIds.includes(x.id) ? m.roleIds.filter((id) => id !== x.id) : [...m.roleIds, x.id]))}>
                               <span style={x.color ? { color: x.color } : undefined}>{x.name}</span>
                               {m.roleIds.includes(x.id) && <Icon name="check" />}

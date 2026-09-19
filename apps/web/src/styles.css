@@ -478,7 +478,7 @@ button.dock-stage:hover { background: var(--sel); }
 .debug td:first-child { color: var(--muted); white-space: nowrap; }
 .wslog { max-height: 10rem; overflow: auto; font-size: 0.72rem; white-space: pre-wrap; word-break: break-all; border: 1px solid var(--line); border-radius: 6px; padding: 0.4rem; margin: 0.2rem 0; }
 /* Debug button: fixed spot on the right of the main area's header, vertically centered */
-.debug-toggle { position: absolute; right: 0.6rem; top: calc(var(--head-h) / 2); transform: translateY(-50%); }
+.debug-toggle { position: absolute; right: 0.6rem; top: calc((var(--head-h) - 1px) / 2); transform: translateY(-50%); }   /* centered in the header above its 1px border line, like the controls inside it */
 
 /* Confirmation and input dialogs (replacement for window.confirm/prompt), sitting above all other modals */
 .dialog-backdrop { z-index: 30; }
@@ -870,3 +870,10 @@ button.emoji-open[aria-expanded="true"] { color: var(--brand); }
 .mention-suggest .user-avatar { width: 1.75rem; height: 1.75rem; font-size: 0.75rem; flex: none; }
 .mention-suggest-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .mention-suggest .muted { margin-left: auto; flex: none; }
+
+/* Header controls (user's wish, 19 September 2026): everything that can be pressed at the top of a voice lobby is exactly as high
+   as the layout switch (.seg): its 3px frame plus its buttons (one line of 0.875rem text at line-height 1.5, 0.25rem padding above
+   and below). The radio button reaches that height by its own padding (see .radio-toggle); the icon buttons and the debug button
+   get it here, as squares. They keep their look: no ground until hovered. Change .seg and this value together. */
+.chat-head, .debug-toggle { --head-control-h: calc(0.875rem * 1.5 + 0.5rem + 6px); }
+.chat-head > button.icon, button.debug-toggle { height: var(--head-control-h); min-width: var(--head-control-h); padding-block: 0; flex-shrink: 0; border-radius: var(--r); }

@@ -16,6 +16,17 @@ export function outranks(a: Actor, t: Target): boolean {
   return a.isOwner || a.topPosition > t.topPosition;
 }
 
+/**
+ * May actor change target's roles? Your own always (the role check limits which). An owner's roles only by the first owner
+ * (`founderId` = server_settings.owner_id; user's decision, 19 September 2026: the main owner can give other owners roles, nobody
+ * else can). Everyone else by rank, like kick and ban. The client mirrors this in `apps/web/src/memberRank.ts`.
+ */
+export function canSetRolesOf(a: Actor, t: Target, founderId: string | null): boolean {
+  if (a.userId === t.userId) return true;
+  if (t.isOwner) return a.userId === founderId;
+  return outranks(a, t);
+}
+
 /** May actor edit, delete or assign a role at this position? */
 export function canTouchRole(a: Actor, rolePosition: number): boolean {
   return a.isOwner || rolePosition < a.topPosition;

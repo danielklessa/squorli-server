@@ -2,7 +2,7 @@ import { BanRequest, MoveMemberRequest, Permission, SetMemberRolesRequest, SetOw
 import { desc, eq, inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { requireMember } from "../auth/session";
-import { can, canTouchRole, outranks, type Actor } from "../authz";
+import { can, canSetRolesOf, canTouchRole, outranks, type Actor } from "../authz";
 import type { Db } from "../db";
 import { bans, channels, memberRoles, members, roles, users } from "../db/schema";
 import type { Hub } from "../hub";
@@ -54,7 +54,8 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
     const target = await targetOf(req.params.id);
     if (!target) return reply.code(404).send({ error: "not_found" });
-    if (m.actor.userId !== target.userId && !outranks(m.actor, target)) return reply.code(403).send({ error: "target_above_you" });
+    // An owner's roles: only the first owner may change them (authz.ts); everyone else by rank.
+    if (!canSetRolesOf(m.actor, target, (await loadSettings(db)).ownerId)) return reply.code(403).send({ error: "target_above_you" });
 
     const wanted = body.data.roleIds.length ? await db.select().from(roles).where(inArray(roles.id, body.data.roleIds)) : [];
     if (wanted.length !== new Set(body.data.roleIds).size) return reply.code(400).send({ error: "unknown_role" });
