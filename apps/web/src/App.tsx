@@ -147,6 +147,7 @@ export function App() {
   // Desktop app: the task bar icon (and the tray's) shows that something waits (attention.ts).
   const attention = attentionCount(Object.values(state.conversations).map((c) => c.unread), Object.values(state.servers).flatMap((s) => Object.values(s.mentions)), state.missed);
   useEffect(() => platform.window.attention?.set(attention), [attention]);
+  useEffect(() => { if (!state.starting) platform.window.ready(); }, [state.starting]);
   // The same for the speech gate: the settings dialog only stores, a running connection follows from here.
   useEffect(() => client.setMode(voiceSettings.mode), [client, voiceSettings.mode]);
   useEffect(() => client.setThreshold(voiceSettings.vadThreshold), [client, voiceSettings.vadThreshold]);
@@ -273,7 +274,8 @@ export function App() {
     const playback = channelRadio?.playback, channelId = voiceChannel?.id, api = voiceHost ? store.connection(voiceHost)?.api : null;
     if (!embedYoutube || !playback || !channelId || !api) return null;
     return { playback, clockOffset: voiceServer?.clockOffset ?? 0, canControl: hasPermission(voiceServer?.server?.myPermissions ?? 0, Permission.CONTROL_RADIO), publish: (p: { playing: boolean; position: number; rate: number }) => api.setRadioPlayback(channelId, p),
-      ended: embedQueue ? (videoId: string) => { void api.advanceRadio(channelId, { from: videoId, ended: true }).catch(() => {}); } : null };
+      // Over: a queue moves on, and a single video or a queue's last one turns the radio off (the server decides; one that predates that answers 409 for a single video).
+      ended: (videoId: string) => { void api.advanceRadio(channelId, { from: videoId, ended: true }).catch(() => {}); } };
   }, [embedYoutube, embedQueue, channelRadio?.playback, voiceChannel?.id, voiceHost, store, voiceServer?.clockOffset, voiceServer?.server?.myPermissions]);
   useEffect(() => radio.setStream(radioUrl), [radio, radioUrl]);
   useEffect(() => radio.setDeafened(voice.deafened), [radio, voice.deafened]);
@@ -349,6 +351,8 @@ export function App() {
 
   // With a home server the client hangs off the session there; without one (desktop app) it has a login of its own.
   const homeless = state.homeHost === null;
+  // Still finding out what the first screen is (store.ts `starting`): the desktop app's start window covers that time.
+  if (state.starting) return <><TitleBar title="Squorli" /><div className="app-starting" role="status"><div className="app-starting-card"><img src="/brand/squorli-icon.svg" alt="" /><span>{t("app.starting")}</span></div></div></>;
   if (homeless ? !state.signedIn : !home?.server || !home.me || !home.userId) return <><TitleBar title="Squorli" />{homeless ? <DesktopLogin store={store} state={state} /> : <LoginScreen store={store} state={state} />}</>;
 
   const server = active?.server ?? null;
@@ -432,7 +436,8 @@ export function App() {
       {!homeOpen && view && <ColumnHandle column="members" width={layout.members} label={t("layout.resizeMembers")} onChange={(w) => resizeColumn("members", w, false)} onCommit={(w) => resizeColumn("members", w, true)} />}
       {videoWindows.windows}
       {stageWindow.render(stage(true))}
-      {embedSource && channelRadio && <EmbedPlayer source={embedSource} name={channelRadio.name} volume={radioState.volume} muted={voice.deafened} popout={playerWindow} sync={embedSync} onNotice={(text) => client.setNotice(text)} onTurnOff={() => radio.setMuted(true)} />}
+      {embedSource && channelRadio && <EmbedPlayer source={embedSource} name={channelRadio.name} volume={radioState.volume} muted={voice.deafened} popout={playerWindow} sync={embedSync} onNotice={(text) => client.setNotice(text)} onTurnOff={() => radio.setMuted(true)}
+        onStreamOver={() => { const api = voiceHost ? store.connection(voiceHost)?.api : null; if (api && voiceChannel && embedTwitch) void api.radioOffline(voiceChannel.id, embedTwitch).catch(() => {}); }} />}
       {showRail && <ServerRail servers={railServers} serverState={railState} activeKey={homeOpen ? null : activeHost} onAdd={homeless ? () => { void addServer(); } : null}
         onSelect={(key, host) => { setMobileContent(false); setVoicePreview(null); if (key === state.homeHost) { store.openServer(homeDirHost); } else store.openServer(host); setStageOpen(key === voiceHost && stageOpen); }}
         onDiscover={state.directoryUrl ? () => setShowBrowser(true) : null} onLeave={(host, name) => { void leaveServer(host, name); }}

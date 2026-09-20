@@ -1,4 +1,4 @@
-import { AdvanceRadioRequest, CreateRadioStationRequest, Permission, SetChannelRadioRequest, SetRadioPlaybackRequest, UpdateRadioStationRequest, youtubePlaylistOf, youtubeVideoOf, type RadioPlayback } from "@squorli/protocol";
+import { AdvanceRadioRequest, CreateRadioStationRequest, Permission, RadioOfflineRequest, SetChannelRadioRequest, SetRadioPlaybackRequest, twitchChannelOf, UpdateRadioStationRequest, youtubePlaylistOf, youtubeVideoOf, type RadioPlayback } from "@squorli/protocol";
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { requireMember } from "../auth/session";
@@ -167,11 +167,18 @@ export async function registerRadioRoutes(app: FastifyInstance, db: Db, hub: Hub
     const [channel] = await db.select({ url: channels.radioStreamUrl, queue: channels.radioQueue, stationId: channels.radioStationId }).from(channels).where(and(eq(channels.id, req.params.id), eq(channels.kind, "voice"))).limit(1);
     if (!channel) return reply.code(404).send({ error: "not_found" });
     const queue = channel.queue;
+    // A radio with nothing left to play turns itself off (user's wish, 20 September 2026): a single video that ended ...
+    if (channel.url && !queue && ended) {
+      if (youtubeVideoOf(channel.url)?.videoId !== from) return { ok: true, moved: false };
+      return { ok: true, moved: false, stopped: await turnOff(req.params.id, channel.url) };
+    }
     if (!channel.url || !queue) return reply.code(409).send({ error: "no_queue" });
     if (queue.videoIds[queue.index] !== from || advancing.has(req.params.id)) return { ok: true, moved: false };
     advancing.add(req.params.id);
     try {
-      const next = await pickPlayable(queue.videoIds, queue.index + step, step, lookupYoutube);
+      // ... or the last video of a queue. Only a skip by hand goes around the ends of the list.
+      const next = await pickPlayable(queue.videoIds, queue.index + step, step, lookupYoutube, !ended);
+      if (!next && ended) return { ok: true, moved: false, stopped: await turnOff(req.params.id, channel.url) };
       if (!next) return reply.code(502).send({ error: "radio_unknown_video" });
       const url = watchUrl(queue.videoIds[next.index]!);
       // A typed address is named after its video; a station keeps its name. Only while it is still the same video: a radio changed during the lookup keeps what it got.
@@ -182,6 +189,29 @@ export async function registerRadioRoutes(app: FastifyInstance, db: Db, hub: Hub
       onRadioChange();
       return { ok: true, moved: true };
     } finally { advancing.delete(req.params.id); }
+  });
+
+  /** The radio has nothing left to play: off, unless it plays something else by now. */
+  async function turnOff(channelId: string, url: string): Promise<boolean> {
+    const [row] = await db.update(channels).set(RADIO_OFF).where(and(eq(channels.id, channelId), eq(channels.radioStreamUrl, url))).returning({ id: channels.id });
+    if (!row) return false;
+    await broadcastStructure(db, hub, ["channels"]);
+    onRadioChange();
+    return true;
+  }
+
+  // A Twitch stream that is over (AdvanceRadioRequest's counterpart, protocol RadioOfflineRequest): told by the player of a
+  // member who sits in the channel, or by someone who may control the radio. The server has no way to ask Twitch itself.
+  app.post<{ Params: { id: string } }>("/api/channels/:id/radio/offline", { schema: { params: Params } }, async (req, reply) => {
+    const m = await requireMember(db, req, reply);
+    if (!m) return;
+    const body = RadioOfflineRequest.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    if (presence.channelOfUser(m.actor.userId) !== req.params.id && !can(m.actor, Permission.CONTROL_RADIO)) return reply.code(403).send({ error: "forbidden" });
+    const [channel] = await db.select({ url: channels.radioStreamUrl }).from(channels).where(and(eq(channels.id, req.params.id), eq(channels.kind, "voice"))).limit(1);
+    if (!channel) return reply.code(404).send({ error: "not_found" });
+    if (!channel.url || twitchChannelOf(channel.url)?.toLowerCase() !== body.data.channel.toLowerCase()) return { ok: true, stopped: false };
+    return { ok: true, stopped: await turnOff(req.params.id, channel.url) };
   });
 
   app.delete<{ Params: { id: string } }>("/api/channels/:id/radio", { schema: { params: Params } }, async (req, reply) => {

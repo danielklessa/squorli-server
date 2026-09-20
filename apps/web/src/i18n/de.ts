@@ -60,6 +60,7 @@ export const de = {
   "desktopLogin.continueAs": "Weiter als @{handle}",
   "desktopLogin.continueKey": "Mit diesem Schlüssel fortfahren",
   "desktopLogin.app": "Squorli Desktop",
+  "app.starting": "Squorli wird gestartet …",
   "noServers.title": "Noch kein Server",
   "noServers.textAccount": "Für @{handle} ist noch kein Server bekannt. Entdecke öffentliche Server oder füge einen per Adresse oder Einladungslink hinzu.",
   "noServers.textKey": "Füge einen Server per Adresse oder Einladungslink hinzu oder entdecke öffentliche Server.",

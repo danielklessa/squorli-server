@@ -211,6 +211,14 @@ export const RadioQueue = z.object({ listId: z.string(), index: z.number().int()
 export const AdvanceRadioRequest = z.object({ from: YoutubeVideoId, step: z.union([z.literal(1), z.literal(-1)]).default(1), ended: z.boolean().default(false) });
 
 /**
+ * A radio that has nothing left to play turns itself off (user's wish, 20 September 2026). For YouTube that is the `ended`
+ * report above: a single video that is over, or the last video of a queue (a skip by hand still goes around the ends). For
+ * Twitch the members' players say when the stream is over (POST /api/channels/:id/radio/offline): `channel` = the Twitch
+ * channel the sender means, so a report that arrives after the radio changed does nothing.
+ */
+export const RadioOfflineRequest = z.object({ channel: z.string().min(1).max(40) });
+
+/**
  * Playing a video in step ("watch together"): where the video stands for everyone. `position` (seconds) was true at the
  * server's time `at` (ms since the epoch); while `playing`, it moves on at `rate` from there (radioPositionAt). The server
  * stamps `at`; members with CONTROL_RADIO set the rest through their player (PUT /api/channels/:id/radio/playback), and every

@@ -70,6 +70,12 @@ export type State = {
   currentPeer: string | null;
   /** Last error from a friend or message action (shown inline). */
   friendsError: string | null;
+  /**
+   * The client is still finding out what its first screen is (`init()`: the key, and without a home server the directory
+   * account with its servers). Until then App.tsx shows a start screen instead of a login or a "no server yet" that would
+   * only flash by (user's report, 20 September 2026), and the desktop app keeps its start window up.
+   */
+  starting: boolean;
   /** Direct messages and mentions that arrived while the window did not have the focus (attention.ts); 0 again once it has. */
   missed: number;
   // ---- Client without a home server (desktop app); unused otherwise
@@ -96,6 +102,8 @@ const restoreError = (err: unknown) => Object.assign(new Error("restore failed")
 
 /** What the store needs from the platform (`platform/`): the server that serves the page, or the directory to use when there is none. */
 export type StoreOptions = { home: PlatformHome | null; defaultDirectoryUrl: string | null };
+
+const START_SCREEN_MAX_MS = 8000;
 
 export class Store {
   readonly homeHost: string | null;
@@ -135,7 +143,7 @@ export class Store {
       identity: null, homeHost: this.homeHost, activeHost: this.homeHost, servers: home ? { [home.state.host]: home.state } : {},
       signedIn: false, localHosts: [], clientLogin: { busy: false, error: null }, joinInvites: {},
       directoryUrl: null, directoryAccount: undefined, directoryError: null, directoryEmailRequired: false, directoryAvatars: false, accountServers: null, settingsSyncError: null, localeReloadPending: false,
-      directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null, friendsError: null, missed: 0,
+      directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null, friendsError: null, missed: 0, starting: true,
     };
     subscribeVoiceSettings((_s, source) => { if (source === "user") this.scheduleSettingsPush(); });
     // AFK detection: every chat server and the directory hear when the user turns idle or comes back (activity.ts).
@@ -169,6 +177,11 @@ export class Store {
   }
 
   async init() {
+    // A server or directory that does not answer must not hold the start screen for long: what is known by then is shown.
+    const cap = setTimeout(() => this.set({ starting: false }), START_SCREEN_MAX_MS);
+    try { await this.start(); } finally { clearTimeout(cap); if (this.state.starting) this.set({ starting: false }); }
+  }
+  private async start() {
     const identity = await loadOrCreateIdentity();
     this.set({ identity });
     const home = this.home;

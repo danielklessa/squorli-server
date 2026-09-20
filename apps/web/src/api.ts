@@ -119,6 +119,8 @@ export class ServerApi {
   startRadioUrl(channelId: string, url: string, videoIds?: string[]) { return this.request("PUT", `/api/channels/${channelId}/radio`, { url, ...(videoIds ? { videoIds } : {}) }); }
   /** A queue's next or previous video (CONTROL_RADIO), or with `ended` a listener's report that `from` is over. */
   advanceRadio(channelId: string, move: { from: string; step?: 1 | -1; ended?: boolean }) { return this.request("POST", `/api/channels/${channelId}/radio/advance`, move); }
+  /** A listener's report that the Twitch stream `channel` is over: the radio turns off (an older server does not know the route). */
+  radioOffline(channelId: string, channel: string) { return this.request("POST", `/api/channels/${channelId}/radio/offline`, { channel }); }
   stopRadio(channelId: string) { return this.request("DELETE", `/api/channels/${channelId}/radio`); }
   /** Play, pause, move a video for everyone (CONTROL_RADIO); the result arrives as `radio.playback`. */
   setRadioPlayback(channelId: string, playback: { playing: boolean; position: number; rate: number }) { return this.request("PUT", `/api/channels/${channelId}/radio/playback`, playback); }

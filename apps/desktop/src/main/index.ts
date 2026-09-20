@@ -15,6 +15,7 @@ import { registerAppScheme, serveApp } from "./scheme";
 import { PlayerAudioOutput } from "./playerAudio";
 import { readPlayerOutputLabel } from "./playerAudioScript";
 import { applyPermissions, letPlayersEmbed, lockDownContents, openExternal } from "./security";
+import { createSplash, type Splash } from "./splash";
 import { createTray, setTrayAttention } from "./tray";
 import { handleUpdates } from "./updates";
 import { desktopUserAgent } from "./userAgent";
@@ -71,6 +72,10 @@ let quitting = false;
 // Started by the system (autostart.ts): the first window stays in the background, unless the user wants it opened.
 let autostartBackground = readAutostartBackground(loadConfig(app.getPath("userData")).autostartBackground);
 let backgroundStart = startsInBackground(process.argv, autostartBackground);
+// The start window (splash.ts) stays until the client says its first screen is there; then the main window takes its place.
+// A client that never says so (a page that failed to load) is shown after this long anyway.
+const REVEAL_AFTER_MS = 12_000;
+let reveal: (() => void) | null = null;
 // Direct messages and mentions that wait, as the client counts them: a mark on the task bar icon and the tray icon.
 let attention = 0;
 function showAttention(): void {
@@ -92,7 +97,7 @@ const isClientFrame = (event: IpcMainEvent | IpcMainInvokeEvent): boolean => {
   try { return origins.includes(originOf(frame.url)); } catch { return false; }
 };
 
-function createWindow(): BrowserWindow {
+function createWindow(splash: Splash | null = null): BrowserWindow {
   const info: DesktopInfo = { version: app.getVersion(), electron: process.versions.electron ?? "", chrome: process.versions.chrome ?? "", os, directoryUrl, materials, nativeScreenAudio: helperPath() !== null, appearance: look, frame: { maximized: false, focused: true, fullscreen: false }, tray: tray ? { closeToTray } : null, autostart: autostartSupported() ? { enabled: autostartEnabled(), background: autostartBackground } : null, update: updateState() };
   // The window reopens where it was closed, as long as that place still lies on a display (windowState.ts).
   const userData = app.getPath("userData");
@@ -117,8 +122,13 @@ function createWindow(): BrowserWindow {
     const background = backgroundStart;
     backgroundStart = false;
     // A start by the system does not put a window in front of the user: it waits in the tray, or minimized where closing quits.
-    if (!background) win.show(); else if (!(closeToTray && tray)) win.minimize();
+    if (background) { if (!(closeToTray && tray)) win.minimize(); return; }
+    // Behind the start window the client first finds out what to show (login, or the account's servers): no half-ready screen.
+    if (!splash) { win.show(); return; }
+    const timer = setTimeout(() => reveal?.(), REVEAL_AFTER_MS);
+    reveal = () => { reveal = null; clearTimeout(timer); if (!win.isDestroyed()) { win.show(); win.focus(); } splash.close(); };
   });
+  win.webContents.on("did-fail-load", () => reveal?.());
   // The task bar button is new whenever the window was hidden: put the mark back.
   win.on("show", () => showAttention());
   // The own title bar shows the window's state (maximize or restore, dimmed while inactive).
@@ -155,7 +165,8 @@ else {
   lockDownContents(origins);
   void app.whenReady().then(() => {
     // Unpackaged: the build of the sibling package; packaged: electron-builder copies it next to the app (extraResources).
-    serveApp(app.isPackaged ? join(process.resourcesPath, "renderer") : join(__dirname, "..", "..", "web", "dist"));
+    const rendererRoot = app.isPackaged ? join(process.resourcesPath, "renderer") : join(__dirname, "..", "..", "web", "dist");
+    serveApp(rendererRoot);
     // The embedded players' sound on the output device chosen for the web radio (the client names it by its label).
     const playerAudio = new PlayerAudioOutput(app.isPackaged ? undefined : (text) => console.log(text));
     applyPermissions(session.defaultSession, origins, () => playerAudio.granting());
@@ -197,8 +208,21 @@ else {
     ipcMain.on(IPC.attention, (event, count: unknown) => { if (isClientFrame(event)) { attention = readAttentionCount(count); showAttention(); } });
     ipcMain.on(IPC.openExternal, (event, url: unknown) => { if (isClientFrame(event) && typeof url === "string") openExternal(url); });
     tray = createTray(() => mainWindow, () => { quitting = true; app.quit(); });
-    updateState = handleUpdates(() => mainWindow, isClientFrame, () => { quitting = true; screenAudio.stop(); }).state;
-    mainWindow = createWindow();
+    const updates = handleUpdates(() => mainWindow, isClientFrame, () => { quitting = true; screenAudio.stop(); });
+    updateState = updates.state;
+    ipcMain.on(IPC.clientReady, (event) => { if (isClientFrame(event)) reveal?.(); });
+    // `--no-splash` (unpackaged only): the main window at once, to look at what the client itself shows while it starts.
+    if (backgroundStart || (!app.isPackaged && process.argv.includes("--no-splash"))) { updates.checkSoon(); mainWindow = createWindow(); }
+    else {
+      // The start window first: it shows the update check, and an update is installed there before the client opens.
+      const splash = createSplash(rendererRoot);
+      splash.show({ step: "checking" });
+      void updates.checkAtStart(splash).catch(() => "continue" as const).then((result) => {
+        if (result === "installing") return;
+        splash.show({ step: "starting" });
+        mainWindow = createWindow(splash);
+      });
+    }
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow(); });
   });
   app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

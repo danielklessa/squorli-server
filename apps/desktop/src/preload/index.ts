@@ -29,6 +29,7 @@ const bridge: DesktopBridge = {
   setCloseToTray: (on: boolean) => ipcRenderer.invoke(IPC.setCloseToTray, on) as Promise<boolean>,
   setAutostart: (on: boolean) => ipcRenderer.invoke(IPC.setAutostart, on) as Promise<boolean>,
   setAutostartBackground: (on: boolean) => ipcRenderer.invoke(IPC.setAutostartBackground, on) as Promise<boolean>,
+  clientReady: () => ipcRenderer.send(IPC.clientReady),
   setAttention: (count: number) => ipcRenderer.send(IPC.attention, count),
   onWindowFrame: (cb) => subscribe<WindowFrameState>(IPC.windowFrame, cb),
   onUpdateState: (cb) => subscribe<UpdateState>(IPC.updateState, cb),

@@ -31,7 +31,7 @@ export function webPlatform(): Platform {
       onDeepLink: () => () => {},
     },
     screen: { setPicker: () => {} },
-    window: { popoutFeatures, appearance: null, tray: null, autostart: null, attention: null, frame: null },
+    window: { popoutFeatures, appearance: null, tray: null, autostart: null, ready: () => {}, attention: null, frame: null },
     updates: null,
   };
 }

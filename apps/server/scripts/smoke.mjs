@@ -423,8 +423,29 @@ await wsB.waitFor((e) => e.type === "voice.state" && e.channelId === voiceCh.id 
 const [sqe0, endedMove] = await api("POST", `/api/channels/${voiceCh.id}/radio/advance`, { from: YT_ID, ended: true }, B.token);
 const [sqe1] = await api("POST", `/api/channels/${voiceCh.id}/radio/advance`, { from: YT_ID2, step: -1, ended: true }, B.token);
 const afterEnd = await radioOf();
+// A radio with nothing left to play turns itself off: the last video of a queue, a single video, a Twitch stream that is over.
+const [sqe2, endOfList] = await api("POST", `/api/channels/${voiceCh.id}/radio/advance`, { from: YT_ID2, ended: true }, B.token);
+const afterList = await radioOf();
+await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: `https://youtu.be/${YT_ID}` }, owner.token);
+const [sqe3, otherVideo] = await api("POST", `/api/channels/${voiceCh.id}/radio/advance`, { from: YT_ID2, ended: true }, B.token);
+const stillSingle = await radioOf();
+const [sqe4, singleEnd] = await api("POST", `/api/channels/${voiceCh.id}/radio/advance`, { from: YT_ID, ended: true }, B.token);
+const afterSingle = await radioOf();
+check("radio: the end of a queue's last video and of a single video turn the radio off, a report about another video does not", sqe2 === 200 && endOfList.stopped === true && afterList === null
+  && sqe3 === 200 && otherVideo.stopped !== true && stillSingle?.youtubeVideo === YT_ID && sqe4 === 200 && singleEnd.stopped === true && afterSingle === null, `${sqe2} ${sqe3} ${sqe4} ${JSON.stringify(afterList)} ${JSON.stringify(afterSingle)}`);
+await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: "https://twitch.tv/squorli_test" }, owner.token);
+const [sqo1, otherStream] = await api("POST", `/api/channels/${voiceCh.id}/radio/offline`, { channel: "someone_else" }, B.token);
+const stillTwitch = await radioOf();
+const [sqo2, streamOver] = await api("POST", `/api/channels/${voiceCh.id}/radio/offline`, { channel: "Squorli_Test" }, B.token);
+const afterStream = await radioOf();
+const [sqo3] = await api("POST", `/api/channels/${voiceCh.id}/radio/offline`, {}, B.token);
+check("radio: a listener in the channel reports that the twitch stream is over and the radio turns off", sqo1 === 200 && otherStream.stopped === false && stillTwitch?.twitchChannel === "squorli_test"
+  && sqo2 === 200 && streamOver.stopped === true && afterStream === null && sqo3 === 400, `${sqo1} ${sqo2} ${sqo3}`);
 wsB.send({ type: "voice.leave" });
 await wsB.waitFor((e) => e.type === "voice.state" && e.channelId === voiceCh.id && !e.members.some((m) => m.userId === B.userId));
+await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: "https://twitch.tv/squorli_test" }, owner.token);
+const [sqo0] = await api("POST", `/api/channels/${voiceCh.id}/radio/offline`, { channel: "squorli_test" }, B.token);
+check("radio: someone outside the channel without CONTROL_RADIO cannot report a stream as over", sqo0 === 403 && (await radioOf())?.twitchChannel === "squorli_test", `${sqo0}`);
 check("radio: a listener in the channel reports the end of the video and the queue moves on, forwards only", sqe0 === 200 && endedMove.moved === true && sqe1 === 403 && afterEnd?.youtubeVideo === YT_ID2 && afterEnd.queue?.index === 1, `${sqe0} ${sqe1} ${JSON.stringify(afterEnd?.queue)}`);
 await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: `https://youtu.be/${YT_ID}` }, owner.token);
 const single = await radioOf();

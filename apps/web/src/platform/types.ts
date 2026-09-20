@@ -79,6 +79,8 @@ export interface Platform {
       /** How a start by the system looks: in the background (tray, or minimized where closing quits) or with the window opened; null = this app cannot be told (it always starts in the background). */
       readonly background: null | { get(): boolean; set(on: boolean): Promise<boolean> };
     };
+    /** The first screen is decided (login, or the servers are known): the desktop app's start window makes way. Nothing to do in a browser. */
+    ready(): void;
     /** Mark on the app's task bar and tray icon: how many direct messages and mentions wait; null = no such mark (browser, older app). */
     readonly attention: null | { set(count: number): void };
     /** The window has no system title bar and the client draws its own (desktop); null = the browser's or system's frame. */

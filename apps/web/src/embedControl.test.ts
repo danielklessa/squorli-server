@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TwitchControl, YoutubeControl } from "./embedControl";
+import { TWITCH_OFFLINE_GRACE_MS, TwitchControl, YoutubeControl } from "./embedControl";
 
 const twitchEvent = (eventName: string) => ({ namespace: "twitch-embed", eventName, params: {} });
 const twitchState = { namespace: "twitch-embed-player-proxy", eventName: "UPDATE_STATE", params: {} };
@@ -15,6 +15,24 @@ describe("twitch control", () => {
     const control = new TwitchControl({ post: (data) => posted.push(data as { eventName: number; params: unknown }), isHidden: () => hidden }, blocked);
     return { posted, control, blocked, hide: (h: boolean) => { hidden = h; } };
   }
+
+  it("tells that the stream is over only when it stays away, and once", () => {
+    const over = vi.fn();
+    const control = new TwitchControl({ post: () => {}, isHidden: () => false }, () => {}, over);
+    const event = (eventName: string) => control.onMessage({ namespace: "twitch-embed", eventName });
+    event("offline");
+    vi.advanceTimersByTime(TWITCH_OFFLINE_GRACE_MS - 1000);
+    event("online"); // the streamer's connection dropped for a moment
+    vi.advanceTimersByTime(TWITCH_OFFLINE_GRACE_MS);
+    expect(over).not.toHaveBeenCalled();
+    event("ended"); event("offline");
+    vi.advanceTimersByTime(TWITCH_OFFLINE_GRACE_MS);
+    expect(over).toHaveBeenCalledTimes(1);
+    event("offline");
+    control.close(); // the radio went off: a pending report dies with the player
+    vi.advanceTimersByTime(TWITCH_OFFLINE_GRACE_MS);
+    expect(over).toHaveBeenCalledTimes(1);
+  });
 
   it("sends our volume once the player shows a sign of life, and again when it changes", () => {
     const { posted, control } = setup();

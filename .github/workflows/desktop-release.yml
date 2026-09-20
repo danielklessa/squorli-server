@@ -73,6 +73,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The version's release notes (apps/desktop/release-notes/<version>.md, written with the `desktop-release` skill before
+      # the tag is set). Checked out BEFORE the artifacts arrive: a checkout empties the folder it works in.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          sparse-checkout: apps/desktop/release-notes
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -83,8 +89,14 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           ls -la artifacts
+          notes="apps/desktop/release-notes/${TAG#desktop-v}.md"
+          footer="Installers for Windows (Squorli-Setup-*.exe) and Linux (AppImage, deb). Unsigned: Windows SmartScreen warns on the first start. Download page: https://squorli.com/en/download/"
+          # A version without a notes file gets the standing text alone, as every release did before.
+          if [ -f "$notes" ]; then { cat "$notes"; echo; echo "---"; echo; echo "$footer"; } > body.md; else echo "$footer" > body.md; fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" artifacts/* --clobber
+            # A run repeated for the same tag also brings the notes up to date, but never rewrites a release a person has published.
+            if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = "true" ]; then gh release edit "$TAG" --notes-file body.md; fi
           else
-            gh release create "$TAG" artifacts/* --draft --verify-tag --title "Squorli Desktop ${TAG#desktop-v}" --notes "Installers for Windows (Squorli-Setup-*.exe) and Linux (AppImage, deb). Unsigned: Windows SmartScreen warns on the first start. Download page: https://squorli.com/en/download/"
+            gh release create "$TAG" artifacts/* --draft --verify-tag --title "Squorli Desktop ${TAG#desktop-v}" --notes-file body.md
           fi

@@ -11,15 +11,18 @@ export type StoredRadioQueue = { listId: string; videoIds: string[]; index: numb
 const MAX_SKIPS = 10;
 
 /**
- * The next entry that can be played, starting at `start` and going on in direction `step`, around the ends (a radio does
- * not stop at the end of its list). `lookup` = YouTube's oEmbed (youtube.ts): it names the video and tells the ones no
+ * The next entry that can be played, starting at `start` and going on in direction `step`. `wrap` = around the ends (a skip
+ * by hand); without it the list is over behind its last entry (a video that ended by itself: the radio then turns off,
+ * user's wish of 20 September 2026). `lookup` = YouTube's oEmbed (youtube.ts): it names the video and tells the ones no
  * player would show. null = nothing playable within MAX_SKIPS entries.
  */
-export async function pickPlayable(videoIds: readonly string[], start: number, step: 1 | -1, lookup: (videoId: string) => Promise<YoutubeLookup>): Promise<{ index: number; title: string | null } | null> {
+export async function pickPlayable(videoIds: readonly string[], start: number, step: 1 | -1, lookup: (videoId: string) => Promise<YoutubeLookup>, wrap = true): Promise<{ index: number; title: string | null } | null> {
   const n = videoIds.length;
   if (n === 0) return null;
   for (let tries = 0; tries < Math.min(n, MAX_SKIPS); tries++) {
-    const index = (((start + tries * step) % n) + n) % n;
+    const at = start + tries * step;
+    if (!wrap && (at < 0 || at >= n)) return null;
+    const index = ((at % n) + n) % n;
     const video = await lookup(videoIds[index]!);
     if (video.ok) return { index, title: video.title };
   }

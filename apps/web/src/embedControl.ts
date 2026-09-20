@@ -1,5 +1,5 @@
 import { radioPositionAt, type RadioPlayback } from "@squorli/protocol";
-import { isTwitchPlayerSignal, twitchAudioCommands, twitchIsIdle, twitchPlayCommand, twitchPlaybackEvent } from "./twitch";
+import { isTwitchPlayerSignal, twitchAudioCommands, twitchIsIdle, twitchPlayCommand, twitchPlaybackEvent, twitchStreamEvent } from "./twitch";
 import { decideSync, type PlayerReport } from "./watchSync";
 import { YT, isYoutubeApiChange, readYoutubeMessage, youtubeAudioCommands, youtubeCaptionsOff, youtubeCommand, youtubeErrorKind, youtubeListening, youtubeWatchApiChange } from "./youtube";
 
@@ -36,6 +36,12 @@ const RESTART_TRIES = 4, RESTART_EVERY_MS = 1500, MUTED_FROM_TRY = 3;
 /** A player that came up without starting (seen after coming back from the pop-out window) gets this long to start by itself. */
 const IDLE_GRACE_MS = 3000;
 
+/**
+ * A stream that is over is told only after this long without coming back: a streamer's connection that drops for a moment
+ * shows as offline and online again, and that must not turn the radio off for everyone.
+ */
+export const TWITCH_OFFLINE_GRACE_MS = 60_000;
+
 /** Twitch: our volume, and starting the player again after Twitch paused it for being hidden (twitch.ts). */
 export class TwitchControl implements EmbedControl {
   private readonly seen = new Set<string>();
@@ -46,8 +52,10 @@ export class TwitchControl implements EmbedControl {
   private tries = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private soundBlocked = false;
+  private offlineTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private readonly link: EmbedLink, private readonly onSoundBlocked: () => void = () => {}) {}
+  /** `onOffline`: the stream is over, or the channel was not live in the first place (told once, after TWITCH_OFFLINE_GRACE_MS). */
+  constructor(private readonly link: EmbedLink, private readonly onSoundBlocked: () => void = () => {}, private readonly onOffline: () => void = () => {}) {}
 
   start(): void { /* the player reports by itself */ }
 
@@ -66,6 +74,9 @@ export class TwitchControl implements EmbedControl {
 
   onMessage(data: unknown): void {
     const playback = twitchPlaybackEvent(data);
+    const stream = twitchStreamEvent(data);
+    if (stream === "offline") this.offlineTimer ??= setTimeout(() => this.onOffline(), TWITCH_OFFLINE_GRACE_MS);
+    else if ((stream === "online" || playback === "playing") && this.offlineTimer !== null) { clearTimeout(this.offlineTimer); this.offlineTimer = null; }
     if (playback === "playing") { this.playing = true; this.pausedByViewer = false; this.tries = 0; this.stopTrying(); }
     // Nobody can press pause in a page they do not see: a pause while hidden is Twitch's own.
     else if (playback === "paused") { this.playing = false; this.pausedByViewer = !this.link.isHidden(); }
@@ -86,7 +97,7 @@ export class TwitchControl implements EmbedControl {
     this.tryPlay();
   }
 
-  close(): void { this.stopTrying(); }
+  close(): void { this.stopTrying(); if (this.offlineTimer !== null) { clearTimeout(this.offlineTimer); this.offlineTimer = null; } }
 
   private sendAudio() { for (const command of twitchAudioCommands(this.audio.volume, this.audio.muted || this.soundBlocked)) this.link.post(command); }
 

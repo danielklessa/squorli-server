@@ -59,6 +59,7 @@ export const en: Messages = {
   "desktopLogin.continueAs": "Continue as @{handle}",
   "desktopLogin.continueKey": "Continue with this key",
   "desktopLogin.app": "Squorli Desktop",
+  "app.starting": "Starting Squorli …",
   "noServers.title": "No server yet",
   "noServers.textAccount": "No server is known for @{handle} yet. Discover public servers or add one by address or invite link.",
   "noServers.textKey": "Add a server by address or invite link, or discover public servers.",

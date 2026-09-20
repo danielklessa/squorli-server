@@ -35,7 +35,10 @@ export function desktopPlatform(bridge: DesktopBridge): Platform {
   let autostartBackground = info.autostart?.background ?? true;
   let frame: WindowFrameState = info.frame;
   const frameListeners = new Set<(state: WindowFrameState) => void>();
-  bridge.onWindowFrame((state) => { frame = state; for (const fn of frameListeners) fn(state); });
+  // The page knows the window's state too (styles.css: a see-through window shows its outline while it has the focus).
+  const markFrame = () => { document.documentElement.dataset.winFrame = frame.fullscreen ? "fullscreen" : frame.maximized ? "maximized" : frame.focused ? "focused" : "inactive"; };
+  markFrame();
+  bridge.onWindowFrame((state) => { frame = state; markFrame(); for (const fn of frameListeners) fn(state); });
 
   let update: UpdateState = info.update;
   const updateListeners = new Set<(state: UpdateState) => void>();
@@ -72,6 +75,7 @@ export function desktopPlatform(bridge: DesktopBridge): Platform {
         enabled: () => autostart, set: async (on) => (autostart = await bridge.setAutostart(on)),
         background: typeof bridge.setAutostartBackground === "function" ? { get: () => autostartBackground, set: async (on) => (autostartBackground = await bridge.setAutostartBackground(on)) } : null,
       } : null,
+      ready: () => { if (typeof bridge.clientReady === "function") bridge.clientReady(); },
       attention: typeof bridge.setAttention === "function" ? { set: (count) => bridge.setAttention(count) } : null,
       frame: {
         state: () => frame,

@@ -66,6 +66,19 @@ export function twitchPlaybackEvent(data: unknown): "playing" | "paused" | null 
   return eventName === "pause" || eventName === "video.pause" ? "paused" : null;
 }
 
+/**
+ * Is the stream there? Measured on 20 September 2026: a channel that is not live says "offline" together with "ready" and
+ * nothing else; a live one goes ready -> "online" -> playing and never says "offline" while loading, so "offline" is no
+ * false alarm of a slow start. "ended" is the same for a stream that stops while it is watched (Twitch's embed script).
+ */
+export function twitchStreamEvent(data: unknown): "offline" | "online" | null {
+  if (!data || typeof data !== "object") return null;
+  const { namespace, eventName } = data as Record<string, unknown>;
+  if (namespace !== "twitch-embed") return null;
+  if (eventName === "offline" || eventName === "ended") return "offline";
+  return eventName === "online" ? "online" : null;
+}
+
 /** The player's regular state update: is it sitting there without playing ("Idle", "Ready", "Ended")? null = not a state update. */
 export function twitchIsIdle(data: unknown): boolean | null {
   if (!data || typeof data !== "object") return null;

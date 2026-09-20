@@ -7,6 +7,7 @@ import { AUTOSTART_ARG, entryStarts, linuxAutostartEntry, linuxAutostartFile, li
 import { hwndOfHandle, hwndOfSource } from "./captureSource";
 import { findDeepLink } from "./deepLinkArgs";
 import { isAllowedExternal, windowOpenDecision } from "./navigation";
+import { SPLASH_SKIP_URL, mayInstallAtStart, splashHtml, splashScript, splashView } from "./splashPage";
 import { updateMode } from "./updateMode";
 import { desktopUserAgent } from "./userAgent";
 import { restoreWindowState } from "./windowState";
@@ -207,5 +208,30 @@ describe("start with the system", () => {
     expect(linuxAutostartEntry('/x/a"b$c')).toContain('Exec="/x/a\\"b\\$c" --autostart');
     expect(entryStarts(entry, "/home/a/My Apps/Squorli 100%.AppImage")).toBe(true);
     expect(entryStarts(entry, "/home/a/Squorli-2.AppImage")).toBe(false);
+  });
+});
+
+describe("start window", () => {
+  it("says what happens at each step, and lets only the download be skipped", () => {
+    expect(splashView({ step: "checking" }, true)).toEqual({ text: "Suche nach Updates …", percent: null, skip: null });
+    expect(splashView({ step: "downloading", version: "1.2.3", percent: 41.6 }, true)).toEqual({ text: "Update 1.2.3 wird geladen …", percent: 42, skip: "Später installieren" });
+    expect(splashView({ step: "downloading", version: "1.2.3", percent: 250 }, false).percent).toBe(100);
+    expect(splashView({ step: "installing", version: "1.2.3" }, false)).toEqual({ text: "Installing update 1.2.3. Squorli restarts in a moment.", percent: 100, skip: null });
+    expect(splashView({ step: "starting" }, false).text).toBe("Starting Squorli …");
+  });
+  it("is a page without a script, and the shell's writes cannot break out of their strings", () => {
+    const html = splashHtml("<svg xmlns='http://www.w3.org/2000/svg'/>");
+    expect(html).not.toContain("<script");
+    expect(html).toContain(`href="${SPLASH_SKIP_URL}"`);
+    expect(html).toContain("data:image/svg+xml;base64,");
+    expect(splashHtml(null)).not.toContain("<img");
+    const script = splashScript({ text: 'x"); alert(1); ("', percent: 10, skip: null });
+    expect(script).toContain(JSON.stringify('x"); alert(1); ("'));
+    expect(() => new Function(script)).not.toThrow();
+  });
+  it("hands a version to the installer at a start only once", () => {
+    expect(mayInstallAtStart(undefined, "0.2.0")).toBe(true);
+    expect(mayInstallAtStart("0.1.9", "0.2.0")).toBe(true);
+    expect(mayInstallAtStart("0.2.0", "0.2.0")).toBe(false); // offered again although it was installed at the last start: it did not take
   });
 });

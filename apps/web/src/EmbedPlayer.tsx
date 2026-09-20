@@ -29,7 +29,7 @@ export const embedKeyOf = (source: EmbedSource | null): string | null => source 
 /** Playing a video in step with everyone (YouTube): the shared state, the server's clock, and whether this viewer steers. */
 export type EmbedSync = {
   playback: RadioPlayback; clockOffset: number; canControl: boolean; publish: (playback: { playing: boolean; position: number; rate: number }) => Promise<unknown>;
-  /** A queue: tell the server that this video is over (or cannot be played), so it moves on. null = a single video. */
+  /** Tell the server that this video is over: a queue moves on, a single video or a queue's last one turns the radio off. (In a queue also: cannot be played.) */
   ended: ((videoId: string) => void) | null;
 };
 
@@ -90,13 +90,13 @@ function largestSlot(): DOMRect | null {
  * else (embedControl.ts). Rendered only while the user has not turned the radio off for themselves: no iframe, no
  * connection to Twitch or YouTube, no tile (user's requirement).
  */
-export function EmbedPlayer({ source, name, volume, muted, popout, sync, onNotice, onTurnOff }: { source: EmbedSource; name: string; volume: number; muted: boolean; popout: PlayerWindow; sync: EmbedSync | null; onNotice: (text: string) => void; onTurnOff: () => void }) {
+export function EmbedPlayer({ source, name, volume, muted, popout, sync, onNotice, onTurnOff, onStreamOver }: { source: EmbedSource; name: string; volume: number; muted: boolean; popout: PlayerWindow; sync: EmbedSync | null; onNotice: (text: string) => void; onTurnOff: () => void; /** Twitch: the stream is over (the radio turns off for everyone). */ onStreamOver: () => void }) {
   const box = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const control = useRef<EmbedControl | null>(null);
   const videoId = source.kind === "youtube" ? source.videoId : "";
-  const live = useRef({ volume, muted, sync, onNotice, videoId });
-  live.current = { volume, muted, sync, onNotice, videoId };
+  const live = useRef({ volume, muted, sync, onNotice, videoId, onStreamOver });
+  live.current = { volume, muted, sync, onNotice, videoId, onStreamOver };
   const key = embedKeyOf(source)!;
   const win = popout.win;
   const origin = source.kind === "twitch" ? TWITCH_PLAYER_ORIGIN : YOUTUBE_PLAYER_ORIGIN;
@@ -147,7 +147,7 @@ export function EmbedPlayer({ source, name, volume, muted, popout, sync, onNotic
     let lastNotice = 0;
     const notice = (text: string) => { if (Date.now() - lastNotice > 10_000) { lastNotice = Date.now(); live.current.onNotice(text); } };
     const soundBlocked = () => notice(t("radio.soundBlocked"));
-    const c: EmbedControl = source.kind === "twitch" ? new TwitchControl(link, soundBlocked) : new YoutubeControl(link, {
+    const c: EmbedControl = source.kind === "twitch" ? new TwitchControl(link, soundBlocked, () => live.current.onStreamOver()) : new YoutubeControl(link, {
       serverNow: () => Date.now() + (live.current.sync?.clockOffset ?? 0),
       canControl: () => live.current.sync?.canControl ?? false,
       publish: (playback) => live.current.sync ? live.current.sync.publish(playback) : Promise.reject(new Error("no sync")),
@@ -157,7 +157,7 @@ export function EmbedPlayer({ source, name, volume, muted, popout, sync, onNotic
         // In a queue a video nobody can play is skipped instead (the server checks each video before it is on, but YouTube's
         // oEmbed does not know every ban). Reported by those who may skip anyway: for a single viewer it may be their region.
         const s = live.current.sync;
-        if (kind !== "other" && s?.ended && s.canControl && source.kind === "youtube") s.ended(live.current.videoId);
+        if (kind !== "other" && s?.ended && s.canControl && source.kind === "youtube" && source.queue !== null) s.ended(live.current.videoId);
         else live.current.onNotice(t(kind === "embedding" ? "radio.errNotEmbeddable" : kind === "missing" ? "radio.errUnknownVideo" : "radio.errPlayer"));
       },
       onEnded: (videoId) => live.current.sync?.ended?.(videoId),

@@ -41,8 +41,15 @@ html[data-material] #root {
   --bg3: color-mix(in srgb, var(--sq-night, #0C1424) calc(var(--win-alpha, 1) * 100%), transparent);
   --bg2: color-mix(in srgb, var(--sq-surface, #162238) calc((var(--win-alpha, 1) * 0.5 + 0.5) * 100%), transparent);
 }
-html[data-material] .modal-backdrop, html[data-material] .rail-menu, html[data-material] .login-card {
+html[data-material] .modal-backdrop, html[data-material] .rail-menu {
   --bg: var(--sq-night, #0C1424); --bg2: var(--sq-surface, #162238); --bg3: var(--sq-night, #0C1424);
+}
+/* A see-through window has no edge of its own: between its areas it is the desktop. While it has the focus a light outline
+   shows where it ends (user's wish, 20 September 2026); not when it fills the screen. Drawn over everything, takes no clicks. */
+html[data-material="clear"][data-win-frame="focused"] body::after {
+  content: ""; position: fixed; inset: 0; z-index: 2147483647; pointer-events: none;
+  /* The title bar's colour and one pixel wide: both the user's choices after seeing the brand's blue, then 2 px. */
+  border: 1px solid var(--bg2); border-radius: var(--r);
 }
 /* With a window background the rail becomes an area of its own too (rounded, with the gap), like the others. */
 html[data-material] .rail { margin: var(--gap) 0 var(--gap) var(--gap); border-radius: var(--r-panel); }
@@ -117,7 +124,8 @@ h4 { font-size: 0.875rem; font-weight: 600; color: var(--muted); padding: 0 0.5r
 
 /* Login */
 .login { min-height: 100%; display: grid; grid-template-rows: 1fr auto; place-items: center; gap: 1rem; padding: 1.5rem; }
-.login-card { width: min(34rem, 100%); background: var(--bg2); padding: 2rem 2rem 1.75rem; border-radius: var(--r-panel); }
+/* Like a chat message under the pointer: the hover surface on top of the main area's; in a see-through window both follow its opacity (user's wish, 20 September 2026; until then the card was opaque there). */
+.login-card { width: min(34rem, 100%); background: linear-gradient(var(--bg2), var(--bg2)), var(--bg3); padding: 2rem 2rem 1.75rem; border-radius: var(--r-panel); }
 /* Splash: the server's icon and name (from /api/health); without its own icon, the Squorli mark */
 .login-head { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; margin-bottom: 1.25rem; text-align: center; }
 .login-head h1 { margin: 0; font-size: 1.5rem; font-weight: 600; overflow-wrap: anywhere; }
@@ -952,3 +960,9 @@ button.emoji-open[aria-expanded="true"] { color: var(--brand); }
 .mobile-voice-sheet li { padding: 0.5rem 0; }
 .mobile-voice-connect { width: 100%; min-height: 3rem; margin-top: 1rem; }
 @keyframes mobile-rise { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+/* The first moments, until the client knows what to show (store `starting`); the desktop app's start window covers them. */
+.app-starting { position: fixed; inset: 0; display: grid; place-items: center; padding: 1.5rem; }
+/* A surface of its own: on a see-through window bare text was hardly readable. It looks like a chat message under the pointer (user's wish, 20 September 2026): the hover surface (--bg2) on top of the main area's (--bg3); both follow the window's opacity. */
+.app-starting-card { display: flex; flex-direction: column; align-items: center; gap: 0.9rem; padding: 2rem 2.75rem; border-radius: var(--r-panel); background: linear-gradient(var(--bg2), var(--bg2)), var(--bg3); color: var(--muted); text-align: center; }
+.app-starting-card img { width: 6rem; height: 6rem; }

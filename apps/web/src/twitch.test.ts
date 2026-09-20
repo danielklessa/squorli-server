@@ -1,6 +1,6 @@
 import { twitchChannelOf } from "@squorli/protocol";
 import { describe, expect, it } from "vitest";
-import { isTwitchPlayerSignal, twitchAudioCommands, twitchIsIdle, twitchPlayCommand, twitchPlaybackEvent, twitchPlayerBox, twitchPlayerSrc } from "./twitch";
+import { isTwitchPlayerSignal, twitchAudioCommands, twitchIsIdle, twitchPlayCommand, twitchPlaybackEvent, twitchPlayerBox, twitchPlayerSrc, twitchStreamEvent } from "./twitch";
 
 describe("twitch as a radio source", () => {
   it("recognizes channel pages and nothing else", () => {
@@ -53,5 +53,10 @@ describe("twitch as a radio source", () => {
     expect(isTwitchPlayerSignal({ namespace: "twitch-embed-player-proxy", eventName: "UPDATE_STATE", params: {} })).toBe(true);
     expect(isTwitchPlayerSignal({ namespace: "twitch-embed", eventName: "video.ready" })).toBe(true);
     for (const data of [null, "ready", { namespace: "other", eventName: "ready" }, { namespace: "twitch-embed", eventName: "offline" }]) expect(isTwitchPlayerSignal(data)).toBe(false);
+  });
+
+  it("reads from the player whether the stream is there", () => {
+    expect(["offline", "ended", "online"].map((eventName) => twitchStreamEvent({ namespace: "twitch-embed", eventName }))).toEqual(["offline", "offline", "online"]);
+    for (const data of [null, "offline", { namespace: "other", eventName: "offline" }, { namespace: "twitch-embed", eventName: "ready" }, { namespace: "twitch-embed-player-proxy", eventName: "UPDATE_STATE", params: { playback: "Idle" } }]) expect(twitchStreamEvent(data)).toBeNull();
   });
 });

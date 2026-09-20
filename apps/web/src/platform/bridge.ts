@@ -89,6 +89,8 @@ export interface DesktopBridge {
   setAutostart(on: boolean): Promise<boolean>;
   /** Whether a start by the system stays in the background (true) or opens the window (false); answers with what is set now. */
   setAutostartBackground(on: boolean): Promise<boolean>;
+  /** The client knows what its first screen is: the shell's start window makes way for the main window. */
+  clientReady(): void;
   /** How many direct messages and mentions wait (0 = none): the mark on the task bar icon and the tray icon. */
   setAttention(count: number): void;
   onWindowFrame(cb: (state: WindowFrameState) => void): () => void;
@@ -115,6 +117,7 @@ export const IPC = {
   setAutostart: "squorli:set-autostart",
   setAutostartBackground: "squorli:set-autostart-background",
   attention: "squorli:attention",
+  clientReady: "squorli:client-ready",
   updateState: "squorli:update-state",
   updateCheck: "squorli:update-check",
   updateInstall: "squorli:update-install",

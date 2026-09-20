@@ -14,6 +14,11 @@ describe("radio queue", () => {
     expect(await pickPlayable(["a", "b", "c"], 3, 1, lookupOf([]))).toEqual({ index: 0, title: "title of a" });
     expect(await pickPlayable(["a", "b", "c"], -1, -1, lookupOf([]))).toEqual({ index: 2, title: "title of c" });
   });
+  it("ends behind the last entry when it may not go around (a video that ended by itself)", async () => {
+    expect(await pickPlayable(["a", "b", "c"], 3, 1, lookupOf([]), false)).toBeNull();
+    expect(await pickPlayable(["a", "b", "c"], 1, 1, lookupOf(["b"]), false)).toEqual({ index: 2, title: "title of c" });
+    expect(await pickPlayable(["a", "b", "c"], 1, 1, lookupOf(["b", "c"]), false)).toBeNull(); // what is left cannot be played: over as well
+  });
   it("gives up when nothing can be played, and asks about no entry twice", async () => {
     const asked: string[] = [];
     expect(await pickPlayable(["a", "b"], 0, 1, async (id) => { asked.push(id); return { ok: false, error: "unknown_video" }; })).toBeNull();
