@@ -37,8 +37,11 @@ import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 import { RadioPlayer, type RadioState } from "./voice/radioPlayer";
 import { EmbedPlayer, embedKeyOf, usePlayerWindow, type EmbedSource } from "./EmbedPlayer";
 import { videoAccessOf } from "./voice/videoAccess";
+import { videoActive } from "./voice/videoWatch";
 import { activity, watchActivity } from "./activity";
 import { resumeIdleDetection } from "./idleDetection";
+import { setOwnVideo, watchSystemActivity } from "./systemActivity";
+import { GameDetection } from "./gameDetection";
 import { t } from "./i18n";
 import { platform, type ScreenPick, type ScreenSource } from "./platform";
 import { formatDeepLink } from "./platform/deepLink";
@@ -50,6 +53,9 @@ export function App() {
   const store = useMemo(() => new Store({ home: platform.home, defaultDirectoryUrl: platform.defaultDirectoryUrl }), []);
   const client = useMemo(() => new VoiceClient(undefined, platform.media), []);
   const radio = useMemo(() => new RadioPlayer(), []);
+  // Desktop app: detection of running games, off until the user switches it on; nothing leaves the computer yet (gameDetection.ts).
+  const games = useMemo(() => (platform.games ? new GameDetection(platform.games, window.localStorage) : null), []);
+  useEffect(() => games?.start(), [games]);
   const [state, setState] = useState<State>(store.state);
   const [voice, setVoice] = useState<VoiceState>(client.state);
   const [showAdmin, setShowAdmin] = useState(false);
@@ -105,6 +111,8 @@ export function App() {
   // AFK detection: input in this window, speaking (open gate of an unmuted microphone) and, where the user allowed it,
   // input anywhere in the system keep the user present (activity.ts); the store reports the state to servers and directory.
   useEffect(() => { void resumeIdleDetection(activity, platform.systemIdle === "always"); return watchActivity(activity); }, []);
+  // A controller is input too, and the system's idle detection does not see it: the desktop app's shell reports it (systemActivity.ts).
+  useEffect(() => watchSystemActivity(activity, platform.systemActivity), []);
   useEffect(() => client.subscribe((s) => { if (s.gateOpen && !s.micMuted) activity.touch(); }), [client]);
 
   // Camera on/off. With several cameras always ask first (as the user specified), with one switch on directly.
@@ -269,6 +277,10 @@ export function App() {
   const embedQueue = channelRadio?.queue?.listId ?? null;
   const embedSource = useMemo<EmbedSource | null>(() => embedTwitch ? { kind: "twitch", channel: embedTwitch } : embedYoutube ? { kind: "youtube", videoId: embedYoutube, queue: embedQueue } : null, [embedTwitch, embedYoutube, embedQueue]);
   const playerWindow = usePlayerWindow(embedKeyOf(embedSource));
+  // AFK: a video in another program keeps the user present, told by a system state that Squorli sets itself while it shows
+  // video. So while a camera, a screen share or the radio's player is on, that state is ignored (systemActivity.ts).
+  const ownVideo = videoActive(voice.participants, embedSource !== null);
+  useEffect(() => setOwnVideo(activity, ownVideo), [ownVideo]);
   // A video plays in step for everyone; members with CONTROL_RADIO steer it through their own player (EmbedPlayer.tsx).
   const embedSync = useMemo(() => {
     const playback = channelRadio?.playback, channelId = voiceChannel?.id, api = voiceHost ? store.connection(voiceHost)?.api : null;
@@ -510,7 +522,7 @@ export function App() {
       )}
       {settingsTab && (homeless || (active?.me && conn)) && (
         <SettingsDialog api={active?.me && conn ? conn.api : null} me={active?.me ?? null} publicKey={state.identity?.publicKey ?? null} displayName={me?.displayName ?? active?.me?.displayName ?? state.directoryAccount?.displayName ?? "…"} avatarUrl={myAvatarUrl} directoryUrl={state.directoryUrl} directoryAccount={state.directoryAccount}
-          serverDomain={active?.serverDomain ?? null} clientVersion={platform.app?.version ?? home?.serverVersion ?? null} syncError={state.settingsSyncError} client={client} voice={voice} initialTab={settingsTab}
+          serverDomain={active?.serverDomain ?? null} clientVersion={platform.app?.version ?? home?.serverVersion ?? null} syncError={state.settingsSyncError} client={client} voice={voice} games={games} initialTab={settingsTab}
           onSaveServerName={(n) => store.setServerDisplayName(n)} onSaveGlobalName={(n) => store.setDirectoryName(null, n)} onSetAvatar={state.directoryAccount && state.directoryAvatars ? (file) => store.setAvatar(file) : null} onSetLocale={(pref) => store.setLocale(pref)} localePending={state.localeReloadPending}
           onCapturingKey={setCapturingPttKey} onClose={() => setSettingsTab(null)}
           onLogout={() => { setSettingsTab(null); void client.leave(); store.logout(); }}

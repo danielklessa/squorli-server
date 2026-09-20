@@ -15,11 +15,13 @@ import { IPC, type ScreenAudioEvent } from "@squorli/web/platform/bridge";
  */
 export type CaptureTarget = { kind: "window"; hwnd: string } | { kind: "system" };
 
-export function helperPath(): string | null {
+/** A helper of apps/desktop/native by its file name; null = not there (not built, other platform). */
+export function nativeHelperPath(name: string): string | null {
   if (process.platform !== "win32") return null;
-  const file = app.isPackaged ? join(process.resourcesPath, "native", "squorli-window-audio.exe") : join(__dirname, "..", "native", "bin", "win32-x64", "squorli-window-audio.exe");
+  const file = app.isPackaged ? join(process.resourcesPath, "native", name) : join(__dirname, "..", "native", "bin", "win32-x64", name);
   return existsSync(file) ? file : null;
 }
+export const helperPath = (): string | null => nativeHelperPath("squorli-window-audio.exe");
 
 // 20 ms of 48 kHz stereo 16 bit: small enough for low delay, large enough not to flood the channel.
 const CHUNK_BYTES = 3840;

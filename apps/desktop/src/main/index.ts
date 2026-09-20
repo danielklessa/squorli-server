@@ -9,6 +9,7 @@ import { readAutostartBackground, startsInBackground } from "./autostart";
 import { autostartEnabled, autostartSupported, setAutostart } from "./autostartSystem";
 import { loadConfig, saveConfig } from "./config";
 import { findDeepLink } from "./deepLinkArgs";
+import { handleGames } from "./gameWatch";
 import { handleDeepLinks } from "./deepLinks";
 import { handleDisplayMedia } from "./displayMedia";
 import { registerAppScheme, serveApp } from "./scheme";
@@ -17,6 +18,7 @@ import { readPlayerOutputLabel } from "./playerAudioScript";
 import { applyPermissions, letPlayersEmbed, lockDownContents, openExternal } from "./security";
 import { createSplash, type Splash } from "./splash";
 import { createTray, setTrayAttention } from "./tray";
+import { startSystemWatch, systemWatchPath } from "./systemWatch";
 import { handleUpdates } from "./updates";
 import { desktopUserAgent } from "./userAgent";
 import { helperPath, ScreenAudioCapture } from "./windowAudio";
@@ -98,7 +100,7 @@ const isClientFrame = (event: IpcMainEvent | IpcMainInvokeEvent): boolean => {
 };
 
 function createWindow(splash: Splash | null = null): BrowserWindow {
-  const info: DesktopInfo = { version: app.getVersion(), electron: process.versions.electron ?? "", chrome: process.versions.chrome ?? "", os, directoryUrl, materials, nativeScreenAudio: helperPath() !== null, appearance: look, frame: { maximized: false, focused: true, fullscreen: false }, tray: tray ? { closeToTray } : null, autostart: autostartSupported() ? { enabled: autostartEnabled(), background: autostartBackground } : null, update: updateState() };
+  const info: DesktopInfo = { version: app.getVersion(), electron: process.versions.electron ?? "", chrome: process.versions.chrome ?? "", os, directoryUrl, materials, nativeScreenAudio: helperPath() !== null, systemWatch: systemWatchPath() !== null, gameDetection: systemWatchPath() !== null, appearance: look, frame: { maximized: false, focused: true, fullscreen: false }, tray: tray ? { closeToTray } : null, autostart: autostartSupported() ? { enabled: autostartEnabled(), background: autostartBackground } : null, update: updateState() };
   // The window reopens where it was closed, as long as that place still lies on a display (windowState.ts).
   const userData = app.getPath("userData");
   const state = restoreWindowState(loadConfig(userData).window, screen.getAllDisplays().map((d) => d.workArea));
@@ -175,7 +177,11 @@ else {
     const screenAudio = new ScreenAudioCapture();
     handleDisplayMedia(session.defaultSession, isClientFrame, screenAudio);
     ipcMain.on(IPC.screenAudioStop, (event) => { if (isClientFrame(event)) screenAudio.stop(); });
-    app.on("before-quit", () => { quitting = true; screenAudio.stop(); playerAudio.stop(); });
+    // Controller input and "display required" for the client's AFK detection (native helper, Windows).
+    const systemWatch = startSystemWatch(() => mainWindow, isClientFrame);
+    // Game detection: the launchers' installed games, and the helper says when one of them is in front (gameWatch.ts).
+    handleGames(() => mainWindow, isClientFrame, systemWatch);
+    app.on("before-quit", () => { quitting = true; screenAudio.stop(); playerAudio.stop(); systemWatch.stop(); });
     ipcMain.handle(IPC.setAppearance, (event, next: unknown) => {
       if (!isClientFrame(event)) return look;
       appearance = normalizeAppearance(next, materials);
@@ -208,7 +214,7 @@ else {
     ipcMain.on(IPC.attention, (event, count: unknown) => { if (isClientFrame(event)) { attention = readAttentionCount(count); showAttention(); } });
     ipcMain.on(IPC.openExternal, (event, url: unknown) => { if (isClientFrame(event) && typeof url === "string") openExternal(url); });
     tray = createTray(() => mainWindow, () => { quitting = true; app.quit(); });
-    const updates = handleUpdates(() => mainWindow, isClientFrame, () => { quitting = true; screenAudio.stop(); });
+    const updates = handleUpdates(() => mainWindow, isClientFrame, () => { quitting = true; screenAudio.stop(); systemWatch.stop(); });
     updateState = updates.state;
     ipcMain.on(IPC.clientReady, (event) => { if (isClientFrame(event)) reveal?.(); });
     // `--no-splash` (unpackaged only): the main window at once, to look at what the client itself shows while it starts.

@@ -20,6 +20,7 @@
 .ic-eye::before { content: "\e0ba"; }
 .ic-eye-off::before { content: "\e0bb"; }
 .ic-flag::before { content: "\e0d1"; }
+.ic-gamepad-2::before { content: "\e0df"; }
 .ic-grip-vertical::before { content: "\e0eb"; }
 .ic-hand::before { content: "\e1d7"; }
 .ic-hash::before { content: "\e0ef"; }

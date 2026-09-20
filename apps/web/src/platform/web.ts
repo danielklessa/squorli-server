@@ -24,6 +24,8 @@ export function webPlatform(): Platform {
     app: null,
     home: homeless ? null : { host: window.location.host, signDomain: window.location.hostname },
     systemIdle: "permission",
+    systemActivity: null,
+    games: null,
     defaultDirectoryUrl: homeless ? (import.meta.env.VITE_DIRECTORY_URL as string | undefined) ?? "http://localhost:3100" : null,
     media: { mobile, blocksInsecureMedia: window.location.protocol === "https:", screenSharePublishOverrides: () => null, takeScreenAudio: async () => null, stopScreenAudio: () => {}, setPlayerOutput: null },
     links: {

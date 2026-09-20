@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ActivityTracker } from "./activity";
+import { ActivityTracker, VIDEO_ACTIVE_MAX_MS, VIDEO_GAP_MS } from "./activity";
 
 const MIN = 60_000;
 function setup() {
@@ -47,6 +47,49 @@ describe("ActivityTracker", () => {
     at(4 * MIN); tracker.touch(); // speaking
     at(6 * MIN);
     expect(tracker.idle).toBe(false);
+  });
+
+  it("stays present while a video plays, for at most four hours since the last input", () => {
+    const { tracker, seen, at } = setup();
+    tracker.setSystemIdle(true);
+    tracker.setVideoPlaying(true);
+    at(3 * 60 * MIN);
+    expect(tracker.idle).toBe(false);
+    at(VIDEO_ACTIVE_MAX_MS - 1000);
+    expect(tracker.idle).toBe(false);
+    at(VIDEO_ACTIVE_MAX_MS);
+    expect(tracker.idle).toBe(true);
+    // Input starts the four hours again.
+    tracker.touch();
+    at(VIDEO_ACTIVE_MAX_MS + 3 * 60 * MIN);
+    expect(tracker.idle).toBe(false);
+    expect(seen).toEqual([true, false]);
+  });
+
+  it("bridges the gap between two videos, and a video that ended leaves the five minutes to decide", () => {
+    const { tracker, at } = setup();
+    tracker.setVideoPlaying(true);
+    at(20 * MIN); tracker.setVideoPlaying(false);
+    at(20 * MIN + VIDEO_GAP_MS - 1000);
+    expect(tracker.idle).toBe(false);
+    tracker.setVideoPlaying(true); // the next video of the playlist
+    at(40 * MIN);
+    expect(tracker.idle).toBe(false);
+    tracker.setVideoPlaying(false);
+    at(40 * MIN + VIDEO_GAP_MS);
+    expect(tracker.idle).toBe(true);
+  });
+
+  it("counts the four hours from when the system-wide detector last saw the user", () => {
+    const { tracker, at } = setup();
+    tracker.setVideoPlaying(true);
+    tracker.setSystemIdle(false);
+    at(60 * MIN); // typing in another program until now
+    tracker.setSystemIdle(true);
+    at(60 * MIN + VIDEO_ACTIVE_MAX_MS - 1000);
+    expect(tracker.idle).toBe(false);
+    at(60 * MIN + VIDEO_ACTIVE_MAX_MS);
+    expect(tracker.idle).toBe(true);
   });
 
   it("system activity ends an absence", () => {

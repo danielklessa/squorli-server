@@ -1,8 +1,8 @@
-import type { AppearanceState, PlatformOs, ScreenPick, ScreenSource, UpdateState, WindowAppearance, WindowControl, WindowFrameState, WindowMaterial } from "./bridge";
+import type { AppearanceState, CustomProgram, DetectedGame, GameWatchSettings, PlatformOs, RunningGame, ScreenPick, ScreenSource, SystemActivityEvent, UpdateState, WindowAppearance, WindowControl, WindowFrameState, WindowMaterial } from "./bridge";
 import type { DeepLink } from "./deepLink";
 
 export type { DeepLink } from "./deepLink";
-export type { AppearanceState, PlatformOs, ScreenPick, ScreenSource, UpdateState, WindowAppearance, WindowControl, WindowFrameState, WindowMaterial } from "./bridge";
+export type { AppearanceState, CustomProgram, DetectedGame, GameWatchSettings, PlatformOs, RunningGame, ScreenPick, ScreenSource, SystemActivityEvent, UpdateState, WindowAppearance, WindowControl, WindowFrameState, WindowMaterial } from "./bridge";
 
 /** The chat server that serves the page: its key in the store and the domain a login there signs. */
 export type PlatformHome = { host: string; signDomain: string };
@@ -55,6 +55,23 @@ export interface Platform {
    * a switch in the settings; "always": the desktop shell grants it by itself, it simply runs and there is no switch.
    */
   readonly systemIdle: "permission" | "always";
+  /**
+   * What only the desktop app's shell sees (its native helper, Windows): controller input, which the browser's Gamepad API
+   * delivers only while the window has the focus, and whether some program keeps the display on (a playing video);
+   * systemActivity.ts. null = nothing of the kind (browser, an app without the helper or older than it).
+   */
+  readonly systemActivity: null | { subscribe(cb: (event: SystemActivityEvent) => void): () => void };
+  /**
+   * Game detection (gameDetection.ts, docs/features/games.md): the desktop app's shell reads the launchers' installed games
+   * and says which one is in front; null = not available (browser, an app without the helper or older than the feature).
+   */
+  readonly games: null | {
+    scan(): Promise<DetectedGame[]>;
+    setWatch(settings: GameWatchSettings): void;
+    /** The system's file dialog for a program to add; null = cancelled. */
+    pickProgram(): Promise<CustomProgram | null>;
+    subscribe(cb: (game: RunningGame | null) => void): () => void;
+  };
   readonly media: PlatformMedia;
   readonly links: {
     /** Open an address outside the client (desktop: the system's browser). */

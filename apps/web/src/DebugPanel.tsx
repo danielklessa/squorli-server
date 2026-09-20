@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { RawLogEntry } from "./store";
 import type { AudioStats, VoiceClient, VoiceState } from "./voice/voiceClient";
 import { fmtTime, t } from "./i18n";
+import { systemActivityDiagnostics } from "./systemActivity";
 
 /**
  * Protocol inspector (PLAN 5): WebSocket events and LiveKit statistics, live.
@@ -46,6 +47,10 @@ export function DebugPanel({ log, client, voice }: { log: RawLogEntry[]; client:
     return () => clearInterval(id);
   }, [client, voice.status]);
 
+  // AFK signals of the desktop app's shell: controller input counted as activity, and the "display required" state.
+  const [system, setSystem] = useState(systemActivityDiagnostics);
+  useEffect(() => { const id = setInterval(() => setSystem(systemActivityDiagnostics()), 1000); return () => clearInterval(id); }, []);
+
   const totalDown = Object.entries(rates).filter(([k]) => k.startsWith("r:")).reduce((a, [, v]) => a + v.kbps, 0);
   const totalUp = Object.entries(rates).filter(([k]) => k.startsWith("s:")).reduce((a, [, v]) => a + v.kbps, 0);
 
@@ -63,6 +68,8 @@ export function DebugPanel({ log, client, voice }: { log: RawLogEntry[]; client:
           <tr><td>{t("debug.microphone")}</td><td>{voice.inputDeviceId ?? "–"}</td></tr>
           <tr><td>{t("debug.screenOut")}</td><td>{voice.screenSink.deviceId ? t("debug.device", { id: voice.screenSink.deviceId.slice(0, 12) }) : t("debug.sameAsVoice")} · {t("debug.tracks", { n: voice.screenSink.tracks })}{voice.screenSink.error ? ` · ${t("debug.error", { err: voice.screenSink.error })}` : ""}</td></tr>
           <tr><td>{t("debug.camScreen")}</td><td>{voice.cameraOn ? t("debug.on") : t("debug.off")} / {voice.screenOn ? (voice.screenAudio ? t("debug.onWithAudio") : t("debug.onNoAudio")) : t("debug.off")}</td></tr>
+          <tr><td>{t("debug.controllerInput")}</td><td title={t("debug.controllerInputHint")}>{!system.available ? t("debug.systemWatchMissing") : `${t("debug.controllerInputRow", { n: system.inputs })}${system.lastInput ? ` · ${t("debug.controllerInputLast", { time: new Date(system.lastInput).toLocaleTimeString() })}` : ""}`}</td></tr>
+          <tr><td>{t("debug.displayRequired")}</td><td title={t("debug.displayRequiredHint")}>{!system.available ? t("debug.systemWatchMissing") : system.display === null ? "–" : !system.display ? t("debug.no") : system.ownVideo ? t("debug.displayOwnVideo") : t("debug.yes")}</td></tr>
           <tr><td>{t("debug.total")}</td><td>{t("debug.totalRow", { up: fmtKbps(totalUp), down: fmtKbps(totalDown), s: POLL_MS / 1000 })}</td></tr>
           <tr><td>{t("debug.audioSend")}</td><td>{stats.sender ? t("debug.audioSendRow", { rate: fmtKbps(rates["s:audio"]?.kbps), sent: stats.sender.packetsSent ?? "?", lost: stats.sender.packetsLost ?? 0, jitter: fmtMs(stats.sender.jitter), rtt: fmtMs(stats.sender.roundTripTime) }) : "–"}</td></tr>
           {stats.videoSend.map((v) => (

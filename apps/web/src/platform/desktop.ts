@@ -52,6 +52,11 @@ export function desktopPlatform(bridge: DesktopBridge): Platform {
     home: null,
     defaultDirectoryUrl: info.directoryUrl,
     systemIdle: "always",
+    // An app older than this client has no such member; one without the helper reports nothing.
+    systemActivity: info.systemWatch === true && typeof bridge.onSystemActivity === "function" ? { subscribe: (cb) => bridge.onSystemActivity(cb) } : null,
+    games: info.gameDetection === true && typeof bridge.scanGames === "function" ? {
+      scan: () => bridge.scanGames(), setWatch: (settings) => bridge.setGameWatch(settings), pickProgram: () => bridge.pickGameProgram(), subscribe: (cb) => bridge.onRunningGame(cb),
+    } : null,
     // app:// is a secure scheme; only the development window (Vite over http) may load http resources.
     media: { mobile: false, blocksInsecureMedia: window.location.protocol !== "http:", screenSharePublishOverrides: () => null, takeScreenAudio: () => audio.take(), stopScreenAudio: () => audio.stop(),
       // An app older than this client has no such member.

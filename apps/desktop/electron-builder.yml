@@ -42,7 +42,7 @@ win:
   target:
     - target: nsis
       arch: [x64]
-  # The native audio capture helper (apps/desktop/native, built by `pnpm --filter @squorli/desktop native` before packaging).
+  # The native helpers: audio capture and system watch (apps/desktop/native, built by `pnpm --filter @squorli/desktop native` before packaging).
   extraResources:
     - from: native/bin/win32-x64
       to: native

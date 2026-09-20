@@ -6,6 +6,8 @@ import { BLUR_OPTIONS } from "./CameraPicker";
 import { askConfirm } from "./dialogs";
 import { Icon } from "./Icon";
 import { LicensesTab } from "./LicensesTab";
+import { GamesTab } from "./GamesTab";
+import type { GameDetection } from "./gameDetection";
 import { LOCALES, fmtDateTime, localePreference, t, type LocalePreference } from "./i18n";
 import { activity } from "./activity";
 import { platform, type WindowAppearance } from "./platform";
@@ -17,13 +19,14 @@ import { VOICE_CUES, type SoundCue, type SoundSettings } from "./voice/sounds";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 
-export type SettingsTab = "profile" | "view" | "voice" | "camera" | "sounds" | "sessions" | "account" | "app" | "licenses";
+export type SettingsTab = "profile" | "view" | "voice" | "camera" | "sounds" | "games" | "sessions" | "account" | "app" | "licenses";
 const TABS: { id: SettingsTab; label: string; icon: string }[] = [
   { id: "profile", label: t("settings.tab.profile"), icon: "user" },
   { id: "view", label: t("settings.tab.view"), icon: "languages" },
   { id: "voice", label: t("settings.tab.voice"), icon: "mic" },
   { id: "camera", label: t("settings.tab.camera"), icon: "video" },
   { id: "sounds", label: t("settings.tab.sounds"), icon: "bell" },
+  { id: "games", label: t("settings.tab.games"), icon: "gamepad-2" },
   { id: "sessions", label: t("settings.tab.sessions"), icon: "monitor-smartphone" },
   { id: "account", label: t("settings.tab.account"), icon: "key-round" },
   { id: "app", label: t("settings.tab.app"), icon: "download" },
@@ -50,7 +53,7 @@ const fmt = fmtDateTime;
  * the directory's account page, sign out, discard identity) and licenses (our own and the third-party notices, LicensesTab.tsx). With a directory account everything except the device selection
  * is stored there (store.ts pushes every change); sessions and the name on this server belong to the server shown.
  */
-export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, directoryUrl, directoryAccount, serverDomain, clientVersion, syncError, client, voice, initialTab, onSaveServerName, onSaveGlobalName, onSetAvatar, onSetLocale, localePending, onCapturingKey, onClose, onLogout, onForget }: {
+export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, directoryUrl, directoryAccount, serverDomain, clientVersion, syncError, client, voice, initialTab, games, onSaveServerName, onSaveGlobalName, onSetAvatar, onSetLocale, localePending, onCapturingKey, onClose, onLogout, onForget }: {
   /** The server on screen and who you are there; null = none is shown (client without a home server): the dialog then has
    *  no profile and no sessions, which belong to a server, and the account page names the directory account and `publicKey`. */
   api: ServerApi | null; me: Me | null; publicKey: string | null;
@@ -63,6 +66,8 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
   /** Last failure while saving the settings in the account; null = none. */
   syncError: string | null;
   client: VoiceClient; voice: VoiceState; initialTab?: SettingsTab;
+  /** Game detection of the desktop app; null = not available here, and the category is not shown. */
+  games: GameDetection | null;
   onSaveServerName: (displayName: string | null) => Promise<void>;
   onSaveGlobalName: (displayName: string | null) => Promise<void>;
   /** Upload (null = remove) the avatar of the directory account; null = no account or a directory without avatars. */
@@ -80,7 +85,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
   settingsRef.current = settings;
   const onServer = !!api && !!me;
   // "App" (version, updates) exists in the desktop app only; profile and sessions belong to a server.
-  const tabs = TABS.filter((entry) => (entry.id !== "app" || platform.app !== null) && (onServer || (entry.id !== "profile" && entry.id !== "sessions")));
+  const tabs = TABS.filter((entry) => (entry.id !== "app" || platform.app !== null) && (entry.id !== "games" || games !== null) && (onServer || (entry.id !== "profile" && entry.id !== "sessions")));
   const appUpdate = useUpdateState();
   const [tab, setTab] = useState<SettingsTab>(() => { const wanted = initialTab ?? "profile"; return tabs.some((entry) => entry.id === wanted) ? wanted : "view"; });
   const [name, setName] = useState(me?.displayName ?? "");
@@ -296,7 +301,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
                 <span className="muted small">{t("settings.featureSelfHint")}</span>
                 <h3>{t("settings.idle")}</h3>
                 {/* The desktop app detects input in the whole system by itself (platform.systemIdle): an explanation, no switch. */}
-                {platform.systemIdle === "always" ? <span className="muted small">{t("settings.idleHintApp")}</span> : <>
+                {platform.systemIdle === "always" ? <span className="muted small">{t("settings.idleHintApp")}{platform.systemActivity ? ` ${t("settings.idleHintAppSystem")}` : ""}</span> : <>
                 <label className="check">
                   {/* The permission prompt only opens inside the click, so the switch asks right here. */}
                   <input type="checkbox" checked={idleDetect} disabled={!idleDetectionSupported()} onChange={(e) => { const on = e.target.checked; void setIdleDetection(activity, on).then((ok) => { setIdleDetect(ok); setIdleDenied(on && !ok); }); }} />
@@ -512,6 +517,8 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
                 <span className="muted small">{t("update.hint")}</span>
               </>
             )}
+            {tab === "games" && games && <GamesTab games={games} />}
+
             {tab === "licenses" && <LicensesTab version={clientVersion} />}
 
             {SYNCED.includes(tab) && (

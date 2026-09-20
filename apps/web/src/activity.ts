@@ -12,15 +12,27 @@ import { AFK_AFTER_MS } from "@squorli/protocol";
  * - with the Idle Detection API (Chromium, needs the user's permission, idleDetection.ts): input anywhere in the system.
  *   While the detector reports the user active they are never idle; once it reports idle (or the screen is locked) the
  *   rule above decides. Without a detector (`systemIdle` null) only the first two count.
+ * - in the desktop app (systemActivity.ts, user's decisions of 20 September 2026): controller input, fed as `touch()`, and
+ *   a playing video: watching needs no input, so while one plays the user stays present, but for at most
+ *   VIDEO_ACTIVE_MAX_MS since they were last seen (autoplay, a viewer who fell asleep).
  */
+export const VIDEO_ACTIVE_MAX_MS = 4 * 60 * 60_000;
+/** A video that stopped still counts this long: the gap between two videos of a playlist, an advertisement, buffering. */
+export const VIDEO_GAP_MS = 2 * 60_000;
+
 export class ActivityTracker {
   private last: number;
+  /** When the user was last really there: input or speech, or the system-wide detector saying so. The video rule's four hours count from here. */
+  private lastPresent: number;
+  private video = false;
+  private videoEndedAt: number | null = null;
   private systemIdle: boolean | null = null;
   private idleNow = false;
   private readonly listeners = new Set<(idle: boolean) => void>();
 
   constructor(private readonly idleMs: number = AFK_AFTER_MS, private readonly now: () => number = () => Date.now()) {
     this.last = this.now();
+    this.lastPresent = this.last;
   }
 
   get idle(): boolean { return this.idleNow; }
@@ -33,6 +45,15 @@ export class ActivityTracker {
   /** Input or speech just happened. */
   touch(): void {
     this.last = this.now();
+    this.lastPresent = this.last;
+    this.check();
+  }
+
+  /** Some program plays a video (the desktop shell's "display required" state, never Squorli's own video). */
+  setVideoPlaying(on: boolean): void {
+    if (on === this.video) return;
+    this.video = on;
+    if (!on) this.videoEndedAt = this.now();
     this.check();
   }
 
@@ -44,7 +65,10 @@ export class ActivityTracker {
 
   /** Re-evaluate; call regularly, because turning idle happens without any event. */
   check(): void {
-    const idle = (this.systemIdle ?? true) && this.now() - this.last >= this.idleMs;
+    const now = this.now();
+    if (this.systemIdle === false) this.lastPresent = now;
+    const watching = (this.video || (this.videoEndedAt !== null && now - this.videoEndedAt < VIDEO_GAP_MS)) && now - this.lastPresent < VIDEO_ACTIVE_MAX_MS;
+    const idle = (this.systemIdle ?? true) && now - this.last >= this.idleMs && !watching;
     if (idle === this.idleNow) return;
     this.idleNow = idle;
     for (const fn of this.listeners) fn(idle);

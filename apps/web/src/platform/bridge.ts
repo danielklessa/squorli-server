@@ -44,6 +44,27 @@ export type ScreenPick = { sourceId: string; audio: boolean };
 /** Audio the shell captures itself for a screen share (Windows, native helper): PCM 48 kHz, 16 bit signed, interleaved stereo. */
 export type ScreenAudioEvent = { type: "start" } | { type: "data"; pcm: Uint8Array } | { type: "end" };
 
+/**
+ * What the shell's native system watch helper sees outside the window (Windows): `input` = a game controller was used (at most
+ * once a second; Chromium's Gamepad API only delivers while the window has the focus), `display` = whether some program asks
+ * the system to keep the display on, which browsers and players do while a video plays. docs/features/afk.md.
+ */
+export type SystemActivityEvent = { type: "input" } | { type: "display"; required: boolean };
+
+/**
+ * Game detection of the desktop app (docs/features/games.md): the shell reads which games the launchers installed and its
+ * native helper tells when a program from one of those folders, or one the user added, is in front. Everything stays on
+ * this computer so far. An id is the launcher's own ("steam:730", "epic:<app name>", "gog:<id>", "xbox:<store id>") or
+ * "custom:<path>" for an added program; install paths stay in the shell.
+ */
+export type GameSource = "steam" | "epic" | "gog" | "xbox" | "custom";
+export type DetectedGame = { id: string; name: string; source: GameSource };
+export type RunningGame = { id: string; name: string };
+/** A program the user added by hand: the full path of its executable and the name to show. */
+export type CustomProgram = { path: string; name: string };
+/** What the shell needs from the client's settings: whether to detect at all, and the added programs. */
+export type GameWatchSettings = { enabled: boolean; custom: CustomProgram[] };
+
 /** Fixed facts about the running app, handed to the preload script at window creation. */
 export type DesktopInfo = {
   version: string;
@@ -56,6 +77,10 @@ export type DesktopInfo = {
   materials: WindowMaterial[];
   /** The shell captures a share's audio itself (native helper present); then a picked source with audio arrives through `onScreenAudio`. */
   nativeScreenAudio: boolean;
+  /** The shell runs its system watch helper (`onSystemActivity`); missing = an app older than it. */
+  systemWatch?: boolean;
+  /** The shell can detect running games (system watch helper present, a platform whose launchers it reads); missing = an app older than it. */
+  gameDetection?: boolean;
   appearance: AppearanceState;
   frame: WindowFrameState;
   /** The app has a tray icon; `closeToTray` = the window's close button hides the window instead of quitting (user's setting). null = no tray. */
@@ -80,6 +105,15 @@ export interface DesktopBridge {
   stopScreenAudio(): void;
   /** Output device of the embedded players (Twitch, YouTube), named by its label because device ids differ per origin; null = the system's default. */
   setPlayerOutput(label: string | null): void;
+  /** Controller input and the "display required" state; the first subscription also gets the current display state. */
+  onSystemActivity(cb: (event: SystemActivityEvent) => void): () => void;
+  /** Read the launchers' installed games again; answers with them and the added programs, by name. */
+  scanGames(): Promise<DetectedGame[]>;
+  setGameWatch(settings: GameWatchSettings): void;
+  /** Ask the user for a program to add (the system's file dialog); null = cancelled. */
+  pickGameProgram(): Promise<CustomProgram | null>;
+  /** The game in front last that still runs, null = none; the first subscription gets the current one. */
+  onRunningGame(cb: (game: RunningGame | null) => void): () => void;
   setAppearance(appearance: WindowAppearance): Promise<AppearanceState>;
   /** Restart the app (a pending change of the window background). */
   relaunch(): void;
@@ -109,6 +143,13 @@ export const IPC = {
   screenAudio: "squorli:screen-audio",
   screenAudioStop: "squorli:screen-audio-stop",
   playerOutput: "squorli:player-output",
+  systemActivity: "squorli:system-activity",
+  systemActivityReady: "squorli:system-activity-ready",
+  gamesScan: "squorli:games-scan",
+  gamesWatch: "squorli:games-watch",
+  gamesPick: "squorli:games-pick",
+  gameRunning: "squorli:game-running",
+  gameRunningReady: "squorli:game-running-ready",
   setAppearance: "squorli:set-appearance",
   relaunch: "squorli:relaunch",
   windowControl: "squorli:window-control",
