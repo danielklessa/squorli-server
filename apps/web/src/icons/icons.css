@@ -58,6 +58,8 @@
 .ic-server::before { content: "\e153"; }
 .ic-settings::before { content: "\e154"; }
 .ic-shield::before { content: "\e158"; }
+.ic-skip-back::before { content: "\e15f"; }
+.ic-skip-forward::before { content: "\e160"; }
 .ic-smile::before { content: "\e164"; }
 .ic-square::before { content: "\e167"; }
 .ic-trash-2::before { content: "\e18e"; }

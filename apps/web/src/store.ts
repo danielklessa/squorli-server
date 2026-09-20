@@ -10,6 +10,7 @@ import { DirectoryLink, type LinkStatus } from "./directoryLink";
 import { loadOrCreateIdentity, storeIdentity, type Identity } from "./identity";
 import { ServerConnection, type ServerConnState } from "./serverConnection";
 import { applyAccountSettings, sameAccountSettings, toAccountSettings } from "./accountSettings";
+import { seesIncoming } from "./attention";
 import { accountLocalePreference, detectLocale, locale, localePreference, markAccountLocalePreference, storeLocalePreference, t, type LocalePreference } from "./i18n";
 import { loadVoiceSettings, sameSoundSettings, saveVoiceSettings, subscribeVoiceSettings } from "./voice/settings";
 import { normalizeSoundSettings } from "./voice/sounds";
@@ -69,6 +70,8 @@ export type State = {
   currentPeer: string | null;
   /** Last error from a friend or message action (shown inline). */
   friendsError: string | null;
+  /** Direct messages and mentions that arrived while the window did not have the focus (attention.ts); 0 again once it has. */
+  missed: number;
   // ---- Client without a home server (desktop app); unused otherwise
   /** Past the client's own login (directory account or this device's key). */
   signedIn: boolean;
@@ -115,6 +118,8 @@ export class Store {
   /** Moderation (M3) on `host`: moving to another voice channel (null = out) and stopping camera/screen. */
   onVoiceMoved: ((host: string, channelId: string | null, by: string, reason: "afk" | null) => void) | null = null;
   onVoiceStop: ((host: string, what: { camera: boolean; screen: boolean }, by: string) => void) | null = null;
+  /** A direct message or a mention arrived that the user does not see right now (App.tsx plays the cue). */
+  onIncoming: ((kind: "dm" | "mention") => void) | null = null;
   /** Settings as the directory account holds them (null = none there or no account); user changes are pushed when they differ. */
   private accountSettings: AccountSettings | null = null;
   /** The directory stores all settings (features.settings); false = one that predates them, then only the cue settings follow the account. */
@@ -130,7 +135,7 @@ export class Store {
       identity: null, homeHost: this.homeHost, activeHost: this.homeHost, servers: home ? { [home.state.host]: home.state } : {},
       signedIn: false, localHosts: [], clientLogin: { busy: false, error: null }, joinInvites: {},
       directoryUrl: null, directoryAccount: undefined, directoryError: null, directoryEmailRequired: false, directoryAvatars: false, accountServers: null, settingsSyncError: null, localeReloadPending: false,
-      directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null, friendsError: null,
+      directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null, friendsError: null, missed: 0,
     };
     subscribeVoiceSettings((_s, source) => { if (source === "user") this.scheduleSettingsPush(); });
     // AFK detection: every chat server and the directory hear when the user turns idle or comes back (activity.ts).
@@ -156,6 +161,7 @@ export class Store {
       onConnected: () => { this.noteJoined(host); if (host === this.homeHost || !(this.state.accountServers ?? []).some((s) => this.hostFor(s.host) === host)) void this.refreshAccountServers(); },
       onVoiceMoved: (channelId, by, reason) => this.onVoiceMoved?.(host, channelId, by, reason),
       onVoiceStop: (what, by) => this.onVoiceStop?.(host, what, by),
+      onMention: (channelId) => this.incoming("mention", this.state.activeHost === host && !this.state.homeOpen && this.conns.get(host)?.state.currentChannelId === channelId),
     });
     conn.setIdle(activity.idle);
     this.conns.set(host, conn);
@@ -468,6 +474,7 @@ export class Store {
         const unread = m.from === me || viewing ? 0 : (prev?.unread ?? 0) + 1;
         this.set({ conversations: { ...this.state.conversations, [peer]: { peer, lastSeq: m.seq, lastAt: m.sentAt, unread } } });
         if (viewing && m.from !== me) this.link?.send({ type: "dm.read", peer, seq: m.seq });
+        if (m.from !== me) this.incoming("dm", this.state.homeOpen && this.state.currentPeer === peer);
         break;
       }
       case "dm.history": {
@@ -501,6 +508,19 @@ export class Store {
         break;
     }
   }
+  /**
+   * A direct message or a mention came in live (attention.ts). Seen at once = nothing happens; otherwise the cue sounds, and
+   * what arrives while the window does not have the focus is counted for the desktop app's task bar mark until it has.
+   */
+  private incoming(kind: "dm" | "mention", showing: boolean) {
+    const visible = document.visibilityState === "visible";
+    const focused = visible && document.hasFocus();
+    if (seesIncoming({ visible, focused }, showing)) return;
+    if (!focused) this.set({ missed: this.state.missed + 1 });
+    this.onIncoming?.(kind);
+  }
+  /** The window has the focus again. */
+  clearMissed() { if (this.state.missed !== 0) this.set({ missed: 0 }); }
   openHome(open = true) { this.set({ homeOpen: open, friendsError: null }); }
   /** Open a conversation with a friend: home view, load the history, report it as read. */
   selectPeer(peer: string) {
@@ -585,14 +605,14 @@ export class Store {
     const remote = this.settingsSupported ? status.settings : null;
     if (!remote) {
       // Nothing stored yet (or an older directory): cue settings stored by an older client still win, the rest is seeded from this device.
-      const sounds = status.soundSettings ? normalizeSoundSettings(status.soundSettings) : null;
+      const sounds = status.soundSettings ? normalizeSoundSettings({ ...status.soundSettings, message: status.soundSettings.message ?? local.sounds.message }) : null;
       if (sounds && !sameSoundSettings(local.sounds, sounds)) saveVoiceSettings({ ...local, sounds }, "directory");
       this.accountSettings = sounds && !this.settingsSupported ? this.localAccountSettings() : null;
       this.scheduleSettingsPush(0);
       return;
     }
     this.accountSettings = remote;
-    if (!sameAccountSettings(toAccountSettings(local, remote.locale), remote)) saveVoiceSettings(applyAccountSettings(local, remote), "directory");
+    if (!sameAccountSettings(toAccountSettings(local, remote.locale), remote, true)) saveVoiceSettings(applyAccountSettings(local, remote), "directory");
     // Language: a choice made on this device since it was last in step with the account (login footer) wins and is pushed;
     // otherwise the account's applies, with a reload only when the texts actually change.
     const pref = localePreference(); const synced = accountLocalePreference();

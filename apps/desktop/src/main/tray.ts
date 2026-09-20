@@ -7,6 +7,18 @@ import { join } from "node:path";
  * (`closeToTray` in desktop-config.json, off by default: someone who closes the window while in a voice channel should not
  * stay on the air without having asked for it).
  */
+const trayImage = (file: string) => nativeImage.createFromPath(join(__dirname, "..", "build", file)).resize({ width: process.platform === "win32" ? 16 : 22, quality: "best" });
+
+/** Direct messages or mentions wait (attention.ts): the tray icon gets a dot and says so in its tool tip. With the window hidden in the tray it is the only place that can. */
+export function setTrayAttention(tray: Tray | null, waiting: boolean, text: string): void {
+  if (!tray || tray.isDestroyed()) return;
+  try {
+    const image = trayImage(waiting ? "tray-alert.png" : "tray.png");
+    if (!image.isEmpty()) tray.setImage(image);
+    tray.setToolTip(text);
+  } catch { /* the tray is gone */ }
+}
+
 const LABELS = { de: { open: "Squorli öffnen", quit: "Beenden" }, en: { open: "Open Squorli", quit: "Quit" } };
 
 export function createTray(getWindow: () => BrowserWindow | null, quit: () => void): Tray | null {

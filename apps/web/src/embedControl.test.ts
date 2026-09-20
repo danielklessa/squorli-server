@@ -99,7 +99,7 @@ describe("youtube control", () => {
     const control = new YoutubeControl({ post: (data) => posted.push(JSON.parse(data as string)), isHidden: () => false }, {
       serverNow: () => Date.now(), canControl: () => canControl, publish: (p) => { published.push(p); return publish(p); }, onCorrected: corrected, onError: (kind) => errors.push(kind), onSoundBlocked: blocked,
     });
-    const commands = () => posted.filter((m) => m.event === "command").map((m) => [m.func, ...(m.args ?? [])]);
+    const commands = () => posted.filter((m) => m.event === "command" && m.func !== "addEventListener").map((m) => [m.func, ...(m.args ?? [])]);
     return { control, posted, published, corrected, blocked, errors, commands };
   }
 
@@ -113,6 +113,20 @@ describe("youtube control", () => {
     vi.advanceTimersByTime(2000);
     expect(posted.filter((m) => m.event === "listening")).toHaveLength(3);
     expect(commands()).toEqual([["setVolume", 5], ["unMute"]]);
+  });
+
+  it("turns captions off whenever the player says its captions part is there, and not before", () => {
+    const { control, posted, commands } = setup(false);
+    control.start();
+    control.onMessage(JSON.stringify({ event: "initialDelivery", info: {} }));
+    expect(posted.filter((m) => m.func === "addEventListener").map((m) => m.args)).toEqual([["onApiChange"]]);
+    expect(commands().some((c) => c[0] === "setOption")).toBe(false);
+    control.onMessage(JSON.stringify({ event: "onApiChange" }));
+    expect(commands().filter((c) => c[0] === "setOption")).toEqual([["setOption", "captions", "track", {}]]);
+    control.onMessage(JSON.stringify({ event: "onApiChange" })); // the next video of a queue
+    expect(commands().filter((c) => c[0] === "setOption")).toHaveLength(2);
+    control.onMessage(info({ playerState: 1, currentTime: 1 }));
+    expect(posted.filter((m) => m.func === "addEventListener")).toHaveLength(1);
   });
 
   it("brings a freshly loaded player to where the video stands for everyone", () => {
@@ -186,6 +200,52 @@ describe("youtube control", () => {
     expect(published).toEqual([]);
     vi.advanceTimersByTime(20_000);
     expect(blocked).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads a queue's next video into the same player, where it stands for everyone, and judges nothing by the old video meanwhile", () => {
+    const { control, commands, published } = setup(true);
+    control.setVideo("aaaaaaaaaaa"); // what the iframe was made with: nothing to load
+    control.setShared({ playing: true, position: 0, rate: 1, at: 1_000_000 });
+    control.onMessage(info({ playerState: 1, currentTime: 0, playbackRate: 1, videoData: { isLive: false, video_id: "aaaaaaaaaaa" } }));
+    expect(commands().some((c) => c[0] === "loadVideoById")).toBe(false);
+    vi.advanceTimersByTime(60_000);
+    control.setShared({ playing: true, position: 0, rate: 1, at: 1_060_000 });
+    control.setVideo("bbbbbbbbbbb");
+    expect(commands().filter((c) => c[0] === "loadVideoById")).toEqual([["loadVideoById", "bbbbbbbbbbb", 0]]);
+    // The old video's last words must neither be published nor corrected.
+    const before = commands().length;
+    control.onMessage(info({ playerState: 2, currentTime: 60 }));
+    expect(published).toEqual([]);
+    expect(commands().length).toBe(before);
+    control.onMessage(info({ playerState: 1, currentTime: 0.2, playbackRate: 1, videoData: { isLive: false, video_id: "bbbbbbbbbbb" } }));
+    expect(commands().filter((c) => c[0] === "loadVideoById")).toHaveLength(1);
+  });
+
+  it("tells once per video that it is over, and again when the same video came around", () => {
+    const ended: string[] = [];
+    const posted: unknown[] = [];
+    const control = new YoutubeControl({ post: (data) => posted.push(data), isHidden: () => false }, { serverNow: () => Date.now(), canControl: () => false, publish: async () => {}, onCorrected: () => {}, onError: () => {}, onSoundBlocked: () => {}, onEnded: (id) => ended.push(id) });
+    control.setVideo("aaaaaaaaaaa");
+    control.onMessage(info({ playerState: 1, currentTime: 10, videoData: { isLive: false, video_id: "aaaaaaaaaaa" } }));
+    control.onMessage(info({ playerState: 0 }));
+    control.onMessage(info({ playerState: 0 }));
+    expect(ended).toEqual(["aaaaaaaaaaa"]);
+    control.setShared({ playing: true, position: 0, rate: 1, at: 1_000_500 }); // a queue of one: the server started it again
+    control.onMessage(info({ playerState: 1, currentTime: 0 }));
+    control.onMessage(info({ playerState: 0 }));
+    expect(ended).toEqual(["aaaaaaaaaaa", "aaaaaaaaaaa"]);
+  });
+
+  it("takes a shared place behind the video's end for its end instead of seeking there", () => {
+    const ended: string[] = [];
+    const posted: string[] = [];
+    const control = new YoutubeControl({ post: (data) => posted.push(data as string), isHidden: () => false }, { serverNow: () => Date.now(), canControl: () => false, publish: async () => {}, onCorrected: () => {}, onError: () => {}, onSoundBlocked: () => {}, onEnded: (id) => ended.push(id) });
+    control.setVideo("aaaaaaaaaaa");
+    control.setShared({ playing: true, position: 0, rate: 1, at: 1_000_000 - 500_000 }); // stands at 500 s
+    control.onMessage(info({ playerState: 1, currentTime: 3, playbackRate: 1, duration: 100, videoData: { isLive: false, video_id: "aaaaaaaaaaa" } }));
+    control.onMessage(info({ playerState: 1, currentTime: 4 }));
+    expect(ended).toEqual(["aaaaaaaaaaa"]);
+    expect(posted.some((m) => m.includes("seekTo"))).toBe(false);
   });
 
   it("reports a video that may not be embedded", () => {

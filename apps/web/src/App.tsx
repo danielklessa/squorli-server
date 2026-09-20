@@ -15,6 +15,7 @@ import { VoiceDock } from "./VoiceDock";
 import { VoiceStage } from "./VoiceStage";
 import { CameraPicker } from "./CameraPicker";
 import { Icon } from "./Icon";
+import { attentionCount } from "./attention";
 import { askConfirm, askInput } from "./dialogs";
 import type { MenuAnchor } from "./ContextMenu";
 import { MiniProfile } from "./MiniProfile";
@@ -134,6 +135,18 @@ export function App() {
   useEffect(() => client.subscribe(setVoice), [client]);
   // Cue settings reach the voice client from here, whether the user changed them or the directory account supplied them.
   useEffect(() => client.setSoundSettings(voiceSettings.sounds), [client, voiceSettings.sounds]);
+  useEffect(() => client.setCueOutput(voiceSettings.outputDeviceId), [client, voiceSettings.outputDeviceId]);
+  // A new direct message or a mention the user does not see right now (store.ts `incoming`): the cue, in every client.
+  useEffect(() => { store.onIncoming = () => client.playSound("message"); return () => { store.onIncoming = null; }; }, [store, client]);
+  useEffect(() => {
+    const clear = () => { if (document.visibilityState === "visible" && document.hasFocus()) store.clearMissed(); };
+    window.addEventListener("focus", clear);
+    document.addEventListener("visibilitychange", clear);
+    return () => { window.removeEventListener("focus", clear); document.removeEventListener("visibilitychange", clear); };
+  }, [store]);
+  // Desktop app: the task bar icon (and the tray's) shows that something waits (attention.ts).
+  const attention = attentionCount(Object.values(state.conversations).map((c) => c.unread), Object.values(state.servers).flatMap((s) => Object.values(s.mentions)), state.missed);
+  useEffect(() => platform.window.attention?.set(attention), [attention]);
   // The same for the speech gate: the settings dialog only stores, a running connection follows from here.
   useEffect(() => client.setMode(voiceSettings.mode), [client, voiceSettings.mode]);
   useEffect(() => client.setThreshold(voiceSettings.vadThreshold), [client, voiceSettings.vadThreshold]);
@@ -244,19 +257,43 @@ export function App() {
   // Turned off for me = no player at all: no tile, no sound, no connection to Twitch or YouTube (user's requirement).
   const embedTwitch = !radioState.muted ? channelRadio?.twitchChannel ?? null : null;
   const embedYoutube = !radioState.muted ? channelRadio?.youtubeVideo ?? null : null;
-  const embedSource = useMemo<EmbedSource | null>(() => embedTwitch ? { kind: "twitch", channel: embedTwitch } : embedYoutube ? { kind: "youtube", videoId: embedYoutube } : null, [embedTwitch, embedYoutube]);
+  // Still no player then, but the stage says in a tile that a video runs and turns the radio back on (user's wish, 20 September 2026).
+  // The tile can be dismissed; it is back with the next video: another source, or the same one started again after the radio
+  // stopped. Kept here and not in the stage, which goes away whenever a text channel is shown; never stored.
+  // A playlist counts as one: the tile does not come back with every video of it.
+  const videoKey = channelRadio?.twitchChannel ? `twitch:${channelRadio.twitchChannel}` : channelRadio?.youtubeVideo ? (channelRadio.queue ? `youtube-queue:${channelRadio.queue.listId}` : `youtube:${channelRadio.youtubeVideo}`) : null;
+  const [playerOffDismissed, setPlayerOffDismissed] = useState<string | null>(null);
+  useEffect(() => { if (videoKey === null) setPlayerOffDismissed(null); }, [videoKey]);
+  const playerOff = radioState.muted && channelRadio && videoKey !== playerOffDismissed ? (channelRadio.twitchChannel ? "twitch" : channelRadio.youtubeVideo ? "youtube" : null) : null;
+  const embedQueue = channelRadio?.queue?.listId ?? null;
+  const embedSource = useMemo<EmbedSource | null>(() => embedTwitch ? { kind: "twitch", channel: embedTwitch } : embedYoutube ? { kind: "youtube", videoId: embedYoutube, queue: embedQueue } : null, [embedTwitch, embedYoutube, embedQueue]);
   const playerWindow = usePlayerWindow(embedKeyOf(embedSource));
   // A video plays in step for everyone; members with CONTROL_RADIO steer it through their own player (EmbedPlayer.tsx).
   const embedSync = useMemo(() => {
     const playback = channelRadio?.playback, channelId = voiceChannel?.id, api = voiceHost ? store.connection(voiceHost)?.api : null;
     if (!embedYoutube || !playback || !channelId || !api) return null;
-    return { playback, clockOffset: voiceServer?.clockOffset ?? 0, canControl: hasPermission(voiceServer?.server?.myPermissions ?? 0, Permission.CONTROL_RADIO), publish: (p: { playing: boolean; position: number; rate: number }) => api.setRadioPlayback(channelId, p) };
-  }, [embedYoutube, channelRadio?.playback, voiceChannel?.id, voiceHost, store, voiceServer?.clockOffset, voiceServer?.server?.myPermissions]);
+    return { playback, clockOffset: voiceServer?.clockOffset ?? 0, canControl: hasPermission(voiceServer?.server?.myPermissions ?? 0, Permission.CONTROL_RADIO), publish: (p: { playing: boolean; position: number; rate: number }) => api.setRadioPlayback(channelId, p),
+      ended: embedQueue ? (videoId: string) => { void api.advanceRadio(channelId, { from: videoId, ended: true }).catch(() => {}); } : null };
+  }, [embedYoutube, embedQueue, channelRadio?.playback, voiceChannel?.id, voiceHost, store, voiceServer?.clockOffset, voiceServer?.server?.myPermissions]);
   useEffect(() => radio.setStream(radioUrl), [radio, radioUrl]);
   useEffect(() => radio.setDeafened(voice.deafened), [radio, voice.deafened]);
   // Its own output device when one is chosen (settings > audio devices), otherwise where the voices play.
   const radioSink = voiceSettings.radioOutputDeviceId ?? voiceSettings.outputDeviceId;
   useEffect(() => radio.setOutputDevice(radioSink), [radio, radioSink]);
+  // The players of a Twitch or YouTube source are foreign iframes no page can route; the desktop app's shell can, and is
+  // told the device by its label (ids differ per origin). Again when devices come and go: the chosen one may be back.
+  useEffect(() => {
+    const setPlayerOutput = platform.media.setPlayerOutput;
+    if (!setPlayerOutput) return;
+    let stale = false;
+    const tell = () => {
+      if (!radioSink) { setPlayerOutput(null); return; }
+      void navigator.mediaDevices.enumerateDevices().then((devices) => { if (!stale) setPlayerOutput(devices.find((d) => d.kind === "audiooutput" && d.deviceId === radioSink)?.label || null); }).catch(() => {});
+    };
+    tell();
+    navigator.mediaDevices.addEventListener("devicechange", tell);
+    return () => { stale = true; navigator.mediaDevices.removeEventListener("devicechange", tell); };
+  }, [radioSink]);
 
   // Permission VIEW_VIDEO: roles or members changed -> the running connection restricts its camera/screen to the members
   // who may watch (enforced by LiveKit), and stops receiving others' feeds when we lost the permission ourselves.
@@ -334,7 +371,7 @@ export function App() {
   const voiceApi = voiceHost ? store.connection(voiceHost)?.api ?? null : null;
   const stage = (detached: boolean) => voiceChannel && voiceServer?.server && voiceApi ? (
     <VoiceStage client={client} voice={voice} channel={voiceChannel} members={voiceServer.server.members} myPermissions={voiceServer.server.myPermissions}
-      api={voiceApi} radio={radio} radioStations={voiceServer.server.radioStations} radioTitle={voiceServer.radioTitles[voiceChannel.id] ?? null} playerTile={embedKeyOf(embedSource)} playerPopped={playerWindow.win !== null} onRestorePlayer={playerWindow.restore}
+      api={voiceApi} radio={radio} radioStations={voiceServer.server.radioStations} radioTitle={voiceServer.radioTitles[voiceChannel.id] ?? null} playerTile={embedKeyOf(embedSource)} playerOff={playerOff} onDismissPlayerOff={() => setPlayerOffDismissed(videoKey)} playerPopped={playerWindow.win !== null} onRestorePlayer={playerWindow.restore}
       onToggleCamera={toggleCamera} onToggleBlur={toggleBlur} onLeave={leaveVoice} onPopout={videoWindows.open} poppedIds={videoWindows.poppedIds} onRestore={videoWindows.restore}
       detached={detached} onToggleWindow={detached ? stageWindow.close : stageWindow.open} />
   ) : null;
@@ -395,7 +432,7 @@ export function App() {
       {!homeOpen && view && <ColumnHandle column="members" width={layout.members} label={t("layout.resizeMembers")} onChange={(w) => resizeColumn("members", w, false)} onCommit={(w) => resizeColumn("members", w, true)} />}
       {videoWindows.windows}
       {stageWindow.render(stage(true))}
-      {embedSource && channelRadio && <EmbedPlayer source={embedSource} name={channelRadio.name} volume={radioState.volume} muted={voice.deafened} popout={playerWindow} sync={embedSync} onNotice={(text) => client.setNotice(text)} />}
+      {embedSource && channelRadio && <EmbedPlayer source={embedSource} name={channelRadio.name} volume={radioState.volume} muted={voice.deafened} popout={playerWindow} sync={embedSync} onNotice={(text) => client.setNotice(text)} onTurnOff={() => radio.setMuted(true)} />}
       {showRail && <ServerRail servers={railServers} serverState={railState} activeKey={homeOpen ? null : activeHost} onAdd={homeless ? () => { void addServer(); } : null}
         onSelect={(key, host) => { setMobileContent(false); setVoicePreview(null); if (key === state.homeHost) { store.openServer(homeDirHost); } else store.openServer(host); setStageOpen(key === voiceHost && stageOpen); }}
         onDiscover={state.directoryUrl ? () => setShowBrowser(true) : null} onLeave={(host, name) => { void leaveServer(host, name); }}

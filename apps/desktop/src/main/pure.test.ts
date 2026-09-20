@@ -2,6 +2,8 @@ import { join, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CONTENT_SECURITY_POLICY, contentTypeOf, resolveAppFile } from "./appFiles";
 import { appearanceState, normalizeAppearance, supportedMaterials } from "./appearance";
+import { attentionText, badgeFile, readAttentionCount } from "./attention";
+import { AUTOSTART_ARG, entryStarts, linuxAutostartEntry, linuxAutostartFile, linuxExecutable, readAutostartBackground, startedBySystem, startsInBackground } from "./autostart";
 import { hwndOfHandle, hwndOfSource } from "./captureSource";
 import { findDeepLink } from "./deepLinkArgs";
 import { isAllowedExternal, windowOpenDecision } from "./navigation";
@@ -140,5 +142,70 @@ describe("navigation", () => {
     expect(isAllowedExternal("http://localhost:3100/")).toBe(true);
     expect(isAllowedExternal("mailto:a@example.org")).toBe(true);
     for (const url of ["file:///etc/passwd", "ms-settings:privacy", "javascript:alert(1)", "", "C:\\Windows\\system32\\calc.exe"]) expect(isAllowedExternal(url), url).toBe(false);
+  });
+});
+
+describe("player audio output", () => {
+  it("knows the two player frames and nothing else", async () => {
+    const { isPlayerFrameUrl } = await import("./playerAudioScript");
+    expect(isPlayerFrameUrl("https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ?enablejsapi=1")).toBe(true);
+    expect(isPlayerFrameUrl("https://player.twitch.tv/?channel=x&parent=squorli")).toBe(true);
+    for (const url of ["https://www.youtube.com/embed/aqz-KE-bpKQ", "https://player.twitch.tv.evil.example/", "http://player.twitch.tv/", "app://squorli/", "about:blank", "", undefined]) expect(isPlayerFrameUrl(url)).toBe(false);
+  });
+
+  it("takes a label or nothing from the client, and carries the label into the script as data", async () => {
+    const { playerAudioScript, readPlayerOutputLabel } = await import("./playerAudioScript");
+    expect(readPlayerOutputLabel("Lautsprecher (Realtek)")).toBe("Lautsprecher (Realtek)");
+    for (const bad of [null, undefined, "", 7, {}, "x".repeat(513)]) expect(readPlayerOutputLabel(bad)).toBeNull();
+    const label = 'Speakers"); alert(1); ("';
+    expect(playerAudioScript(label).endsWith(`)(${JSON.stringify(label)})`)).toBe(true);
+    expect(playerAudioScript(null).endsWith(")(null)")).toBe(true);
+    // The script parses, whatever the label.
+    expect(() => new Function(`return ${playerAudioScript(label)}`)).not.toThrow();
+  });
+});
+
+describe("attention mark", () => {
+  it("takes only a sensible count from the client", () => {
+    expect(readAttentionCount(3)).toBe(3);
+    expect(readAttentionCount(2.9)).toBe(2);
+    expect(readAttentionCount(1e9)).toBe(9999);
+    for (const bad of [0, -1, Number.NaN, Infinity, "3", null, undefined, {}]) expect(readAttentionCount(bad), String(bad)).toBe(0);
+  });
+  it("names an image per count and says what waits", () => {
+    expect(badgeFile(0)).toBeNull();
+    expect(badgeFile(1)).toBe("badge-1.png");
+    expect(badgeFile(9)).toBe("badge-9.png");
+    expect(badgeFile(10)).toBe("badge-9plus.png");
+    expect(attentionText(0, true)).toBe("Squorli");
+    expect(attentionText(1, true)).toContain("1 neue Nachricht ");
+    expect(attentionText(4, false)).toContain("4 new messages");
+  });
+});
+
+describe("start with the system", () => {
+  it("knows a start by the system from its argument", () => {
+    expect(startedBySystem(["squorli.exe", AUTOSTART_ARG])).toBe(true);
+    expect(startedBySystem(["squorli.exe", "squorli://server/x"])).toBe(false);
+  });
+  it("keeps such a start in the background unless the user wants the window opened", () => {
+    for (const stored of [undefined, true, "no", null]) expect(readAutostartBackground(stored), String(stored)).toBe(true);
+    expect(readAutostartBackground(false)).toBe(false);
+    expect(startsInBackground(["squorli.exe", AUTOSTART_ARG], undefined)).toBe(true);
+    expect(startsInBackground(["squorli.exe", AUTOSTART_ARG], false)).toBe(false);
+    expect(startsInBackground(["squorli.exe"], true)).toBe(false); // started by the user: always opened
+  });
+  it("writes a desktop entry into the user's autostart folder on Linux", () => {
+    expect(linuxAutostartFile({ XDG_CONFIG_HOME: "/cfg", HOME: "/home/a" })).toBe(join("/cfg", "autostart", "squorli.desktop"));
+    expect(linuxAutostartFile({ HOME: "/home/a" })).toBe(join("/home/a", ".config", "autostart", "squorli.desktop"));
+    expect(linuxAutostartFile({})).toBeNull();
+    expect(linuxExecutable({ APPIMAGE: "/home/a/Apps/Squorli.AppImage" }, "/tmp/.mount_x/squorli")).toBe("/home/a/Apps/Squorli.AppImage");
+    expect(linuxExecutable({}, "/opt/Squorli/squorli")).toBe("/opt/Squorli/squorli");
+    const entry = linuxAutostartEntry("/home/a/My Apps/Squorli 100%.AppImage");
+    expect(entry).toContain('Exec="/home/a/My Apps/Squorli 100%%.AppImage" --autostart\n');
+    expect(entry.startsWith("[Desktop Entry]\nType=Application\n")).toBe(true);
+    expect(linuxAutostartEntry('/x/a"b$c')).toContain('Exec="/x/a\\"b\\$c" --autostart');
+    expect(entryStarts(entry, "/home/a/My Apps/Squorli 100%.AppImage")).toBe(true);
+    expect(entryStarts(entry, "/home/a/Squorli-2.AppImage")).toBe(false);
   });
 });

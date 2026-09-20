@@ -26,4 +26,5 @@ export const appEn: Partial<Record<keyof typeof de, string>> = {
   "voice.connErrWs": "{message}. The LiveKit address \"{url}\" uses ws:// (unencrypted); the app blocks that, like a browser on an HTTPS page. Switch LIVEKIT_PUBLIC_URL to wss://.",
   "voice.errMic": "Microphone: {err}. Check that a microphone is connected, that Squorli may use it in the system's privacy settings, and that the right one is chosen under Settings > Voice and audio.",
   "voice.errCameraBusy": "Camera: {err}. The camera could not be started: another program is using it, or it has not been released yet. Close other programs with camera access and try again.",
+  "settings.radioAudioHint": "Play the radio of a voice channel separately, e.g. on the speakers instead of the headset. In the app this also applies to Twitch and YouTube sources (a few seconds after the player starts).",
 };

@@ -113,9 +113,12 @@ export class ServerApi {
   createRadioStation(data: { name: string; url: string }) { return this.request<RadioStation>("POST", "/api/radio/stations", data); }
   updateRadioStation(id: string, patch: { name?: string; url?: string }) { return this.request<RadioStation>("PATCH", `/api/radio/stations/${id}`, patch); }
   deleteRadioStation(id: string) { return this.request("DELETE", `/api/radio/stations/${id}`); }
-  startRadio(channelId: string, stationId: string) { return this.request("PUT", `/api/channels/${channelId}/radio`, { stationId }); }
+  /** `videoIds`: the videos of the address's YouTube playlist, read by this client (youtubePlaylist.ts); the server plays them as a queue. */
+  startRadio(channelId: string, stationId: string, videoIds?: string[]) { return this.request("PUT", `/api/channels/${channelId}/radio`, { stationId, ...(videoIds ? { videoIds } : {}) }); }
   /** Any address instead of a station (also CONTROL_RADIO). */
-  startRadioUrl(channelId: string, url: string) { return this.request("PUT", `/api/channels/${channelId}/radio`, { url }); }
+  startRadioUrl(channelId: string, url: string, videoIds?: string[]) { return this.request("PUT", `/api/channels/${channelId}/radio`, { url, ...(videoIds ? { videoIds } : {}) }); }
+  /** A queue's next or previous video (CONTROL_RADIO), or with `ended` a listener's report that `from` is over. */
+  advanceRadio(channelId: string, move: { from: string; step?: 1 | -1; ended?: boolean }) { return this.request("POST", `/api/channels/${channelId}/radio/advance`, move); }
   stopRadio(channelId: string) { return this.request("DELETE", `/api/channels/${channelId}/radio`); }
   /** Play, pause, move a video for everyone (CONTROL_RADIO); the result arrives as `radio.playback`. */
   setRadioPlayback(channelId: string, playback: { playing: boolean; position: number; rate: number }) { return this.request("PUT", `/api/channels/${channelId}/radio/playback`, playback); }

@@ -25,13 +25,13 @@ export function webPlatform(): Platform {
     home: homeless ? null : { host: window.location.host, signDomain: window.location.hostname },
     systemIdle: "permission",
     defaultDirectoryUrl: homeless ? (import.meta.env.VITE_DIRECTORY_URL as string | undefined) ?? "http://localhost:3100" : null,
-    media: { mobile, blocksInsecureMedia: window.location.protocol === "https:", screenSharePublishOverrides: () => null, takeScreenAudio: async () => null, stopScreenAudio: () => {} },
+    media: { mobile, blocksInsecureMedia: window.location.protocol === "https:", screenSharePublishOverrides: () => null, takeScreenAudio: async () => null, stopScreenAudio: () => {}, setPlayerOutput: null },
     links: {
       openExternal: (url) => { window.open(url, "_blank", "noopener"); },
       onDeepLink: () => () => {},
     },
     screen: { setPicker: () => {} },
-    window: { popoutFeatures, appearance: null, tray: null, frame: null },
+    window: { popoutFeatures, appearance: null, tray: null, autostart: null, attention: null, frame: null },
     updates: null,
   };
 }

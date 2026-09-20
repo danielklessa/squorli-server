@@ -14,7 +14,7 @@ describe("account settings", () => {
   });
 
   it("matches the protocol defaults for a fresh device", () => {
-    expect(sameAccountSettings(toAccountSettings(DEFAULT_VOICE_SETTINGS, "auto"), AccountSettings.parse({}))).toBe(true);
+    expect(sameAccountSettings(toAccountSettings(DEFAULT_VOICE_SETTINGS, "auto"), AccountSettings.parse({}), true)).toBe(true);
   });
 
   it("applies the account's settings and keeps the devices", () => {
@@ -27,7 +27,19 @@ describe("account settings", () => {
     expect(next.featureSelfInSpeakerView).toBe(false);
     expect(next.sounds.volume).toBe(0.2);
     expect([next.inputDeviceId, next.outputDeviceId, next.screenOutputDeviceId, next.radioOutputDeviceId, next.cameraDeviceId]).toEqual(["mic-1", "out-1", "out-2", "out-3", "cam-1"]);
-    expect(sameAccountSettings(toAccountSettings(next, "auto"), remote)).toBe(true);
+    expect(sameAccountSettings(toAccountSettings(next, "auto"), remote, true)).toBe(true);
+  });
+
+  it("keeps this device's message cue when the account says nothing about it, and pushes it all the same", () => {
+    const silent = { ...device, sounds: { ...device.sounds, message: false } };
+    const old = AccountSettings.parse({}); // stored before the cue existed, or by a directory that drops the field
+    expect(old.sounds.message).toBeUndefined();
+    expect(applyAccountSettings(silent, old).sounds.message).toBe(false);
+    expect(sameAccountSettings(toAccountSettings(silent, "auto"), old, true)).toBe(true); // nothing to take over
+    expect(sameAccountSettings(toAccountSettings(silent, "auto"), old)).toBe(false);      // but something to push
+    const known = AccountSettings.parse({ sounds: { ...old.sounds, message: true } });
+    expect(applyAccountSettings(silent, known).sounds.message).toBe(true);
+    expect(sameAccountSettings(toAccountSettings(silent, "auto"), known, true)).toBe(false);
   });
 
   it("notices every difference, whatever the key order", () => {

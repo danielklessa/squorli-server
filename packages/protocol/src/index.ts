@@ -179,6 +179,38 @@ export function youtubeVideoOf(url: string): { videoId: string; start: number } 
 }
 
 /**
+ * A YouTube playlist as a radio source (`/playlist?list=`, or a video's address with `&list=`): its videos are played one
+ * after the other as a queue the SERVER keeps, so everyone stays on the same video (RadioQueue). Without an API key the
+ * server cannot read a playlist; the client of the member who starts it reads the video ids from YouTube's player and
+ * hands them over with the request (`videoIds`). `videoId` = the video the address names (the queue starts there), else null.
+ */
+export function youtubePlaylistOf(url: string): { listId: string; videoId: string | null } | null {
+  try {
+    const u = new URL(url.trim());
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    const host = u.hostname.toLowerCase().replace(/^(www\.|m\.|music\.)/, "");
+    if (host !== "youtube.com" && host !== "youtu.be" && host !== "youtube-nocookie.com") return null;
+    const listId = u.searchParams.get("list") ?? "";
+    if (!/^[A-Za-z0-9_-]{10,64}$/.test(listId)) return null;
+    const videoId = youtubeVideoOf(url)?.videoId ?? null;
+    const parts = u.pathname.split("/").filter(Boolean);
+    const isListPage = host !== "youtu.be" && parts.length === 1 && parts[0] === "playlist";
+    return videoId !== null || isListPage ? { listId, videoId } : null;
+  } catch { return null; }
+}
+/** YouTube's player hands out at most 200 videos of a playlist. */
+export const RADIO_QUEUE_MAX = 200;
+export const YoutubeVideoId = z.string().regex(/^[A-Za-z0-9_-]{11}$/);
+/** The queue a channel's radio plays from (a YouTube playlist): which list, where it stands. The video itself is `youtubeVideo`. */
+export const RadioQueue = z.object({ listId: z.string(), index: z.number().int().min(0), length: z.number().int().min(1) });
+/**
+ * POST /api/channels/:id/radio/advance: on to the next video of the queue (`step` -1 = back). `from` = the video the
+ * sender means; when the queue has moved on already, nothing happens (every listener's player reports the end). With
+ * `ended` a member sitting in the voice channel reports that the video is over; without it a member with CONTROL_RADIO skips.
+ */
+export const AdvanceRadioRequest = z.object({ from: YoutubeVideoId, step: z.union([z.literal(1), z.literal(-1)]).default(1), ended: z.boolean().default(false) });
+
+/**
  * Playing a video in step ("watch together"): where the video stands for everyone. `position` (seconds) was true at the
  * server's time `at` (ms since the epoch); while `playing`, it moves on at `rate` from there (radioPositionAt). The server
  * stamps `at`; members with CONTROL_RADIO set the rest through their player (PUT /api/channels/:id/radio/playback), and every
@@ -208,9 +240,13 @@ export const ChannelRadio = z.object({
   youtubeVideo: z.string().nullable().default(null),
   /** Where the video stands for everyone (YouTube sources only). */
   playback: RadioPlayback.nullable().default(null),
+  /** Set while the source is a YouTube playlist played as a queue; null also from servers that know no queues. */
+  queue: RadioQueue.nullable().default(null),
 });
 /** PUT /api/channels/:id/radio: one of the server's stations, or any address (same rules as a station's). DELETE turns the radio off. */
-export const SetChannelRadioRequest = z.union([z.object({ stationId: Uuid }), z.object({ url: RadioUrl })]);
+/** `videoIds`: the videos of the address's YouTube playlist, read by the sender's client (youtubePlaylistOf); ignored for every other address. */
+const QueueVideoIds = z.array(YoutubeVideoId).min(1).max(RADIO_QUEUE_MAX).optional();
+export const SetChannelRadioRequest = z.union([z.object({ stationId: Uuid, videoIds: QueueVideoIds }), z.object({ url: RadioUrl, videoIds: QueueVideoIds })]);
 
 export const Channel = z.object({
   id: Uuid,
@@ -481,6 +517,7 @@ export type Channel = z.infer<typeof Channel>;
 export type RadioStation = z.infer<typeof RadioStation>;
 export type ChannelRadio = z.infer<typeof ChannelRadio>;
 export type RadioPlayback = z.infer<typeof RadioPlayback>;
+export type RadioQueue = z.infer<typeof RadioQueue>;
 export type Role = z.infer<typeof Role>;
 export type Member = z.infer<typeof Member>;
 export type Ban = z.infer<typeof Ban>;

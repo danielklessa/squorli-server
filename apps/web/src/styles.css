@@ -550,8 +550,11 @@ button.icon.on { color: var(--brand); }
 .screen-name { display: flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .screen-name img { flex: none; }
 /* Twitch as the radio's source: ONE iframe (TwitchPlayer) laid over whichever slot is on screen. Below menus and dialogs, above the page. */
-.embed-player { position: fixed; z-index: 4; overflow: hidden; border-radius: calc(var(--r-panel) - 2px); background: #000; }
-.embed-player iframe { width: 100%; height: 100%; border: 0; display: block; }
+.embed-player { --embed-r: calc(var(--r-panel) - 2px); position: fixed; z-index: 4; overflow: hidden; border-radius: var(--embed-r); background: #000; }
+/* The rounding once more on the iframe itself, as a clip-path: a video the GPU shows on a plane of its own can ignore the rounded
+   `overflow: hidden` of an ancestor and then stands out over the tile's corners (user's report, 20 September 2026; not visible in
+   screenshots, which never contain such planes). Not on the box: that would cut off the floating window's shadow and outline. */
+.embed-player iframe { width: 100%; height: 100%; border: 0; display: block; border-radius: var(--embed-r); clip-path: inset(0 round var(--embed-r)); }
 .tile.embed { cursor: default; }
 .tile.embed:hover { border-color: transparent; }
 .tile.embed > .embed-slot, .tile.embed > .tile-popped { width: 100%; height: 100%; background: #000; }
@@ -562,8 +565,23 @@ button.icon.on { color: var(--brand); }
 .embed-player .tile-window-actions { top: 2.75rem; opacity: 0; transition: opacity .15s; }
 .embed-player:hover .tile-window-actions, .embed-player .tile-window-actions:hover, .embed-player .tile-window-actions:focus-within { opacity: 1; }
 @media (hover: none) { .embed-player .tile-window-actions { opacity: 1; } }
-.embed-player.floating { border-radius: var(--r); box-shadow: 0 12px 40px rgba(0,0,0,.5); outline: 1px solid var(--line); }
+.embed-player.floating { --embed-r: var(--r); box-shadow: 0 12px 40px rgba(0,0,0,.5); outline: 1px solid var(--line); }
 .tile.embed > .embed-slot { display: grid; place-items: center; padding: 0.5rem; text-align: center; color: var(--muted); font-size: 0.8rem; }
+/* A YouTube playlist as a queue: where it stands, and for members who control the radio the previous/next buttons. */
+.radio-queue { display: flex; align-items: center; gap: 0.25rem; padding: 0.125rem 0.75rem; }
+.radio-queue > span { flex: 1; min-width: 0; }
+.user-context-menu .radio-queue button.icon { flex: none; width: auto; min-width: 2rem; min-height: 2rem; padding: 0.25rem; justify-content: center; }
+/* The same source while the user has the radio turned off: a tile that says so and turns it back on (volume slider, button). Small tiles keep the title and the button. */
+.tile.player-off { cursor: default; container-type: size; }
+.tile.player-off:hover { border-color: transparent; }
+.tile.player-off > .tile-popped { width: 100%; height: 100%; padding: 0.5rem 1.75rem; }   /* the sides keep the text clear of the x in the corner */
+.tile.player-off .player-off-title { flex: none; color: var(--text); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.tile.player-off .user-volume-row { width: min(100%, 16rem); }
+.tile.player-off .player-off-close { position: absolute; top: 0.25rem; right: 0.25rem; color: var(--muted); }
+.tile.player-off .player-off-close:hover { color: var(--text); }
+@container (max-height: 14rem) { .tile.player-off .player-off-hint { display: none; } }
+@container (max-height: 10.5rem) { .tile.player-off .tile-popped > .ic { display: none; } }
+@container (max-height: 8.5rem) { .tile.player-off .user-volume-row { display: none; } }
 /* Web radio: button in the stage head (station name while one plays), its menu, and the station list in the admin area. */
 .radio-toggle { position: relative; display: inline-flex; align-items: center; gap: 0.4rem; flex: 0 1 auto; min-width: 0; max-width: 26rem; padding: calc(0.25rem + 3px) 0.7rem; font-size: 0.875rem; background: var(--bg4); color: var(--muted); }   /* exactly as high as the .seg next to it: its 3px frame plus its buttons' padding */
 /* Without a station there is only the icon (line-height 1): an empty text box keeps the height of a line of text. */

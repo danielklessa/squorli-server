@@ -121,6 +121,8 @@ const REMOTE_SPEAK_HANGOVER_MS = 250;
 const EVENTS_MAX = 40;
 /** Quiet period after connecting: participants reported within it were already in the room. */
 const PEER_CUE_GRACE_MS = 1500;
+/** The message cue waits this long for an audio context that is not running yet; later it would only be noise at the wrong time. */
+const MESSAGE_CUE_WAIT_MS = 1000;
 
 /** Selected ICE path per transport direction, e.g. "udp srflx->host" or "relay (TURN)". */
 export type IcePath = { publisher: string | null; subscriber: string | null };
@@ -207,6 +209,7 @@ export class VoiceClient {
   private meterTimer: number | null = null;
   /** Cues for joining/leaving (per device, from the voice settings). */
   private sounds: SoundSettings = { ...DEFAULT_SOUND_SETTINGS };
+  private cueSinkId: string | null = null;
   /** join() replaces a running room: the room change is one move, so it gets no leave cue. */
   private switchingRoom = false;
   /** No cues for other participants before this time: the ones already in the room are not arrivals. */
@@ -287,6 +290,7 @@ export class VoiceClient {
   private ensureCtx(): AudioContext {
     if (!this.audioCtx || this.audioCtx.state === "closed") {
       this.audioCtx = new AudioContext();
+      if (this.cueSinkId) applyCueOutput(this.audioCtx, this.cueSinkId);
       // Volumes above 100 % run through this context; while it is not running they fall back to 100 % (applyUserVolumes).
       this.audioCtx.onstatechange = () => {
         this.applyUserVolumes();
@@ -342,7 +346,22 @@ export class VoiceClient {
    */
   playSound(cue: SoundCue, force = false): void {
     if (!shouldPlayCue(cue, this.sounds, { deafened: this.state.deafened, force })) return;
-    playCue(this.ensureCtx(), cue, this.sounds.volume);
+    const ctx = this.ensureCtx();
+    // The message cue comes without a click (the others follow one). A browser keeps the context waiting until the user
+    // did something in the page, and tones scheduled meanwhile would all sound at that first click: play it only if the
+    // context runs, or starts within a moment.
+    if (cue === "message" && !force && ctx.state !== "running") {
+      const asked = Date.now();
+      void ctx.resume().then(() => { if (Date.now() - asked < MESSAGE_CUE_WAIT_MS) playCue(ctx, cue, this.sounds.volume); }).catch(() => {});
+      return;
+    }
+    playCue(ctx, cue, this.sounds.volume);
+  }
+
+  /** Output device of the cues outside a voice room (the message cue); a join and `setOutputDevice` set it as before. */
+  setCueOutput(deviceId: string | null): void {
+    this.cueSinkId = deviceId;
+    if (this.audioCtx && this.audioCtx.state !== "closed") applyCueOutput(this.audioCtx, deviceId);
   }
 
   async join(channelId: string, url: string, token: string, settings: VoiceSettings, opts: JoinOptions = {}): Promise<void> {

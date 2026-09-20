@@ -187,7 +187,7 @@ async function main() {
   await registerInviteRoutes(app, db);
   await registerMessageRoutes(app, db, hub);
   await registerReadStateRoutes(app, db, hub);
-  await registerRadioRoutes(app, db, hub, syncRadioMeta);
+  await registerRadioRoutes(app, db, hub, presence, syncRadioMeta);
   await registerAttachmentRoutes(app, db, config);
   await registerLivekitRoutes(app, db, config);
   await registerWs(app, db, hub, presence, radioMeta, lk);

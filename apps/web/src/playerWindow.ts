@@ -19,8 +19,22 @@ export function playerOriginOf(src: string): string | null {
   } catch { return null; }
 }
 
-export function playerWindowUrl(src: string, title: string): string {
-  return `/player-window.html?${new URLSearchParams({ src, title }).toString()}`;
+/**
+ * `routable`: the desktop app puts the player's sound on the chosen output device (platform `setPlayerOutput`); the
+ * window's page then frames the player with the policy that needs (playerFrameAllow).
+ */
+export function playerWindowUrl(src: string, title: string, routable = false): string {
+  return `/player-window.html?${new URLSearchParams({ src, title, ...(routable ? { route: "1" } : {}) }).toString()}`;
+}
+
+/**
+ * The `allow` attribute of a player's iframe. `routable` (desktop app only) adds `microphone`: Chromium lets a frame use
+ * another output device than the default only where that policy reaches it. In the app a player's request for the
+ * microphone is refused by the shell whatever the policy says; in a browser the policy would let the player ask the user
+ * for the microphone under our name, so it is never set there.
+ */
+export function playerFrameAllow(routable: boolean): string {
+  return `autoplay; fullscreen; encrypted-media; picture-in-picture${routable ? "; speaker-selection; microphone" : ""}`;
 }
 
 /** What the window's page sends to its opener: a message of the player, or its own visibility. */

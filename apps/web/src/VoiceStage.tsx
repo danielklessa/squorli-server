@@ -30,6 +30,10 @@ type Props = {
   radioTitle: string | null;
   /** The channel's radio is a Twitch or YouTube source and the user has not turned the radio off: its player gets a tile (the source's key, else null). */
   playerTile: string | null;
+  /** The channel's radio is a Twitch or YouTube source and the user HAS turned the radio off: a tile says that it runs and turns the radio back on. */
+  playerOff: "twitch" | "youtube" | null;
+  /** The user does not want that tile: gone until the next video starts (App.tsx). */
+  onDismissPlayerOff: () => void;
   /** The player is open in a window of its own: the tile says so and offers to bring it back. */
   playerPopped: boolean;
   onRestorePlayer: () => void;
@@ -51,7 +55,7 @@ type Layout = "grid" | "focus";
 /** `off`: the participant sends this feed, the user may see it and does not watch it (voiceClient.setVideoWatching): the tile offers to turn it on. */
 /** A participant with the avatar of the matching member (null for identities that are no members: bots, "external"). */
 type StageParticipant = VoiceParticipant & { avatarUrl: string | null };
-type Item = { key: string; participant: StageParticipant; tile: VideoTile | null; kind: "camera" | "screen"; off: boolean } | { key: string; participant: null; tile: null; kind: "player"; off: false };
+type Item = { key: string; participant: StageParticipant; tile: VideoTile | null; kind: "camera" | "screen"; off: boolean } | { key: string; participant: null; tile: null; kind: "player" | "playerOff"; off: false };
 
 /**
  * Stage of a voice channel (M3): one tile per participant (camera or avatar) plus one per screen share.
@@ -63,7 +67,7 @@ type Item = { key: string; participant: StageParticipant; tile: VideoTile | null
  * The tile view can hide participants without video while any video is being sent; that choice is never stored.
  * Receive quality follows the tile size (adaptiveStream in the voice core); here the <video> only has to have the right size.
  */
-export function VoiceStage({ client, voice, channel, members, myPermissions, api, radio, radioStations, radioTitle, playerTile, playerPopped, onRestorePlayer, onToggleCamera, onToggleBlur, onLeave, onPopout, poppedIds, onRestore, detached, onToggleWindow }: Props) {
+export function VoiceStage({ client, voice, channel, members, myPermissions, api, radio, radioStations, radioTitle, playerTile, playerOff, onDismissPlayerOff, playerPopped, onRestorePlayer, onToggleCamera, onToggleBlur, onLeave, onPopout, poppedIds, onRestore, detached, onToggleWindow }: Props) {
   // Names from the server's member list (arrives via WS immediately on every rename), not from the LiveKit token,
   // which is only created on joining. Unknown identities (bots, "external") keep the LiveKit name.
   const participants = voice.participants.map((p) => {
@@ -93,6 +97,9 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
   }
   // A Twitch or YouTube source of the radio is shown like a screen share (user's decision); real shares come after it, so the newest of them wins the focus.
   if (playerTile) items.push({ key: `player:${playerTile}`, participant: null, tile: null, kind: "player", off: false });
+  // The same source while the user has the radio turned off: nothing plays and nothing is loaded, so a tile tells them that
+  // a video runs (user's wish). It is no video: it never takes the focus by itself and does not count for "video only".
+  else if (playerOff && channel.radio) items.push({ key: "player:off", participant: null, tile: null, kind: "playerOff", off: false });
   for (const t of voice.tiles.filter((t) => t.source === "screen")) {
     const participant = participants.find((p) => p.identity === t.identity);
     if (participant) items.push({ key: t.id, participant, tile: t, kind: "screen", off: false });
@@ -105,7 +112,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
   const screens = items.filter((i) => (i.kind === "screen" && !i.off) || i.kind === "player");
   const lastScreen = screens[screens.length - 1];
   // With "feature myself" off your own camera tile only becomes the large one by pinning it, or when nobody else is there.
-  const mayFeature = (i: Item) => featureSelfInSpeakerView || !i.participant?.isLocal;
+  const mayFeature = (i: Item) => i.kind !== "playerOff" && (featureSelfInSpeakerView || !i.participant?.isLocal);
   const focusKey = (pinned && items.some((i) => i.key === pinned) ? pinned : null)
     ?? lastScreen?.key
     ?? (lastSpeaker ? items.find((i) => i.kind === "camera" && i.participant.identity === lastSpeaker && mayFeature(i))?.key : undefined)
@@ -115,7 +122,8 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
     ?? items[0]?.key
     ?? null;
   const focus = items.find((i) => i.key === focusKey) ?? null;
-  const rest = items.filter((i) => i.key !== focusKey);
+  // The strip scrolls sideways with many participants: the notice that a video runs comes first, or nobody would see it there.
+  const rest = [...items.filter((i) => i.kind === "playerOff"), ...items.filter((i) => i.key !== focusKey && i.kind !== "playerOff")];
   const screenHint = explainScreenAudio(voice, platform.kind === "desktop" ? { audioPossible: platform.os === "windows" } : undefined);
   // Tile view: hide participants without video. Only while a video is being sent at all, and never stored: it is gone
   // with the last video and with the stage (user's requirement).
@@ -149,6 +157,10 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
     setMenu({ identity: item.participant.identity, trigger: event.currentTarget, x: event.clientX, y: event.clientY });
   };
 
+  const playerTileOf = (i: Extract<Item, { participant: null }>, big = false) => i.kind === "playerOff" && playerOff
+    ? <PlayerOffTile key={i.key} big={big} kind={playerOff} name={channel.radio?.name ?? ""} radio={radio} onDismiss={onDismissPlayerOff} />
+    : <PlayerTile key={i.key} big={big} popped={playerPopped} elsewhere={detached} onRestore={onRestorePlayer} />;
+
   return (
     <section className="stage">
       <header className="chat-head">
@@ -180,17 +192,17 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
       ) : layout === "grid" || !focus ? (
         <div className="stage-grid" ref={grid.ref}>
           <div className="stage-grid-inner" style={{ gridTemplateColumns: `repeat(${grid.cols}, ${grid.tileWidth}px)` }}>
-            {gridItems.map((i) => i.kind === "player" ? <PlayerTile key={i.key} popped={playerPopped} elsewhere={detached} onRestore={onRestorePlayer} />
+            {gridItems.map((i) => i.participant === null ? playerTileOf(i)
               : <Tile key={i.key} item={i} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} onMenu={openMenu} pinned={false} onClick={() => focusOn(i.key)} />)}
           </div>
         </div>
       ) : (
         <div className="stage-focus">
-          <div className="stage-main">{focus.kind === "player" ? <PlayerTile big popped={playerPopped} elsewhere={detached} onRestore={onRestorePlayer} />
+          <div className="stage-main">{focus.participant === null ? playerTileOf(focus, true)
             : <Tile item={focus} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} onMenu={openMenu} big pinned={pinned === focus.key} onClick={unfocus} />}</div>
           {rest.length > 0 && (
             <div className="stage-strip">
-              {rest.map((i) => i.kind === "player" ? <PlayerTile key={i.key} popped={playerPopped} elsewhere={detached} onRestore={onRestorePlayer} />
+              {rest.map((i) => i.participant === null ? playerTileOf(i)
                 : <Tile key={i.key} item={i} client={client} onPopout={onPopout} poppedIds={poppedIds} onRestore={onRestore} onMenu={openMenu} pinned={false} onClick={() => focusOn(i.key)} />)}
             </div>
           )}
@@ -271,6 +283,49 @@ function PlayerTile({ big, popped, elsewhere, onRestore }: { big?: boolean; popp
     <div className={`tile screen embed ${big ? "big" : ""}`}>
       {elsewhere ? <div className="tile-popped"><Icon name="radio" /><span>{t(popped ? "stage.poppedOut" : "stage.playerInMain")}</span></div>
         : popped ? <div className="tile-popped"><Icon name="external-link" /><span>{t("stage.poppedOut")}</span><button className="secondary small" onClick={onRestore}>{t("stage.restoreVideo")}</button></div> : <EmbedSlot />}
+    </div>
+  );
+}
+
+/**
+ * The radio plays a Twitch or YouTube source while the user has the radio turned off for themselves: no player and no
+ * connection (EmbedPlayer.tsx), so without this tile nothing would tell them that a video runs. It turns the radio back
+ * on: the button at the volume as it stands, the slider at the one it is dragged to. The slider applies when it is let go
+ * (the input's native "change"), not while it moves: turning the radio on replaces this tile with the player, which would
+ * take the slider away from under the pointer. From the keyboard every step is such a "change", so keys only set the
+ * value and Enter or the button turns the radio on. The x dismisses the tile until the next video starts (user's wish).
+ */
+function PlayerOffTile({ big, kind, name, radio, onDismiss }: { big: boolean; kind: "twitch" | "youtube"; name: string; radio: RadioPlayer; onDismiss: () => void }) {
+  const [percent, setPercent] = useState(() => Math.round(radio.state.volume * 100));
+  const slider = useRef<HTMLInputElement>(null);
+  const live = useRef({ percent, moved: false, byPointer: false });
+  live.current.percent = percent;
+  // A volume is only stored as the user's own once they set one (radioPlayer.ts): the button alone keeps the default.
+  const turnOn = useCallback(() => { if (live.current.moved) radio.setVolume(live.current.percent / 100); radio.setMuted(false); }, [radio]);
+  useEffect(() => {
+    const el = slider.current;
+    if (!el) return;
+    const released = () => { if (live.current.byPointer) { live.current.percent = Number(el.value); turnOn(); } };
+    el.addEventListener("change", released);
+    return () => el.removeEventListener("change", released);
+  }, [turnOn]);
+  const volumeLabel = t("radio.volume");
+  return (
+    <div className={`tile screen player-off ${big ? "big" : ""}`}>
+      <div className="tile-popped">
+        <Icon name="volume-x" />
+        <span className="player-off-title" title={name}>{t(kind === "twitch" ? "radio.offTileTwitch" : "radio.offTileYoutube", { name })}</span>
+        <span className="player-off-hint small">{t("radio.offTileHint")}</span>
+        <div className="user-volume-row">
+          <input ref={slider} type="range" min={0} max={100} step={1} value={percent} title={volumeLabel} aria-label={volumeLabel} aria-valuetext={`${percent} %`}
+            onPointerDown={() => { live.current.byPointer = true; }}
+            onKeyDown={(event) => { live.current.byPointer = false; if (event.key === "Enter") turnOn(); }}
+            onChange={(event) => { live.current.moved = true; setPercent(Number(event.target.value)); }} />
+          <output>{percent} %</output>
+        </div>
+        <button className="small" title={t("radio.unmute")} onClick={turnOn}><Icon name="volume-2" /> {t("radio.turnOn")}</button>
+      </div>
+      <button className="icon player-off-close" title={t("radio.offTileDismiss")} aria-label={t("radio.offTileDismiss")} onClick={onDismiss}><Icon name="x" /></button>
     </div>
   );
 }

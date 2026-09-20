@@ -4,7 +4,8 @@ import { createPortal } from "react-dom";
 import { TwitchControl, YoutubeControl, type EmbedControl } from "./embedControl";
 import { Icon } from "./Icon";
 import { t } from "./i18n";
-import { playerWindowUrl, readPlayerWindowMessage } from "./playerWindow";
+import { platform } from "./platform";
+import { playerFrameAllow, playerWindowUrl, readPlayerWindowMessage } from "./playerWindow";
 import { TWITCH_PLAYER_ORIGIN, twitchPlayerBox, twitchPlayerSrc } from "./twitch";
 import { YOUTUBE_PLAYER_ORIGIN, youtubePlayerSrc } from "./youtube";
 
@@ -13,15 +14,24 @@ import { YOUTUBE_PLAYER_ORIGIN, youtubePlayerSrc } from "./youtube";
  * App for as long as the voice channel plays such a source: moving an iframe in the DOM reloads it, and unmounting it with
  * the stage would cut the sound the moment the user looks at a text channel. So the tile in the voice stage only reserves
  * room (`EmbedSlot`) and the player lays itself over it, completely: no bar or label of ours (user's decision: a bar got
- * in the way of the player's controls, and the players show the title on hover by themselves). The one control of ours is
- * "open in a window of its own", shown on hover like on the video tiles. Without a slot on screen, or with one Twitch
+ * in the way of the player's controls, and the players show the title on hover by themselves). The controls of ours are
+ * "open in a window of its own" and an x that turns the radio off for oneself, shown on hover like on the video tiles. Without a slot on screen, or with one Twitch
  * would not play in (it pauses a player that is too small), it floats in the bottom right corner (twitch.ts `twitchPlayerBox`).
  */
-export type EmbedSource = { kind: "twitch"; channel: string } | { kind: "youtube"; videoId: string };
-export const embedKeyOf = (source: EmbedSource | null): string | null => source === null ? null : source.kind === "twitch" ? `twitch:${source.channel}` : `youtube:${source.videoId}`;
+/** `queue`: the YouTube playlist the video belongs to (protocol RadioQueue), null = a single video. */
+export type EmbedSource = { kind: "twitch"; channel: string } | { kind: "youtube"; videoId: string; queue: string | null };
+/**
+ * What one player (one iframe, one pop-out window) stands for. A queue is ONE player that loads video after video: a new
+ * iframe per video would close the pop-out window with every song and would have to win its sound from the browser again.
+ */
+export const embedKeyOf = (source: EmbedSource | null): string | null => source === null ? null : source.kind === "twitch" ? `twitch:${source.channel}` : source.queue ? `youtube-queue:${source.queue}` : `youtube:${source.videoId}`;
 
 /** Playing a video in step with everyone (YouTube): the shared state, the server's clock, and whether this viewer steers. */
-export type EmbedSync = { playback: RadioPlayback; clockOffset: number; canControl: boolean; publish: (playback: { playing: boolean; position: number; rate: number }) => Promise<unknown> };
+export type EmbedSync = {
+  playback: RadioPlayback; clockOffset: number; canControl: boolean; publish: (playback: { playing: boolean; position: number; rate: number }) => Promise<unknown>;
+  /** A queue: tell the server that this video is over (or cannot be played), so it moves on. null = a single video. */
+  ended: ((videoId: string) => void) | null;
+};
 
 const slots = new Set<HTMLElement>();
 
@@ -80,12 +90,13 @@ function largestSlot(): DOMRect | null {
  * else (embedControl.ts). Rendered only while the user has not turned the radio off for themselves: no iframe, no
  * connection to Twitch or YouTube, no tile (user's requirement).
  */
-export function EmbedPlayer({ source, name, volume, muted, popout, sync, onNotice }: { source: EmbedSource; name: string; volume: number; muted: boolean; popout: PlayerWindow; sync: EmbedSync | null; onNotice: (text: string) => void }) {
+export function EmbedPlayer({ source, name, volume, muted, popout, sync, onNotice, onTurnOff }: { source: EmbedSource; name: string; volume: number; muted: boolean; popout: PlayerWindow; sync: EmbedSync | null; onNotice: (text: string) => void; onTurnOff: () => void }) {
   const box = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const control = useRef<EmbedControl | null>(null);
-  const live = useRef({ volume, muted, sync, onNotice });
-  live.current = { volume, muted, sync, onNotice };
+  const videoId = source.kind === "youtube" ? source.videoId : "";
+  const live = useRef({ volume, muted, sync, onNotice, videoId });
+  live.current = { volume, muted, sync, onNotice, videoId };
   const key = embedKeyOf(source)!;
   const win = popout.win;
   const origin = source.kind === "twitch" ? TWITCH_PLAYER_ORIGIN : YOUTUBE_PLAYER_ORIGIN;
@@ -142,11 +153,19 @@ export function EmbedPlayer({ source, name, volume, muted, popout, sync, onNotic
       publish: (playback) => live.current.sync ? live.current.sync.publish(playback) : Promise.reject(new Error("no sync")),
       onCorrected: () => notice(t("radio.syncFollowOnly")),
       onSoundBlocked: soundBlocked,
-      onError: (kind) => live.current.onNotice(t(kind === "embedding" ? "radio.errNotEmbeddable" : kind === "missing" ? "radio.errUnknownVideo" : "radio.errPlayer")),
+      onError: (kind) => {
+        // In a queue a video nobody can play is skipped instead (the server checks each video before it is on, but YouTube's
+        // oEmbed does not know every ban). Reported by those who may skip anyway: for a single viewer it may be their region.
+        const s = live.current.sync;
+        if (kind !== "other" && s?.ended && s.canControl && source.kind === "youtube") s.ended(live.current.videoId);
+        else live.current.onNotice(t(kind === "embedding" ? "radio.errNotEmbeddable" : kind === "missing" ? "radio.errUnknownVideo" : "radio.errPlayer"));
+      },
+      onEnded: (videoId) => live.current.sync?.ended?.(videoId),
     });
     control.current = c;
     c.setAudio(live.current.volume, live.current.muted);
     if (c instanceof YoutubeControl && live.current.sync) c.setShared(live.current.sync.playback);
+    if (c instanceof YoutubeControl) c.setVideo(live.current.videoId); // what the iframe was just made with
     if (win) c.start(); // in the page: once the iframe has loaded (onLoad below)
 
     const onMessage = (event: MessageEvent) => {
@@ -170,15 +189,21 @@ export function EmbedPlayer({ source, name, volume, muted, popout, sync, onNotic
   useEffect(() => { control.current?.setAudio(volume, muted); }, [volume, muted]);
   const playback = sync?.playback ?? null;
   useEffect(() => { if (playback && control.current instanceof YoutubeControl) control.current.setShared(playback); }, [playback]);
+  // The queue moved on: the same player loads the next video (after the shared state above, which says where it starts).
+  useEffect(() => { if (videoId && control.current instanceof YoutubeControl) control.current.setVideo(videoId); }, [videoId]);
 
   if (win) return null;
-  const openWindow = () => { if (!popout.open(playerWindowUrl(buildSrc(), name))) onNotice(t("stage.popupBlocked")); };
+  // The desktop app's shell puts the player's sound on the radio's output device (App.tsx); the frame needs a policy for that.
+  const routable = platform.media.setPlayerOutput !== null;
+  const openWindow = () => { if (!popout.open(playerWindowUrl(buildSrc(), name, routable))) onNotice(t("stage.popupBlocked")); };
   return createPortal(
     <div ref={box} className={`embed-player ${source.kind}`}>
       <iframe ref={frame} key={src} src={src} title={t("radio.playerFrame", { name })} onLoad={() => control.current?.start()}
-        allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" />
+        allow={playerFrameAllow(routable)} allowFullScreen referrerPolicy="strict-origin-when-cross-origin" />
       <div className="tile-window-actions">
         <button className="icon" title={t("stage.popout")} aria-label={t("stage.popout")} onClick={openWindow}><Icon name="external-link" /></button>
+        {/* The radio off for me, without the way through the radio menu (user's wish); the stage's tile then offers to turn it back on. */}
+        <button className="icon" title={t("radio.mute")} aria-label={t("radio.mute")} onClick={onTurnOff}><Icon name="x" /></button>
       </div>
     </div>, document.body,
   );

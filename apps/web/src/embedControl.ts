@@ -1,7 +1,7 @@
-import type { RadioPlayback } from "@squorli/protocol";
+import { radioPositionAt, type RadioPlayback } from "@squorli/protocol";
 import { isTwitchPlayerSignal, twitchAudioCommands, twitchIsIdle, twitchPlayCommand, twitchPlaybackEvent } from "./twitch";
 import { decideSync, type PlayerReport } from "./watchSync";
-import { YT, readYoutubeMessage, youtubeAudioCommands, youtubeCommand, youtubeErrorKind, youtubeListening } from "./youtube";
+import { YT, isYoutubeApiChange, readYoutubeMessage, youtubeAudioCommands, youtubeCaptionsOff, youtubeCommand, youtubeErrorKind, youtubeListening, youtubeWatchApiChange } from "./youtube";
 
 /**
  * What drives an embedded player (Twitch, YouTube) once its iframe exists, without React: the component (EmbedPlayer.tsx)
@@ -113,6 +113,8 @@ export type YoutubeControlOptions = {
   onError: (kind: "embedding" | "missing" | "other") => void;
   /** The browser refuses to start the player with sound: it was started muted, the next click in the page turns the sound on. */
   onSoundBlocked: () => void;
+  /** The video is over (told once per video): a queue moves on. */
+  onEnded?: (videoId: string) => void;
 };
 
 const LISTEN_EVERY_MS = 250, LISTEN_TRIES = 240; // a minute: the player's page may load slowly
@@ -125,6 +127,10 @@ const PUBLISH_EVERY_MS = 300;
 const IDLE_CHECK_MS = 1000;
 /** Should be playing, was told to several times, still is not: the browser refuses the sound (see RESTART_TRIES above). */
 const SOUND_BLOCKED_AFTER_MS = 4000;
+/** After telling the player to load another video, give it this long before telling it again. */
+const LOAD_AGAIN_MS = 4000;
+/** The shared place counts as "behind the end" this many seconds after it: a player may run behind by the sync tolerance, and its own end comes first then. */
+const OVER_AFTER = 3;
 
 /** YouTube: our volume, and the video kept in step with everyone (watchSync.ts). */
 export class YoutubeControl implements EmbedControl {
@@ -149,6 +155,12 @@ export class YoutubeControl implements EmbedControl {
   private publishFrom = 0;
   private publishing = false;
   private closed = false;
+  /** A queue plays its videos in ONE player (a new iframe per video would close the pop-out window and may be refused its sound): the video that should be on, and the one the player has. */
+  private video: string | null = null;
+  private loaded: string | null = null;
+  private loadAgainFrom = 0;
+  private endedFor: string | null = null;
+  private duration = 0;
 
   constructor(private readonly link: EmbedLink, private readonly options: YoutubeControlOptions, private readonly now: () => number = () => Date.now()) {}
 
@@ -171,6 +183,24 @@ export class YoutubeControl implements EmbedControl {
     if (this.answered) this.sendAudio();
   }
 
+  /** The video that should be on. The first one is what the iframe was made with; a later one is loaded into the same player. */
+  setVideo(videoId: string): void {
+    if (this.video === null) this.loaded = videoId;
+    this.video = videoId;
+    this.loadVideo();
+  }
+
+  private loadVideo() {
+    if (!this.answered || this.closed || this.video === null || this.loaded === this.video || this.now() < this.loadAgainFrom) return;
+    const at = this.shared ? Math.max(0, radioPositionAt(this.shared, this.options.serverNow())) : 0;
+    this.link.post(youtubeCommand("loadVideoById", this.video, Math.floor(at)));
+    // A new video in the old player: nothing it reported so far applies any more.
+    this.loadAgainFrom = this.now() + LOAD_AGAIN_MS;
+    this.settleUntil = this.now() + SETTLE_MS;
+    this.current = {}; this.stable = null; this.published = null; this.duration = 0;
+    this.failed = false; this.force = true; this.playedSinceCommand = false; this.notPlayingSince = null;
+  }
+
   /** Where the video stands for everyone, from the server. Our own publication coming back is no news. */
   setShared(playback: RadioPlayback): void {
     const before = this.fromServer;
@@ -178,6 +208,7 @@ export class YoutubeControl implements EmbedControl {
     if (before && before.playing === playback.playing && before.position === playback.position && before.rate === playback.rate && before.at === playback.at) return;
     const mine = this.published;
     this.shared = playback;
+    this.endedFor = null; // a new state from the server: a queue of one video comes around to the same one
     if (mine && mine.playing === playback.playing && mine.position === playback.position && mine.rate === playback.rate) return;
     this.force = true;
     this.settleUntil = 0;
@@ -185,13 +216,21 @@ export class YoutubeControl implements EmbedControl {
   }
 
   onMessage(data: unknown): void {
+    // Every video starts without captions (youtube.ts): the player's captions part is there now, for this video.
+    if (isYoutubeApiChange(data)) { if (!this.closed) this.link.post(youtubeCaptionsOff()); return; }
     const info = readYoutubeMessage(data);
     if (!info || this.closed) return;
-    if (!this.answered) { this.answered = true; this.stopListening(); this.sendAudio(); }
+    if (!this.answered) { this.answered = true; this.stopListening(); this.sendAudio(); this.link.post(youtubeWatchApiChange()); }
+    if (info.videoId !== undefined) { if (info.videoId !== this.loaded) { this.current = {}; this.duration = 0; } this.loaded = info.videoId; }
+    if (info.duration !== undefined) this.duration = info.duration;
+    this.loadVideo();
+    // What the player says about another video than the one that should be on is of no interest (it is being replaced).
+    if (this.video !== null && this.loaded !== this.video) return;
     // A video that cannot be played: say so once, and stop nudging the player (it shows YouTube's own message).
     if (info.error !== undefined) { if (!this.failed) this.options.onError(youtubeErrorKind(info.error)); this.failed = true; return; }
     this.lastReportAt = this.now();
     if (info.state !== undefined) this.current.state = info.state;
+    if (info.state === YT.ENDED) this.tellEnded();
     if (info.state === YT.PLAYING) { this.playedSinceCommand = true; this.playedEver = true; }
     const st = this.current.state;
     if (st === YT.PLAYING || st === YT.BUFFERING || st === YT.ENDED) this.notPlayingSince = null;
@@ -231,6 +270,12 @@ export class YoutubeControl implements EmbedControl {
     if (this.idleTimer !== null) { clearInterval(this.idleTimer); this.idleTimer = null; }
   }
 
+  private tellEnded() {
+    if (this.loaded === null || this.endedFor === this.loaded) return;
+    this.endedFor = this.loaded;
+    this.options.onEnded?.(this.loaded);
+  }
+
   private stopListening() { if (this.listenTimer !== null) { clearInterval(this.listenTimer); this.listenTimer = null; } }
   private sendAudio() { for (const command of youtubeAudioCommands(this.audio.volume, this.audio.muted || this.soundBlocked)) this.link.post(command); }
 
@@ -238,6 +283,10 @@ export class YoutubeControl implements EmbedControl {
     const { state, time } = this.current;
     if (!this.shared || state === undefined || time === undefined || this.closed || this.failed) return;
     const report: PlayerReport = { state, time, rate: this.current.rate ?? 1, live: this.current.live ?? false };
+    // The video is over for everyone although nobody's player said so (nobody listened, or this player came later): the
+    // same as an end seen here. Never seek there: YouTube answers a place behind the end by starting over (seen in the
+    // browser check, a restart every few seconds).
+    if (!report.live && this.duration > 0 && radioPositionAt(this.shared, this.options.serverNow()) >= this.duration + OVER_AFTER) { this.tellEnded(); return; }
     const settled = state === YT.PLAYING || state === YT.PAUSED;
     const now = this.now();
     if (now < this.settleUntil || this.publishing || now < this.publishFrom) { if (settled) this.stable = report; return; }

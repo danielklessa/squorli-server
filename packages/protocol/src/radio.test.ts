@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Channel, RADIO_IDLE_STOP_MS, ServerEvent, ServerSettings, SetRadioPlaybackRequest, UpdateSettingsRequest, radioPositionAt, twitchChannelOf, youtubeVideoOf } from "./index";
+import { Channel, RADIO_IDLE_STOP_MS, ServerEvent, ServerSettings, SetRadioPlaybackRequest, UpdateSettingsRequest, AdvanceRadioRequest, ChannelRadio, SetChannelRadioRequest, radioPositionAt, twitchChannelOf, youtubePlaylistOf, youtubeVideoOf } from "./index";
 
 const U1 = "6f1c2a4e-1b2c-4d3e-8f90-123456789abc";
 
@@ -21,6 +21,27 @@ describe("radio sources", () => {
       expect(youtubeVideoOf(url), url).toBeNull();
     }
     expect(twitchChannelOf("https://www.youtube.com/watch?v=aqz-KE-bpKQ")).toBeNull();
+  });
+
+  it("recognizes a YouTube playlist, with or without the video to start at", () => {
+    expect(youtubePlaylistOf("https://www.youtube.com/playlist?list=PLOU2XLYxmsIJGErt5rrCqaSGTMyyqNt2H")).toEqual({ listId: "PLOU2XLYxmsIJGErt5rrCqaSGTMyyqNt2H", videoId: null });
+    expect(youtubePlaylistOf("https://music.youtube.com/watch?v=aqz-KE-bpKQ&list=PLOU2XLYxmsIJGErt5rrCqaSGTMyyqNt2H&index=3")).toEqual({ listId: "PLOU2XLYxmsIJGErt5rrCqaSGTMyyqNt2H", videoId: "aqz-KE-bpKQ" });
+    expect(youtubePlaylistOf("https://youtu.be/aqz-KE-bpKQ?list=PLOU2XLYxmsIJGErt5rrCqaSGTMyyqNt2H")?.videoId).toBe("aqz-KE-bpKQ");
+    for (const url of ["https://www.youtube.com/watch?v=aqz-KE-bpKQ", "https://www.youtube.com/playlist?list=PLx", "https://www.youtube.com/playlist?list=bad id with spaces", "https://www.youtube.com/@LofiGirl?list=PLOU2XLYxmsIJGErt5rrCqaSGTMyyqNt2H",
+      "https://youtu.be/?list=PLOU2XLYxmsIJGErt5rrCqaSGTMyyqNt2H", "https://example.org/playlist?list=PLOU2XLYxmsIJGErt5rrCqaSGTMyyqNt2H", "nonsense"]) expect(youtubePlaylistOf(url), url).toBeNull();
+  });
+
+  it("takes the playlist's videos with the request and carries the queue on the channel's radio", () => {
+    expect(SetChannelRadioRequest.safeParse({ url: "https://www.youtube.com/playlist?list=PLOU2XLYxmsIJGErt5rrCqaSGTMyyqNt2H", videoIds: ["aqz-KE-bpKQ", "jfKfPfyJRdk"] }).success).toBe(true);
+    expect(SetChannelRadioRequest.safeParse({ stationId: U1, videoIds: ["aqz-KE-bpKQ"] }).success).toBe(true);
+    expect(SetChannelRadioRequest.safeParse({ stationId: U1 }).success).toBe(true);
+    expect(SetChannelRadioRequest.safeParse({ url: "https://example.org/a", videoIds: ["too-short"] }).success).toBe(false);
+    expect(SetChannelRadioRequest.safeParse({ url: "https://example.org/a", videoIds: [] }).success).toBe(false);
+    expect(SetChannelRadioRequest.safeParse({ url: "https://example.org/a", videoIds: Array.from({ length: 201 }, () => "aqz-KE-bpKQ") }).success).toBe(false);
+    expect(AdvanceRadioRequest.parse({ from: "aqz-KE-bpKQ" })).toEqual({ from: "aqz-KE-bpKQ", step: 1, ended: false });
+    expect(AdvanceRadioRequest.safeParse({ from: "aqz-KE-bpKQ", step: 2 }).success).toBe(false);
+    // A server from before the queue sends none.
+    expect(ChannelRadio.parse({ stationId: null, name: "x", streamUrl: "https://www.youtube.com/watch?v=aqz-KE-bpKQ", startedBy: null }).queue).toBeNull();
   });
 
   it("moves a playing video on from the server's stamp and leaves a paused one where it is", () => {

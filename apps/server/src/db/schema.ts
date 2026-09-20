@@ -104,6 +104,8 @@ export const channels = pgTable("channels", {
   radioStartedBy: uuid("radio_started_by").references(() => users.id, { onDelete: "set null" }),
   /** Where a video source stands for everyone (protocol RadioPlayback; `at` = server time in ms). null for audio and Twitch. */
   radioPlayback: jsonb("radio_playback").$type<{ playing: boolean; position: number; rate: number; at: number }>(),
+  /** A YouTube playlist played as a queue (radio/queue.ts): its videos and which one is on; `radio_stream_url` is that video. null for everything else. */
+  radioQueue: jsonb("radio_queue").$type<{ listId: string; videoIds: string[]; index: number }>(),
 });
 
 export const roles = pgTable("roles", {

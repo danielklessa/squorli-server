@@ -14,7 +14,7 @@ export function toAccountSettings(s: VoiceSettings, locale: LocalePreference): A
     locale,
     voice: { mode: s.mode, pttKey: s.pttKey, vadThreshold: s.vadThreshold, vadHangoverMs: s.vadHangoverMs },
     camera: { quality: s.cameraQuality, blur: s.cameraBlur },
-    sounds: { selfJoin: s.sounds.selfJoin, selfLeave: s.sounds.selfLeave, peerJoin: s.sounds.peerJoin, peerLeave: s.sounds.peerLeave, volume: s.sounds.volume },
+    sounds: { selfJoin: s.sounds.selfJoin, selfLeave: s.sounds.selfLeave, peerJoin: s.sounds.peerJoin, peerLeave: s.sounds.peerLeave, message: s.sounds.message, volume: s.sounds.volume },
     stage: { featureSelf: s.featureSelfInSpeakerView },
   };
 }
@@ -25,13 +25,19 @@ export function applyAccountSettings(local: VoiceSettings, remote: AccountSettin
     ...local,
     mode: remote.voice.mode, pttKey: remote.voice.pttKey, vadThreshold: remote.voice.vadThreshold, vadHangoverMs: remote.voice.vadHangoverMs,
     cameraQuality: remote.camera.quality, cameraBlur: remote.camera.blur,
-    sounds: { ...remote.sounds },
+    // An account stored before the message cue existed (or by a directory that does not know it) says nothing about it: this device's value stays.
+    sounds: { ...remote.sounds, message: remote.sounds.message ?? local.sounds.message },
     featureSelfInSpeakerView: remote.stage.featureSelf,
   };
 }
 
-/** Same settings? Compared in a fixed field order, so the key order of a parsed object does not matter. */
-export function sameAccountSettings(a: AccountSettings, b: AccountSettings): boolean {
+/**
+ * Same settings? Compared in a fixed field order, so the key order of a parsed object does not matter. `tolerateMissing`: a
+ * field one side does not have at all (`sounds.message` from an older account) counts as equal; for "does the account's copy
+ * change anything here", not for "must this be pushed".
+ */
+export function sameAccountSettings(a: AccountSettings, b: AccountSettings, tolerateMissing = false): boolean {
+  if (!(tolerateMissing && (a.sounds.message === undefined || b.sounds.message === undefined)) && a.sounds.message !== b.sounds.message) return false;
   const canon = (s: AccountSettings) => JSON.stringify([
     s.locale, s.voice.mode, s.voice.pttKey, s.voice.vadThreshold, s.voice.vadHangoverMs, s.camera.quality, s.camera.blur,
     s.sounds.selfJoin, s.sounds.selfLeave, s.sounds.peerJoin, s.sounds.peerLeave, s.sounds.volume, s.stage.featureSelf,

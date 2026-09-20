@@ -1,4 +1,4 @@
-import { RadioUrl, type Channel, type RadioStation } from "@squorli/protocol";
+import { RadioUrl, youtubePlaylistOf, type Channel, type RadioStation } from "@squorli/protocol";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, type ServerApi } from "./api";
 import { ContextMenu, type MenuAnchor } from "./ContextMenu";
@@ -6,6 +6,7 @@ import { Icon } from "./Icon";
 import { t } from "./i18n";
 import { fitsInstead } from "./radioLabel";
 import type { RadioPlayer, RadioState } from "./voice/radioPlayer";
+import { resolveYoutubePlaylist } from "./youtubePlaylist";
 
 function explain(err: unknown): string {
   const code = err instanceof ApiError ? err.code : null;
@@ -14,6 +15,7 @@ function explain(err: unknown): string {
   if (code === "radio_forbidden_host") return t("radio.errForbiddenHost");
   if (code === "radio_unknown_video") return t("radio.errUnknownVideo");
   if (code === "radio_not_embeddable") return t("radio.errNotEmbeddable");
+  if (code === "radio_playlist_unresolved") return t("radio.errPlaylist");
   if (code === "forbidden") return t("radio.errForbidden");
   return err instanceof Error ? err.message : String(err);
 }
@@ -45,6 +47,21 @@ export function RadioControl({ api, player, channel, stations, nowPlaying, canCo
     setBusy(true); setError(null);
     try { await fn(); } catch (err) { setError(explain(err)); } finally { setBusy(false); }
   };
+  /**
+   * A YouTube playlist: this client reads its videos from YouTube's player and hands them to the server, which plays them
+   * as a queue (youtubePlaylist.ts). An address that also names a video still plays that one when the list cannot be read.
+   */
+  const [readingList, setReadingList] = useState(false);
+  const start = (address: string, send: (videoIds?: string[]) => Promise<unknown>) => act(async () => {
+    const list = youtubePlaylistOf(address);
+    if (!list) return send();
+    setReadingList(true);
+    const videoIds = await resolveYoutubePlaylist(list.listId, list.videoId).finally(() => setReadingList(false));
+    if (!videoIds && !list.videoId) throw new Error(t("radio.errPlaylist"));
+    return send(videoIds ?? undefined);
+  });
+  const queue = playing?.queue ?? null;
+  const skip = (step: 1 | -1) => { if (playing?.youtubeVideo) void act(() => api.advanceRadio(channel.id, { from: playing.youtubeVideo!, step })); };
   const percent = Math.round(radio.volume * 100);
   const volumeLabel = t("radio.volume");
   const tooltip = !playing ? t("radio.button") : title ? t("radio.buttonPlaying", { name: playing.name, title }) : t("radio.buttonOn", { name: playing.name });
@@ -64,6 +81,15 @@ export function RadioControl({ api, player, channel, stations, nowPlaying, canCo
             <div><strong>{playing ? playing.name : t("radio.title")}</strong><span className="muted small">{playing ? (video && !radio.muted ? t(video === "twitch" ? "radio.statusTwitch" : "radio.statusYoutube") : statusText(radio)) : t("radio.nothingPlaying")}</span></div>
           </div>
           {title && <div className="radio-track" role="presentation"><span className="muted small">{t("radio.nowPlaying")}</span><span>{title}</span></div>}
+          {queue && (
+            <div className="radio-queue" role="group" aria-label={t("radio.queue")}>
+              <span className="muted small">{t("radio.queuePosition", { n: queue.index + 1, total: queue.length })}</span>
+              {canControl && <>
+                <button role="menuitem" className="icon" disabled={busy} title={t("radio.queuePrevious")} aria-label={t("radio.queuePrevious")} onClick={() => skip(-1)}><Icon name="skip-back" /></button>
+                <button role="menuitem" className="icon" disabled={busy} title={t("radio.queueNext")} aria-label={t("radio.queueNext")} onClick={() => skip(1)}><Icon name="skip-forward" /></button>
+              </>}
+            </div>
+          )}
           {video === "youtube" && !radio.muted && <div className="radio-track" role="presentation"><span className="muted small">{t(canControl ? "radio.syncControl" : "radio.syncFollow")}</span></div>}
           {playing && !video && (radio.status === "blocked" || radio.status === "error") && (
             <button role="menuitem" onClick={() => player.resume()}><Icon name={radio.status === "blocked" ? "play" : "rotate-ccw"} /> {radio.status === "blocked" ? t("dock.unblockAudio") : t("radio.retry")}</button>
@@ -89,17 +115,18 @@ export function RadioControl({ api, player, channel, stations, nowPlaying, canCo
               <span className="muted small">{t("radio.stationsForAll")}</span>
               {stations.length === 0 && <p className="muted small">{t("radio.noStations")}</p>}
               {stations.map((s) => (
-                <button key={s.id} role="menuitemradio" aria-checked={playing?.stationId === s.id} disabled={busy} onClick={() => { void act(() => api.startRadio(channel.id, s.id)); }}>
+                <button key={s.id} role="menuitemradio" aria-checked={playing?.stationId === s.id} disabled={busy} onClick={() => { void start(s.url, (videoIds) => api.startRadio(channel.id, s.id, videoIds)); }}>
                   <Icon name={playing?.stationId === s.id ? "check" : "play"} /> <span>{s.name}</span>
                 </button>
               ))}
               {/* Any address instead of a station. The field keeps its keys to itself: the menu would take arrows, Home and End. */}
-              <form className="radio-url" onSubmit={(event) => { event.preventDefault(); if (urlOk && !busy) void act(async () => { await api.startRadioUrl(channel.id, url.trim()); setUrl(""); }); }}>
+              <form className="radio-url" onSubmit={(event) => { event.preventDefault(); if (urlOk && !busy) void start(url.trim(), async (videoIds) => { await api.startRadioUrl(channel.id, url.trim(), videoIds); setUrl(""); }); }}>
                 <input type="url" inputMode="url" value={url} maxLength={2048} placeholder={t("radio.urlPlaceholder")} aria-label={t("radio.urlLabel")} title={t("radio.urlLabel")}
                   onChange={(event) => setUrl(event.target.value)} onKeyDown={(event) => { if (event.key !== "Escape" && event.key !== "Tab") event.stopPropagation(); }} />
                 <button type="submit" className="icon" disabled={!urlOk || busy} title={t("radio.urlPlay")} aria-label={t("radio.urlPlay")}><Icon name="play" /></button>
               </form>
               {url.trim() !== "" && !urlOk && <span className="error small">{t("admin.radio.invalidUrl")}</span>}
+              {readingList && <span className="muted small" role="status">{t("radio.readingPlaylist")}</span>}
               {playing && <button role="menuitem" className="danger" disabled={busy} onClick={() => { void act(() => api.stopRadio(channel.id)); }}><Icon name="square" /> {t("radio.stop")}</button>}
             </div>
           )}

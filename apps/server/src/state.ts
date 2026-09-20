@@ -34,7 +34,7 @@ export async function loadChannels(db: Db): Promise<Channel[]> {
   return rows.map(({ c, stationName }) => ({
     id: c.id, kind: c.kind, name: c.name, topic: c.topic, categoryId: c.categoryId, position: c.position, audioBitrate: c.audioBitrate, audioStereo: c.audioStereo,
     // On while there is something to play. The name: the station's (current one), else the one stored for a typed address.
-    radio: c.radioStreamUrl ? { stationId: stationName !== null ? c.radioStationId : null, name: stationName ?? c.radioName ?? radioHostOf(c.radioStreamUrl), streamUrl: c.radioStreamUrl, startedBy: c.radioStartedBy, twitchChannel: twitchChannelOf(c.radioStreamUrl), ...youtubeRadio(c.radioStreamUrl, c.radioPlayback) } : null,
+    radio: c.radioStreamUrl ? { stationId: stationName !== null ? c.radioStationId : null, name: stationName ?? c.radioName ?? radioHostOf(c.radioStreamUrl), streamUrl: c.radioStreamUrl, startedBy: c.radioStartedBy, twitchChannel: twitchChannelOf(c.radioStreamUrl), ...youtubeRadio(c.radioStreamUrl, c.radioPlayback), queue: c.radioQueue ? { listId: c.radioQueue.listId, index: c.radioQueue.index, length: c.radioQueue.videoIds.length } : null } : null,
   }));
 }
 

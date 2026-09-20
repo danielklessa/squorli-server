@@ -13,7 +13,7 @@ import { DOWNLOAD_URL, describeUpdate, useUpdateState } from "./appUpdates";
 import { idleDetectionSupported, idleDetectionWanted, setIdleDetection } from "./idleDetection";
 import { boostLimits } from "./voice/micBoost";
 import { saveVoiceSettings, type VoiceSettings } from "./voice/settings";
-import { SOUND_CUES, type SoundCue, type SoundSettings } from "./voice/sounds";
+import { VOICE_CUES, type SoundCue, type SoundSettings } from "./voice/sounds";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 
@@ -38,6 +38,7 @@ const SOUND_LABELS: Record<SoundCue, string> = {
   selfLeave: t("settings.soundSelfLeave"),
   peerJoin: t("settings.soundPeerJoin"),
   peerLeave: t("settings.soundPeerLeave"),
+  message: t("settings.soundMessage"),
 };
 
 const fmt = fmtDateTime;
@@ -90,6 +91,9 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
   const [lookRestart, setLookRestart] = useState(() => windowLook?.state().needsRestart ?? false);
   const trayPref = platform.window.tray;
   const [closeToTray, setCloseToTray] = useState(() => trayPref?.closeToTray() ?? false);
+  const autostartPref = platform.window.autostart;
+  const [autostart, setAutostart] = useState(() => autostartPref?.enabled() ?? false);
+  const [autostartBackground, setAutostartBackground] = useState(() => autostartPref?.background?.get() ?? true);
   const changeLook = (next: WindowAppearance) => { setLook(next); void windowLook?.set(next).then((s) => { setLook(s.appearance); setLookRestart(s.needsRestart); }); };
   const [globalName, setGlobalName] = useState(directoryAccount?.displayName ?? "");
   // The global name arrives with the signed account status, possibly after the dialog opened: follow it until the user edits the field
@@ -276,6 +280,14 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
                     <span className="muted small">{t("settings.closeToTrayHint")}</span>
                   </>
                 )}
+                {autostartPref && (
+                  <>
+                    <h3>{t("settings.autostartHead")}</h3>
+                    <label className="check"><input type="checkbox" checked={autostart} onChange={(e) => { const on = e.target.checked; setAutostart(on); void autostartPref.set(on).then(setAutostart); }} /> {t("settings.autostart")}</label>
+                    {autostartPref.background && <label className="check"><input type="checkbox" checked={autostartBackground} disabled={!autostart} onChange={(e) => { const on = e.target.checked; setAutostartBackground(on); void autostartPref.background?.set(on).then(setAutostartBackground); }} /> {t("settings.autostartBackground")}</label>}
+                    <span className="muted small">{t("settings.autostartHint")}</span>
+                  </>
+                )}
                 <h3>{t("settings.speakerView")}</h3>
                 <label className="check">
                   <input type="checkbox" checked={settings.featureSelfInSpeakerView} onChange={(e) => update({ featureSelfInSpeakerView: e.target.checked })} />
@@ -390,7 +402,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
             {tab === "sounds" && (
               <>
                 <h3>{t("settings.soundsHead")}</h3>
-                {SOUND_CUES.map((cue) => (
+                {([...VOICE_CUES, null, "message"] as const).map((cue) => cue === null ? <h3 key="messages">{t("settings.soundsMessagesHead")}</h3> : (
                   <div className="row" key={cue}>
                     <label className="check">
                       <input type="checkbox" checked={settings.sounds[cue]}
@@ -401,6 +413,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
                       onClick={() => client.playSound(cue, true)}><Icon name="play" /></button>
                   </div>
                 ))}
+                <h3>{t("settings.soundsAllHead")}</h3>
                 <label className="stack">
                   {t("settings.soundVolume", { pct: Math.round(settings.sounds.volume * 100) })}
                   <input type="range" min={0} max={1} step={0.05} value={settings.sounds.volume}

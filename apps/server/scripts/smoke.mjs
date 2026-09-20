@@ -403,6 +403,33 @@ const pausedVideo = await radioOf();
 check("radio: play/pause/seek of a video needs CONTROL_RADIO, is stamped by the server, goes to everyone and stays on the channel", spb0 === 403 && spb1 === 400 && spb2 === 400 && spb3 === 200
   && evPlayback?.playback.playing === false && evPlayback.playback.rate === 1 && evPlayback.playback.at === setPlayback.playback.at
   && pausedVideo?.playback?.position === 123.5 && pausedVideo.playback.playing === false && pausedVideo.playback.at === setPlayback.playback.at, `${spb0} ${spb1} ${spb2} ${spb3}`);
+// A YouTube playlist: the client hands over the video ids, the server plays them as a queue (one video at a time, in step).
+const YT_LIST = "PLOU2XLYxmsIJGErt5rrCqaSGTMyyqNt2H", YT_ID2 = "jfKfPfyJRdk";
+const [sq0, sqNoIds] = await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: `https://www.youtube.com/playlist?list=${YT_LIST}` }, owner.token);
+const [sq1] = await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: `https://www.youtube.com/watch?v=${YT_ID2}&list=${YT_LIST}`, videoIds: [YT_ID, YT_ID2] }, owner.token);
+const queued = await radioOf();
+check("radio: a youtube playlist with the client's video ids becomes a queue that starts at the video the address names", sq0 === 400 && sqNoIds.error === "radio_playlist_unresolved" && sq1 === 200
+  && queued?.youtubeVideo === YT_ID2 && queued.queue?.listId === YT_LIST && queued.queue.index === 1 && queued.queue.length === 2 && queued.playback?.playing === true && queued.playback.position === 0, `${sq0} ${sq1} ${JSON.stringify(queued?.queue)}`);
+const [sqa0] = await api("POST", `/api/channels/${voiceCh.id}/radio/advance`, { from: YT_ID2 }, B.token);
+const [sqa1] = await api("POST", `/api/channels/${voiceCh.id}/radio/advance`, { from: YT_ID2, ended: true }, B.token); // not sitting in the channel
+const [sqa2, stale] = await api("POST", `/api/channels/${voiceCh.id}/radio/advance`, { from: YT_ID }, owner.token);
+const unmoved = await radioOf();
+const [sqa3, moved] = await api("POST", `/api/channels/${voiceCh.id}/radio/advance`, { from: YT_ID2 }, owner.token);
+const wrapped = await radioOf();
+check("radio: skipping needs CONTROL_RADIO, names the running video, and goes around the end of the list", sqa0 === 403 && sqa1 === 403 && sqa2 === 200 && stale.moved === false && unmoved?.queue?.index === 1
+  && sqa3 === 200 && moved.moved === true && wrapped?.youtubeVideo === YT_ID && wrapped.queue?.index === 0 && wrapped.streamUrl === `https://www.youtube.com/watch?v=${YT_ID}`, `${sqa0} ${sqa1} ${sqa2} ${sqa3} ${JSON.stringify(wrapped?.queue)}`);
+wsB.send({ type: "voice.join", channelId: voiceCh.id });
+await wsB.waitFor((e) => e.type === "voice.state" && e.channelId === voiceCh.id && e.members.some((m) => m.userId === B.userId));
+const [sqe0, endedMove] = await api("POST", `/api/channels/${voiceCh.id}/radio/advance`, { from: YT_ID, ended: true }, B.token);
+const [sqe1] = await api("POST", `/api/channels/${voiceCh.id}/radio/advance`, { from: YT_ID2, step: -1, ended: true }, B.token);
+const afterEnd = await radioOf();
+wsB.send({ type: "voice.leave" });
+await wsB.waitFor((e) => e.type === "voice.state" && e.channelId === voiceCh.id && !e.members.some((m) => m.userId === B.userId));
+check("radio: a listener in the channel reports the end of the video and the queue moves on, forwards only", sqe0 === 200 && endedMove.moved === true && sqe1 === 403 && afterEnd?.youtubeVideo === YT_ID2 && afterEnd.queue?.index === 1, `${sqe0} ${sqe1} ${JSON.stringify(afterEnd?.queue)}`);
+await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: `https://youtu.be/${YT_ID}` }, owner.token);
+const single = await radioOf();
+const [sqn0, noQueue] = await api("POST", `/api/channels/${voiceCh.id}/radio/advance`, { from: YT_ID }, owner.token);
+check("radio: a single video has no queue", single?.queue === null && sqn0 === 409 && noQueue.error === "no_queue", `${sqn0}`);
 await api("PUT", `/api/channels/${voiceCh.id}/radio`, { url: streamUrl }, owner.token);
 const [spb4, noPlayback] = await api("PUT", `/api/channels/${voiceCh.id}/radio/playback`, { playing: true, position: 1 }, owner.token);
 const [spb5] = await api("PUT", `/api/channels/${textCh.id}/radio/playback`, { playing: true, position: 1 }, owner.token);

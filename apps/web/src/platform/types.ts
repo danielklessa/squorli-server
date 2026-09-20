@@ -25,6 +25,12 @@ export interface PlatformMedia {
   takeScreenAudio(): Promise<MediaStreamTrack | null>;
   /** The share ended: end the platform's capture. */
   stopScreenAudio(): void;
+  /**
+   * Where the embedded players (Twitch, YouTube as the radio's source) play: the output device's LABEL (device ids differ
+   * per origin), null = the system's default. Only the desktop app can do that (its shell reaches into the player's frame);
+   * a browser page cannot route a foreign iframe's sound, there it is null and the players use the default device.
+   */
+  readonly setPlayerOutput: ((label: string | null) => void) | null;
 }
 
 /**
@@ -67,6 +73,14 @@ export interface Platform {
     readonly appearance: null | { readonly materials: readonly WindowMaterial[]; state(): AppearanceState; set(appearance: WindowAppearance): Promise<AppearanceState>; restart(): void };
     /** Tray icon of the desktop app: whether closing the window only hides it there; null = no tray. */
     readonly tray: null | { closeToTray(): boolean; setCloseToTray(on: boolean): Promise<boolean> };
+    /** Start the desktop app with the system; null = not available (browser, unpackaged app, an app older than the setting). */
+    readonly autostart: null | {
+      enabled(): boolean; set(on: boolean): Promise<boolean>;
+      /** How a start by the system looks: in the background (tray, or minimized where closing quits) or with the window opened; null = this app cannot be told (it always starts in the background). */
+      readonly background: null | { get(): boolean; set(on: boolean): Promise<boolean> };
+    };
+    /** Mark on the app's task bar and tray icon: how many direct messages and mentions wait; null = no such mark (browser, older app). */
+    readonly attention: null | { set(count: number): void };
     /** The window has no system title bar and the client draws its own (desktop); null = the browser's or system's frame. */
     readonly frame: null | { state(): WindowFrameState; subscribe(cb: (state: WindowFrameState) => void): () => void; control(action: WindowControl): void };
   };

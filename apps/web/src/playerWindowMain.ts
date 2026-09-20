@@ -1,4 +1,4 @@
-import { playerOriginOf, type PlayerWindowMessage } from "./playerWindow";
+import { playerFrameAllow, playerOriginOf, type PlayerWindowMessage } from "./playerWindow";
 
 /**
  * Script of player-window.html (see playerWindow.ts): shows the player named by `?src=` (Twitch's or YouTube's official
@@ -13,7 +13,7 @@ document.title = `${params.get("title") ?? ""} | Squorli`.replace(/^ \| /, "");
 
 if (origin && opener) {
   const frame = document.createElement("iframe");
-  frame.allow = "autoplay; fullscreen; encrypted-media; picture-in-picture";
+  frame.allow = playerFrameAllow(params.get("route") === "1");
   frame.allowFullscreen = true;
   frame.referrerPolicy = "strict-origin-when-cross-origin";
   frame.title = document.title;

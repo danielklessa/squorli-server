@@ -1,4 +1,4 @@
-import { CreateRadioStationRequest, Permission, SetChannelRadioRequest, SetRadioPlaybackRequest, UpdateRadioStationRequest, youtubeVideoOf, type RadioPlayback } from "@squorli/protocol";
+import { AdvanceRadioRequest, CreateRadioStationRequest, Permission, SetChannelRadioRequest, SetRadioPlaybackRequest, UpdateRadioStationRequest, youtubePlaylistOf, youtubeVideoOf, type RadioPlayback } from "@squorli/protocol";
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { requireMember } from "../auth/session";
@@ -6,15 +6,18 @@ import { can } from "../authz";
 import type { Db } from "../db";
 import { channels, radioStations } from "../db/schema";
 import type { Hub } from "../hub";
+import { pickPlayable } from "../radio/queue";
 import { resolveStreamUrl } from "../radio/resolve";
 import { lookupYoutube } from "../radio/youtube";
 import { broadcastStructure, loadSettings, radioHostOf } from "../state";
 import { compact } from "../util";
+import type { VoicePresence } from "../voice/presence";
 
 const Params = { type: "object", properties: { id: { type: "string", format: "uuid" } }, required: ["id"] } as const;
 const MAX_STATIONS = 200;
 /** Everything that says "a radio is on"; also what the idle stop (index.ts) writes. */
-export const RADIO_OFF = { radioStationId: null, radioStreamUrl: null, radioName: null, radioStartedBy: null, radioPlayback: null };
+export const RADIO_OFF = { radioStationId: null, radioStreamUrl: null, radioName: null, radioStartedBy: null, radioPlayback: null, radioQueue: null };
+const watchUrl = (videoId: string) => `https://www.youtube.com/watch?v=${videoId}`;
 
 /**
  * Web radio. The station list belongs to the server (MANAGE_SERVER); tuning a voice channel to a station or turning the
@@ -22,7 +25,9 @@ export const RADIO_OFF = { radioStationId: null, radioStreamUrl: null, radioName
  * only reads a station's playlist when the radio is started (radio/resolve.ts).
  */
 /** `onRadioChange`: whatever changed what a channel plays, the "now playing" reader (radio/metadata.ts) follows. */
-export async function registerRadioRoutes(app: FastifyInstance, db: Db, hub: Hub, onRadioChange: () => void) {
+export async function registerRadioRoutes(app: FastifyInstance, db: Db, hub: Hub, presence: VoicePresence, onRadioChange: () => void) {
+  /** Channels whose queue is being moved on right now: every listener's player reports the end of a video at the same moment. */
+  const advancing = new Set<string>();
   // ---- Stations
   app.post("/api/radio/stations", async (req, reply) => {
     const m = await requireMember(db, req, reply);
@@ -84,6 +89,25 @@ export async function registerRadioRoutes(app: FastifyInstance, db: Db, hub: Hub
     } else {
       source = { stationId: null, url: body.data.url, name: radioHostOf(body.data.url) };
     }
+    // A YouTube playlist is played as a queue kept here. Its videos come with the request: the sender's client read them from
+    // YouTube's player, the server has no key to ask YouTube with. Without them a playlist address that names a video plays
+    // that video alone (an older client), one that names none cannot be played.
+    const list = youtubePlaylistOf(source.url);
+    if (list && body.data.videoIds) {
+      const videoIds = body.data.videoIds;
+      const first = await pickPlayable(videoIds, Math.max(0, list.videoId ? videoIds.indexOf(list.videoId) : 0), 1, lookupYoutube);
+      if (!first) return reply.code(502).send({ error: "radio_unknown_video" });
+      const videoId = videoIds[first.index]!;
+      const start = videoId === list.videoId ? youtubeVideoOf(source.url)?.start ?? 0 : 0;
+      const [queued] = await db.update(channels).set({ radioStationId: source.stationId, radioStreamUrl: watchUrl(videoId), radioName: source.stationId === null ? first.title ?? source.name : null, radioStartedBy: m.actor.userId,
+        radioPlayback: { playing: true, position: start, rate: 1, at: Date.now() }, radioQueue: { listId: list.listId, videoIds, index: first.index } })
+        .where(and(eq(channels.id, req.params.id), eq(channels.kind, "voice"))).returning({ id: channels.id });
+      if (!queued) return reply.code(404).send({ error: "not_found" });
+      await broadcastStructure(db, hub, ["channels"]);
+      onRadioChange();
+      return { ok: true, streamUrl: watchUrl(videoId) };
+    }
+    if (list && !list.videoId) return reply.code(400).send({ error: "radio_playlist_unresolved" });
     const resolved = await resolveStreamUrl(source.url);
     if (!resolved.ok) return reply.code(502).send({ error: `radio_${resolved.error}` });
     // A YouTube video: its title as the name of a typed address, and it starts playing for everyone at the address's offset.
@@ -95,7 +119,7 @@ export async function registerRadioRoutes(app: FastifyInstance, db: Db, hub: Hub
       if (source.stationId === null && video.title) source.name = video.title;
       playback = { playing: true, position: youtube.start, rate: 1, at: Date.now() };
     }
-    const [row] = await db.update(channels).set({ radioStationId: source.stationId, radioStreamUrl: resolved.streamUrl, radioName: source.name, radioStartedBy: m.actor.userId, radioPlayback: playback })
+    const [row] = await db.update(channels).set({ radioStationId: source.stationId, radioStreamUrl: resolved.streamUrl, radioName: source.name, radioStartedBy: m.actor.userId, radioPlayback: playback, radioQueue: null })
       .where(and(eq(channels.id, req.params.id), eq(channels.kind, "voice"))).returning({ id: channels.id });
     if (!row) return reply.code(404).send({ error: "not_found" });
     await broadcastStructure(db, hub, ["channels"]);
@@ -123,6 +147,41 @@ export async function registerRadioRoutes(app: FastifyInstance, db: Db, hub: Hub
     if (!row) return reply.code(409).send({ error: "no_playback" });
     hub.broadcast({ type: "radio.playback", channelId: row.id, playback });
     return { ok: true, playback };
+  });
+
+  /**
+   * On to the next video of the queue (or back). Two senders: a member with CONTROL_RADIO skips, and every listener's player
+   * reports when the video is over (`ended`), for which sitting in the voice channel is enough: the server cannot know
+   * when a video ends (no API key, oEmbed names no length), and a queue that only moves on while a member with the
+   * permission listens would be no radio. What such a report can do at worst is skip the running video. `from` names the
+   * video the sender means: all players report the same end, only the first report moves the queue.
+   */
+  app.post<{ Params: { id: string } }>("/api/channels/:id/radio/advance", { schema: { params: Params } }, async (req, reply) => {
+    const m = await requireMember(db, req, reply);
+    if (!m) return;
+    const body = AdvanceRadioRequest.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    const { from, step, ended } = body.data;
+    const allowed = ended ? step === 1 && presence.channelOfUser(m.actor.userId) === req.params.id : can(m.actor, Permission.CONTROL_RADIO);
+    if (!allowed) return reply.code(403).send({ error: "forbidden" });
+    const [channel] = await db.select({ url: channels.radioStreamUrl, queue: channels.radioQueue, stationId: channels.radioStationId }).from(channels).where(and(eq(channels.id, req.params.id), eq(channels.kind, "voice"))).limit(1);
+    if (!channel) return reply.code(404).send({ error: "not_found" });
+    const queue = channel.queue;
+    if (!channel.url || !queue) return reply.code(409).send({ error: "no_queue" });
+    if (queue.videoIds[queue.index] !== from || advancing.has(req.params.id)) return { ok: true, moved: false };
+    advancing.add(req.params.id);
+    try {
+      const next = await pickPlayable(queue.videoIds, queue.index + step, step, lookupYoutube);
+      if (!next) return reply.code(502).send({ error: "radio_unknown_video" });
+      const url = watchUrl(queue.videoIds[next.index]!);
+      // A typed address is named after its video; a station keeps its name. Only while it is still the same video: a radio changed during the lookup keeps what it got.
+      const [row] = await db.update(channels).set({ radioStreamUrl: url, radioQueue: { ...queue, index: next.index }, radioPlayback: { playing: true, position: 0, rate: 1, at: Date.now() }, ...(channel.stationId === null ? { radioName: next.title ?? radioHostOf(url) } : {}) })
+        .where(and(eq(channels.id, req.params.id), eq(channels.radioStreamUrl, channel.url))).returning({ id: channels.id });
+      if (!row) return { ok: true, moved: false };
+      await broadcastStructure(db, hub, ["channels"]);
+      onRadioChange();
+      return { ok: true, moved: true };
+    } finally { advancing.delete(req.params.id); }
   });
 
   app.delete<{ Params: { id: string } }>("/api/channels/:id/radio", { schema: { params: Params } }, async (req, reply) => {

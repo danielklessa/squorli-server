@@ -197,8 +197,12 @@ export function directoryAvatarUrl(directoryUrl: string, publicKey: string, upda
 // account across chat servers and devices. The chat client keeps a per-device copy (its "local profile") so servers without a
 // directory keep working; with an account it reads the settings via /api/account/status and writes them with the signed
 // action `sound-settings`. The payload is the canonical line "<selfJoin><selfLeave><peerJoin><peerLeave>\n<volume>" (1/0 per cue).
+// `message` (20 September 2026): the cue for a new direct message or a message that mentions me. Optional on purpose, and NOT part
+// of the signed line of `sound-settings` (that one stays as older directories check it): a directory that predates the field drops
+// it when it stores the settings, and a client that gets settings without it keeps this device's value instead of a default.
 export const SoundSettings = z.object({
   selfJoin: z.boolean(), selfLeave: z.boolean(), peerJoin: z.boolean(), peerLeave: z.boolean(),
+  message: z.boolean().optional(),
   /** 0..1, applied on top of the per-tone gain. */
   volume: z.number().min(0).max(1),
 });

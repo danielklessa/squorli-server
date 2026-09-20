@@ -2,22 +2,26 @@
  * Short synthesized cues for joining and leaving a voice room (no asset files: the tones are generated
  * with Web Audio, so they cost nothing to ship and follow the selected output device).
  *
- * Four cues, each audibly different:
+ * Four cues for voice rooms, each audibly different:
  * - selfJoin / selfLeave: sine, wide interval (C5<->G5), the "you moved" pair.
  * - peerJoin / peerLeave: triangle, narrower interval (E5<->A5), shorter and quieter, the "someone else moved" pair.
  * Rising = arriving, falling = leaving.
+ * And one for a new direct message or a message that mentions me (`message`, 20 September 2026): the same high note twice,
+ * so it is neither an arrival nor a departure.
  */
 import type { SoundSettings as ProtocolSoundSettings } from "@squorli/protocol";
 import { contextNeedsResume } from "./gate";
 
-export type SoundCue = "selfJoin" | "selfLeave" | "peerJoin" | "peerLeave";
+export type SoundCue = "selfJoin" | "selfLeave" | "peerJoin" | "peerLeave" | "message";
 
-export const SOUND_CUES: readonly SoundCue[] = ["selfJoin", "selfLeave", "peerJoin", "peerLeave"];
+/** The cues of a voice room, in the order the settings offer them. */
+export const VOICE_CUES: readonly SoundCue[] = ["selfJoin", "selfLeave", "peerJoin", "peerLeave"];
+export const SOUND_CUES: readonly SoundCue[] = [...VOICE_CUES, "message"];
 
 /** One scheduled tone of a cue; times in seconds relative to the start of the cue. */
 export type Tone = { freq: number; start: number; dur: number; type: OscillatorType; gain: number };
 
-const C5 = 523.25, G5 = 783.99, E5 = 659.25, A5 = 880;
+const C5 = 523.25, G5 = 783.99, E5 = 659.25, A5 = 880, E6 = 1318.51;
 
 export const CUE_TONES: Record<SoundCue, readonly Tone[]> = {
   selfJoin: [
@@ -36,22 +40,27 @@ export const CUE_TONES: Record<SoundCue, readonly Tone[]> = {
     { freq: A5, start: 0, dur: 0.07, type: "triangle", gain: 0.28 },
     { freq: E5, start: 0.06, dur: 0.17, type: "triangle", gain: 0.28 },
   ],
+  message: [
+    { freq: E6, start: 0, dur: 0.09, type: "sine", gain: 0.4 },
+    { freq: E6, start: 0.14, dur: 0.26, type: "sine", gain: 0.4 },
+  ],
 };
 
 /** On/off per cue plus one common volume; part of the per-device voice settings and, with an account, stored in the directory (protocol schema). */
-export type SoundSettings = ProtocolSoundSettings;
+export type SoundSettings = Omit<ProtocolSoundSettings, "message"> & { message: boolean };
 
 export const DEFAULT_SOUND_SETTINGS: SoundSettings = {
   selfJoin: true,
   selfLeave: true,
   peerJoin: true,
   peerLeave: true,
+  message: true,
   volume: 0.6,
 };
 
 /** Merge stored (possibly older or partial) settings onto the defaults; out-of-range volumes fall back. */
 export function normalizeSoundSettings(raw: Partial<SoundSettings> | undefined | null): SoundSettings {
-  const s = { ...DEFAULT_SOUND_SETTINGS, ...(raw ?? {}) };
+  const s: SoundSettings = { ...DEFAULT_SOUND_SETTINGS, ...(raw ?? {}) };
   for (const cue of SOUND_CUES) if (typeof s[cue] !== "boolean") s[cue] = DEFAULT_SOUND_SETTINGS[cue];
   const v = Number(s.volume);
   s.volume = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : DEFAULT_SOUND_SETTINGS.volume;

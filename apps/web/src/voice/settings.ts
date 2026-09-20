@@ -4,6 +4,7 @@
  * follows the directory account (store.ts): a change here is reported to subscribers with its source, so the store can
  * push user changes to the directory and apply the account's settings without echoing them back.
  */
+import type { SoundSettings as ProtocolSoundSettings } from "@squorli/protocol";
 import { detectMobile } from "../platform/mobile";
 import { DEFAULT_MIC_BOOST, normalizeMicBoost, type MicBoostSettings } from "./micBoost";
 import { DEFAULT_SOUND_SETTINGS, normalizeSoundSettings, type SoundSettings } from "./sounds";
@@ -110,6 +111,6 @@ export function subscribeVoiceSettings(fn: (s: VoiceSettings, source: VoiceSetti
 }
 
 /** Same cue settings? (Order-independent field comparison; volumes compared exactly, the slider steps are 0.05.) */
-export function sameSoundSettings(a: SoundSettings, b: SoundSettings): boolean {
-  return a.selfJoin === b.selfJoin && a.selfLeave === b.selfLeave && a.peerJoin === b.peerJoin && a.peerLeave === b.peerLeave && a.volume === b.volume;
+export function sameSoundSettings(a: ProtocolSoundSettings, b: ProtocolSoundSettings): boolean {
+  return a.selfJoin === b.selfJoin && a.selfLeave === b.selfLeave && a.peerJoin === b.peerJoin && a.peerLeave === b.peerLeave && a.message === b.message && a.volume === b.volume;
 }

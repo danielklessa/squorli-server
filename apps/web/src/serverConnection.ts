@@ -74,6 +74,8 @@ export type ConnectionHooks = {
   /** Moderation (M3): moving to another voice channel (null = out) and stopping camera/screen. */
   onVoiceMoved: (channelId: string | null, by: string, reason: "afk" | null) => void;
   onVoiceStop: (what: { camera: boolean; screen: boolean }, by: string) => void;
+  /** A live message of someone else mentions me (also in the channel that is open: the store knows whether the user looks at it). */
+  onMention: (channelId: string) => void;
 };
 
 const LOG_MAX = 80;
@@ -359,7 +361,9 @@ export class ServerConnection {
         const unread = e.message.channelId !== this.state.currentChannelId && e.message.authorId !== this.state.userId;
         if (e.message.channelId === this.state.currentChannelId) this.rememberRead(e.message.channelId, [e.message]);
         if (unread) this.liveLatest = { ...this.liveLatest, [e.message.channelId]: e.message.seq };
-        const mentioned = unread && this.state.userId !== null && mentionsUser(e.message.content, this.state.userId);
+        const mentionsMe = e.message.authorId !== this.state.userId && this.state.userId !== null && mentionsUser(e.message.content, this.state.userId);
+        const mentioned = unread && mentionsMe;
+        if (mentionsMe) this.hooks.onMention(e.message.channelId);
         this.set({
           typing: { ...this.state.typing, [e.message.channelId]: typing },
           unread: unread ? { ...this.state.unread, [e.message.channelId]: true } : this.state.unread,

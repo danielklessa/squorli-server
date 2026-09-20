@@ -60,6 +60,11 @@ export type DesktopInfo = {
   frame: WindowFrameState;
   /** The app has a tray icon; `closeToTray` = the window's close button hides the window instead of quitting (user's setting). null = no tray. */
   tray: { closeToTray: boolean } | null;
+  /**
+   * Start with the system (user's setting, off by default). null = this app cannot (unpackaged, or a system without a known
+   * way); missing = an app older than the setting.
+   */
+  autostart?: { enabled: boolean; /** A start by the system stays in the background (tray or minimized) instead of opening the window; missing = an app that always does. */ background?: boolean } | null;
   update: UpdateState;
 };
 
@@ -73,11 +78,19 @@ export interface DesktopBridge {
   answerScreenPick(requestId: number, pick: ScreenPick | null): void;
   onScreenAudio(cb: (event: ScreenAudioEvent) => void): () => void;
   stopScreenAudio(): void;
+  /** Output device of the embedded players (Twitch, YouTube), named by its label because device ids differ per origin; null = the system's default. */
+  setPlayerOutput(label: string | null): void;
   setAppearance(appearance: WindowAppearance): Promise<AppearanceState>;
   /** Restart the app (a pending change of the window background). */
   relaunch(): void;
   windowControl(action: WindowControl): void;
   setCloseToTray(on: boolean): Promise<boolean>;
+  /** Start the app when the user signs in to the system; answers with what is set now. */
+  setAutostart(on: boolean): Promise<boolean>;
+  /** Whether a start by the system stays in the background (true) or opens the window (false); answers with what is set now. */
+  setAutostartBackground(on: boolean): Promise<boolean>;
+  /** How many direct messages and mentions wait (0 = none): the mark on the task bar icon and the tray icon. */
+  setAttention(count: number): void;
   onWindowFrame(cb: (state: WindowFrameState) => void): () => void;
   onUpdateState(cb: (state: UpdateState) => void): () => void;
   checkForUpdates(): void;
@@ -93,11 +106,15 @@ export const IPC = {
   screenPickAnswer: "squorli:screen-pick-answer",
   screenAudio: "squorli:screen-audio",
   screenAudioStop: "squorli:screen-audio-stop",
+  playerOutput: "squorli:player-output",
   setAppearance: "squorli:set-appearance",
   relaunch: "squorli:relaunch",
   windowControl: "squorli:window-control",
   windowFrame: "squorli:window-frame",
   setCloseToTray: "squorli:set-close-to-tray",
+  setAutostart: "squorli:set-autostart",
+  setAutostartBackground: "squorli:set-autostart-background",
+  attention: "squorli:attention",
   updateState: "squorli:update-state",
   updateCheck: "squorli:update-check",
   updateInstall: "squorli:update-install",

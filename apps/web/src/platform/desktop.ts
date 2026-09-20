@@ -31,6 +31,8 @@ export function desktopPlatform(bridge: DesktopBridge): Platform {
   document.documentElement.dataset.desktop = info.os;
 
   let closeToTray = info.tray?.closeToTray ?? false;
+  let autostart = info.autostart?.enabled ?? false;
+  let autostartBackground = info.autostart?.background ?? true;
   let frame: WindowFrameState = info.frame;
   const frameListeners = new Set<(state: WindowFrameState) => void>();
   bridge.onWindowFrame((state) => { frame = state; for (const fn of frameListeners) fn(state); });
@@ -48,7 +50,9 @@ export function desktopPlatform(bridge: DesktopBridge): Platform {
     defaultDirectoryUrl: info.directoryUrl,
     systemIdle: "always",
     // app:// is a secure scheme; only the development window (Vite over http) may load http resources.
-    media: { mobile: false, blocksInsecureMedia: window.location.protocol !== "http:", screenSharePublishOverrides: () => null, takeScreenAudio: () => audio.take(), stopScreenAudio: () => audio.stop() },
+    media: { mobile: false, blocksInsecureMedia: window.location.protocol !== "http:", screenSharePublishOverrides: () => null, takeScreenAudio: () => audio.take(), stopScreenAudio: () => audio.stop(),
+      // An app older than this client has no such member.
+      setPlayerOutput: typeof bridge.setPlayerOutput === "function" ? (label) => bridge.setPlayerOutput(label) : null },
     links: {
       openExternal: (url) => bridge.openExternal(url),
       onDeepLink: (cb) => bridge.onDeepLink((raw) => { const link = parseDeepLink(raw); if (link) cb(link); }),
@@ -63,6 +67,12 @@ export function desktopPlatform(bridge: DesktopBridge): Platform {
         restart: () => bridge.relaunch(),
       },
       tray: info.tray === null ? null : { closeToTray: () => closeToTray, setCloseToTray: async (on) => (closeToTray = await bridge.setCloseToTray(on)) },
+      // An app older than this client has neither member.
+      autostart: info.autostart && typeof bridge.setAutostart === "function" ? {
+        enabled: () => autostart, set: async (on) => (autostart = await bridge.setAutostart(on)),
+        background: typeof bridge.setAutostartBackground === "function" ? { get: () => autostartBackground, set: async (on) => (autostartBackground = await bridge.setAutostartBackground(on)) } : null,
+      } : null,
+      attention: typeof bridge.setAttention === "function" ? { set: (count) => bridge.setAttention(count) } : null,
       frame: {
         state: () => frame,
         subscribe: (cb) => { frameListeners.add(cb); cb(frame); return () => { frameListeners.delete(cb); }; },

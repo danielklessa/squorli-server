@@ -46,6 +46,9 @@ describe("account settings", () => {
     expect(AccountSettings.safeParse({ voice: { vadThreshold: 2 } }).success).toBe(false);
     expect(AccountSettings.safeParse({ locale: "fr" }).success).toBe(false);
     expect(AccountSettings.safeParse({ sounds: { selfJoin: true } }).success).toBe(false);
+    // The message cue (20 September 2026) is optional: settings stored before it stay valid and say nothing about it.
+    expect(AccountSettings.parse({}).sounds.message).toBeUndefined();
+    expect(AccountSettings.parse({ sounds: { selfJoin: true, selfLeave: true, peerJoin: true, peerLeave: true, message: false, volume: 0.6 } }).sounds.message).toBe(false);
   });
   it("parses a stored string and survives rubbish", () => {
     expect(parseAccountSettings(JSON.stringify({ stage: { featureSelf: false } }))?.stage.featureSelf).toBe(false);

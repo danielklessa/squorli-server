@@ -47,6 +47,13 @@ describe("join/leave cues", () => {
     expect(directorySoundSettingsPayload({ ...DEFAULT_SOUND_SETTINGS, peerLeave: false, volume: 0.35 })).toBe("1110\n0.35");
   });
 
+  it("has a cue for messages that an account without the field leaves to the device", () => {
+    expect(SOUND_CUES).toContain("message");
+    expect(normalizeSoundSettings({ message: false }).message).toBe(false);
+    expect(SoundSettingsSchema.parse({ selfJoin: true, selfLeave: true, peerJoin: true, peerLeave: true, volume: 0.6 }).message).toBeUndefined();
+    expect(directorySoundSettingsPayload({ ...DEFAULT_SOUND_SETTINGS, message: false })).toBe("1111\n0.6"); // the signed line of older directories stays
+  });
+
   it("lets the settings preview play a switched-off cue, but not while deafened", () => {
     const off = { ...DEFAULT_SOUND_SETTINGS, peerJoin: false };
     expect(shouldPlayCue("peerJoin", off, { deafened: false, force: true })).toBe(true);
