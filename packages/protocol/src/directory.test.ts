@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DirectoryGame, LibraryGameId, directoryGameIconUrl, directoryGameUrl, splitGameId } from "./directory";
 import {
   ACCOUNT_SETTINGS_MAX_LENGTH, AVATAR_MAX_BYTES, AccountSettings, AccountSettingsUpdateRequest, AvatarUpdateRequest, DirectoryAccount, DirectoryHealth, avatarDigest, directoryAvatarPayload, directoryAvatarUrl, sniffAvatarMime, DirectoryRegisterRequest, Handle, directoryRegisterMessage, parseAccountSettings,
 } from "./directory";
@@ -88,5 +89,20 @@ describe("avatars", () => {
     expect(directoryAvatarUrl("https://id.example.org", "a".repeat(64), null)).toBeNull();
     expect(DirectoryAccount.parse({ handle: "daniel", publicKey: "a".repeat(64), createdAt: "2026-09-19T10:00:00.000Z" }).avatarUpdatedAt).toBeNull();
     expect(DirectoryHealth.parse({ ok: true, service: "directory", host: "h", features: { backup: true, totp: true, email: false }, time: "2026-09-19T10:00:00.000Z" }).features.avatars).toBe(false);
+  });
+});
+
+describe("game library", () => {
+  it("takes the launchers' ids and nothing else", () => {
+    for (const id of ["steam:730", "steam:1133870", "gog:1207658924", "xbox:9NHFVWX1V7QJ"]) expect(LibraryGameId.safeParse(id).success).toBe(true);
+    for (const id of ["steam:0730", "steam:", "steam:7 30", "epic:Sugar", "custom:d:\\a.exe", "xbox:9nhfvwx1v7qj", "xbox:9NHFVWX1V7QJ/../x", "STEAM:730", "steam:12345678901", ""]) expect(LibraryGameId.safeParse(id).success).toBe(false);
+    expect(splitGameId("steam:730")).toEqual({ source: "steam", key: "730" });
+  });
+
+  it("builds the addresses, the icon's only when there is one", () => {
+    expect(directoryGameUrl("https://directory.example/", "steam:730")).toBe("https://directory.example/api/games/steam%3A730");
+    expect(directoryGameIconUrl("https://directory.example", { id: "steam:730", iconUpdatedAt: "2026-09-21T10:00:00.000Z" })).toBe(`https://directory.example/api/games/steam%3A730/icon?v=${Date.parse("2026-09-21T10:00:00.000Z")}`);
+    expect(directoryGameIconUrl("https://directory.example", { id: "steam:730", iconUpdatedAt: null })).toBeNull();
+    expect(DirectoryGame.safeParse({ id: "steam:730", name: "Counter-Strike 2", show: true, iconUpdatedAt: null }).success).toBe(true);
   });
 });

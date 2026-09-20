@@ -193,6 +193,33 @@ export function directoryAvatarUrl(directoryUrl: string, publicKey: string, upda
   return `${directoryUrl.replace(/\/+$/, "")}/api/avatars/${publicKey}?v=${Date.parse(updatedAt)}`;
 }
 
+// ---- Game library (21 September 2026, docs/features/games.md): the directory knows games by the id their launcher gives them
+// ("steam:730") and answers with name and icon, which it fetched from the launcher's own catalog. A client that detects a
+// running game reports this id and nothing else; whoever shows "plays X" asks the directory, never the playing user or a
+// foreign chat server (the trust model of avatars and server icons). `show: false` = not a game (a tool, an application, an
+// add-on, or the operator said so): the playing client does not report it and viewers do not show it.
+/** Launchers whose catalog the directory can ask. Ids of other sources ("epic:...", "custom:...") stay on the client, with a name only. */
+export const GAME_LIBRARY_SOURCES = ["steam", "gog", "xbox"] as const;
+export type GameLibrarySource = typeof GAME_LIBRARY_SOURCES[number];
+/** "steam:<app id>", "gog:<product id>", "xbox:<store id, upper case>". */
+export const LibraryGameId = z.string().max(40).regex(/^(steam:[1-9]\d{0,9}|gog:[1-9]\d{0,11}|xbox:[0-9A-Z]{12})$/, "steam:<Zahl>, gog:<Zahl> oder xbox:<Store-ID>");
+export const DirectoryGame = z.object({
+  id: LibraryGameId,
+  name: z.string().min(1).max(200),
+  /** false = known, but not to be shown as a game. */
+  show: z.boolean(),
+  /** Last change of the icon, null = none; part of the icon's address (`directoryGameIconUrl`). */
+  iconUpdatedAt: Iso.nullable(),
+});
+export type DirectoryGame = z.infer<typeof DirectoryGame>;
+export const splitGameId = (id: string): { source: string; key: string } => { const cut = id.indexOf(":"); return { source: id.slice(0, cut), key: id.slice(cut + 1) }; };
+export const directoryGameUrl = (directoryUrl: string, id: string): string => `${directoryUrl.replace(/\/+$/, "")}/api/games/${encodeURIComponent(id)}`;
+/** Address of a game's icon, null = it has none. Carries the change time, so the answer may be cached for good. */
+export function directoryGameIconUrl(directoryUrl: string, game: Pick<DirectoryGame, "id" | "iconUpdatedAt">): string | null {
+  if (!game.iconUpdatedAt) return null;
+  return `${directoryGameUrl(directoryUrl, game.id)}/icon?v=${Date.parse(game.iconUpdatedAt)}`;
+}
+
 // ---- Voice cue settings in the account (16 September 2026): the switches for the four join/leave cues plus one volume follow the
 // account across chat servers and devices. The chat client keeps a per-device copy (its "local profile") so servers without a
 // directory keep working; with an account it reads the settings via /api/account/status and writes them with the signed
@@ -364,7 +391,7 @@ export const DirectoryHealth = z.object({
   /** Host that registration signatures are bound to. */
   host: z.string(),
   /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. `email`: SMTP configured (address, notices, e-mail code). `settings`: the account stores all client settings (action `settings`). `afk`: the socket takes `activity` and friends carry `afk` (AFK detection). `emailRequired`: new handles need a confirmed e-mail address (REQUIRE_EMAIL; registration in two steps, see DirectoryRegisterRequest). `avatars`: the account stores one avatar image (action `avatar-set`, GET /api/avatars/<key>). */
-  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false), settings: z.boolean().default(false), afk: z.boolean().default(false), emailRequired: z.boolean().default(false), avatars: z.boolean().default(false) }),
+  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false), settings: z.boolean().default(false), afk: z.boolean().default(false), emailRequired: z.boolean().default(false), avatars: z.boolean().default(false), gameLibrary: z.boolean().default(false) }),
   time: Iso,
 });
 
