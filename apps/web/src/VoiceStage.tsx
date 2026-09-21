@@ -1,3 +1,4 @@
+import { VideoStatsButton, VideoStatsOverlay } from "./VideoStatsOverlay";
 import { FullscreenButton, TrackVideo } from "./VideoWindows";
 import { VideoAudioControls } from "./VideoAudioControls";
 import { Avatar } from "./Avatar";
@@ -335,6 +336,9 @@ function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onResto
   const ref = useRef<HTMLDivElement>(null);
   const target = useCallback(() => ref.current, []);
   const [error, setError] = useState("");
+  // The viewer's statistics of a share (VideoStatsOverlay.tsx): only of a received one, the own share has no inbound side.
+  const [stats, setStats] = useState(false);
+  const canStats = item.kind === "screen" && !!tile && !tile.isLocal;
   const hasAudioControls = item.kind === "screen" && !!tile && !tile.isLocal && client.getVideoAudioVolume(tile.id) !== null;
   const popped = !!tile && poppedIds.has(tile.id);
   // A share shown in fullscreen counts as selected, also from a small tile: its audio plays (voiceClient.setScreenAudioListening).
@@ -358,7 +362,9 @@ function Tile({ item, client, big, pinned, onClick, onPopout, poppedIds, onResto
       {item.kind === "camera" && item.off && <div className="tile-window-actions" onClick={(event) => event.stopPropagation()}>
         <button className="icon" title={t("stage.cameraOn")} aria-label={t("stage.cameraOn")} onClick={() => watch(true)}><Icon name="eye" /></button>
       </div>}
+      {canStats && stats && !popped && <VideoStatsOverlay client={client} tileId={tile!.id} />}
       {tile && !popped && <div className="tile-window-actions" onClick={(event) => event.stopPropagation()}>
+        {canStats && <VideoStatsButton on={stats} onToggle={() => setStats(!stats)} />}
         {!tile.isLocal && <button className="icon" title={t(item.kind === "screen" ? "stage.screenOff" : "stage.cameraOff")} aria-label={t(item.kind === "screen" ? "stage.screenOff" : "stage.cameraOff")} onClick={() => watch(false)}><Icon name="eye-off" /></button>}
         <button className="icon" title={t("stage.popout")} aria-label={t("stage.popout")} onClick={() => { setError(""); try { onPopout(tile, ref.current?.ownerDocument.defaultView ?? undefined); } catch (error) { setError(error instanceof Error ? error.message : t("stage.popupFailed")); } }}><Icon name="external-link" /></button>
         <FullscreenButton target={target} onError={setError} />

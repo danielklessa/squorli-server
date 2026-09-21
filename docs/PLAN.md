@@ -344,6 +344,7 @@ Already decided: permissive license, PTT and voice activation both, screen share
 5. **Tauri prototype yes/no** before M4. Note: With system audio as a requirement, Electron's maturity weighs more heavily; a Tauri prototype would have to prove exactly this function.
 6. **macOS system audio in the desktop client:** release-1 requirement or documented limitation, depending on the result of the test matrix.
 7. **Video codec of the screen share: AV1 (or VP9) instead of VP8.** *Deferred (18 September 2026, user's decision): the web app stays on VP8 for now; AV1 with a VP8 backup is to be tested at a later time, for the screen share only. What to measure and what is known: `docs/features/voice-video.md`, "Screen share codec".*
+8. **A screen share that adapts by itself (22 September 2026):** a viewer saw a member's H.265 game share lag on every share. The viewer's statistics exist since that day; the stages (sender-side governor, simulcast or the viewers' quality reports, one-click optimisations, an automatic codec switch) and the decisions to make are in `docs/PLAN-share-adaptation.md`. *Open: which stage next, after the reported share was read with the statistics.*
 
 ---
 

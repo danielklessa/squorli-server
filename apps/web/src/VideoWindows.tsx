@@ -1,3 +1,4 @@
+import { VideoStatsButton, VideoStatsOverlay } from "./VideoStatsOverlay";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { VoiceClient, VideoTile } from "./voice/voiceClient";
@@ -120,6 +121,9 @@ function VideoWindow({ entry, tile, client, onClose }: { entry: Entry; tile: Vid
   const target = useCallback(() => ref.current, []);
   const volume = client.getVideoAudioVolume(tile.id);
   const [error, setError] = useState("");
+  // The viewer's statistics of a received share (VideoStatsOverlay.tsx), as on the stage's tile.
+  const [stats, setStats] = useState(false);
+  const canStats = tile.source === "screen" && !tile.isLocal;
   const [focused, setFocused] = useState(() => entry.document.hasFocus());
   // AFK detection: input in a pop-out counts like input in the main window.
   useEffect(() => watchActivity(activity, entry.window), [entry.window]);
@@ -157,7 +161,9 @@ function VideoWindow({ entry, tile, client, onClose }: { entry: Entry; tile: Vid
       {tile.source === "screen" && <><Icon name="monitor" /> </>}
       {tile.name}{tile.isLocal && ` ${t("members.you")}`}
     </div>
+    {canStats && stats && <VideoStatsOverlay client={client} tileId={tile.id} />}
     <div className="tile-window-actions" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+      {canStats && <VideoStatsButton on={stats} onToggle={() => setStats(!stats)} />}
       <button className="icon" title={t("common.close")} aria-label={t("common.close")} onClick={onClose}><Icon name="x" /></button>
       <FullscreenButton target={target} onError={setError} />
     </div>

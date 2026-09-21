@@ -1,3 +1,4 @@
+import { readInboundVideo, type InboundVideoSample } from "./videoStats";
 import {
   ConnectionState,
   DisconnectReason,
@@ -1129,6 +1130,17 @@ export class VoiceClient {
       }
     }
     return { path, sender, receivers, videoSend, videoRecv };
+  }
+
+  /**
+   * One raw reading of a received video (the viewer's statistics, `videoStats.ts`, shown by VideoStatsOverlay.tsx): the
+   * receiver's own report, which has what LiveKit's `getReceiverStats()` leaves out. Null = no such track is received.
+   */
+  async videoReceiveSample(tileId: string): Promise<InboundVideoSample | null> {
+    const track = this.state.tiles.find((tile) => tile.id === tileId)?.track;
+    if (!(track instanceof RemoteVideoTrack) || !track.receiver) return null;
+    const report = await track.receiver.getStats().catch(() => null);
+    return report ? readInboundVideo(report, performance.now()) : null;
   }
 
   // ---------- A share's audio plays only for who chose to watch that share (user's requirement, 18 September 2026)

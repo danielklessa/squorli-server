@@ -115,12 +115,12 @@ export function DmView({ friend, thread, myKey, store, avatarUrl, myAvatarUrl }:
 
       <footer className="composer">
         {err && <p className="error">{err}</p>}
+        <div className="typing" />
         <div className="composer-row">
           <AutoGrowTextarea value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} rows={1} placeholder={t("dm.placeholder", { name })} readOnly={sending} inputRef={inputRef} />
           <EmojiButton inputRef={inputRef} value={draft} onChange={setDraft} disabled={sending} />
           <button onClick={submit} disabled={sending || !draft.trim()}>{t("chat.send")}</button>
         </div>
-        <div className="typing" />
       </footer>
     </section>
   );

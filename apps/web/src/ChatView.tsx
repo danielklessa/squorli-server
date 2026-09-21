@@ -183,6 +183,8 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
             {files.map((f, i) => <span key={i} className="chip">{f.name} <button className="icon" title={t("common.remove")} onClick={() => setFiles(files.filter((_, j) => j !== i))}><Icon name="x" /></button></span>)}
           </div>
         )}
+        {/* Above the input, so that the input stands on the same base line as the dock with the mini profile (user's wish, 21 September 2026). */}
+        <div className="typing">{typers.length > 0 && t(typers.length === 1 ? "chat.typingOne" : "chat.typingMany", { names: typers.join(", ") })}</div>
         <div className="composer-row">
           {canAttach && (
             <label className="icon-btn" title={t("chat.attach")}>
@@ -205,7 +207,6 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
           <EmojiButton inputRef={inputRef} value={draft} onChange={setDraft} disabled={!canSend || sending} />
           <button onClick={submit} disabled={!canSend || sending || (!draft.trim() && files.length === 0)}>{t("chat.send")}</button>
         </div>
-        <div className="typing">{typers.length > 0 && t(typers.length === 1 ? "chat.typingOne" : "chat.typingMany", { names: typers.join(", ") })}</div>
       </footer>
     </section>
   );
