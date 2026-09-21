@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, ServerEvent, type ClientEvent, type Me, type Message, type ServerState, type VoiceMember } from "@squorli/protocol";
+import { PROTOCOL_VERSION, ServerEvent, type ClientEvent, type GamePresence, type Me, type Message, type ServerState, type VoiceMember } from "@squorli/protocol";
 import { ServerApi, explainLoginError, type Health } from "./api";
 import type { Identity } from "./identity";
 import { t } from "./i18n";
@@ -117,6 +117,7 @@ export class ServerConnection {
   private recountTimer: number | null = null;
   /** AFK detection: what the user's activity tracker says (activity.ts); reported to servers that know the `activity` event. */
   private idle = false;
+  private game: GamePresence | null = null;
 
   constructor(host: string, base: string, private readonly identity: () => Identity | null, private readonly hooks: ConnectionHooks) {
     this.api = new ServerApi(base);
@@ -274,9 +275,16 @@ export class ServerConnection {
     this.idle = idle;
     this.reportIdle();
   }
+  /** Game display: what the user plays, as it may be shown on this server (store.ts; null = nothing or kept to friends). A fresh connection knows none. */
+  setGame(game: GamePresence | null) {
+    if (game?.id === this.game?.id && game?.name === this.game?.name) return;
+    this.game = game;
+    this.reportIdle();
+  }
   private reportIdle() {
-    // Servers from before the AFK detection do not send the setting and would answer the event with `bad_message`.
-    if (this.state.server?.settings.afkChannelId !== undefined) this.send({ type: "activity", idle: this.idle });
+    // Servers from before the AFK detection do not send the setting and would answer the event with `bad_message`; one from
+    // before the game display drops `game` unread.
+    if (this.state.server?.settings.afkChannelId !== undefined) this.send({ type: "activity", idle: this.idle, game: this.game });
   }
 
   send(e: ClientEvent) {
@@ -301,7 +309,7 @@ export class ServerConnection {
         this.set({ server: e.state, userId: e.userId, connection: "connected", currentChannelId: current, error: null, radioTitles: {}, clockOffset: Date.parse(e.serverTime) - Date.now() }); // the server sends the known titles after the welcome
         this.read = pruneReadState(loadReadState(this.state.host, e.userId), e.state.channels.map((c) => c.id));
         void this.syncReadState();
-        if (this.idle) this.reportIdle();
+        if (this.idle || this.game) this.reportIdle();
         if (this.voiceChannelId) this.send({ type: "voice.join", channelId: this.voiceChannelId });
         if (!wasReconnect) this.hooks.onConnected();
         if (this.pingTimer) clearInterval(this.pingTimer);

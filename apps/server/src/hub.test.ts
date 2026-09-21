@@ -89,3 +89,53 @@ describe("Hub AFK state", () => {
     expect(hub.isAfk("u1")).toBe(false);
   });
 });
+
+describe("Hub game display", () => {
+  const cs2 = { id: "steam:730", name: "Counter-Strike 2" };
+  const balatro = { name: "Balatro" };
+
+  it("takes the game a connection reports, the last report among a member's connections counts", () => {
+    const hub = new Hub();
+    const a = sock(), b = sock();
+    hub.add("u1", a, "s1"); hub.add("u1", b, "s2");
+    expect(hub.gameOf("u1")).toBeNull();
+    hub.setGame(a, cs2);
+    hub.setGame(b, balatro);
+    expect(hub.gameOf("u1")).toEqual(balatro);
+    hub.setGame(a, cs2); // reported again: now the last one
+    expect(hub.gameOf("u1")).toEqual(cs2);
+    hub.setGame(a, null);
+    expect(hub.gameOf("u1")).toEqual(balatro);
+    expect(hub.gameOf("u2")).toBeNull();
+  });
+
+  it("tells the presence listeners about a change only, and is independent of the AFK state", () => {
+    const hub = new Hub();
+    const a = sock();
+    hub.add("u1", a, "s1");
+    const events: string[] = [];
+    hub.onPresence((userId) => events.push(userId));
+    hub.setGame(a, cs2); hub.setGame(a, { ...cs2 }); hub.setGame(a, null); hub.setGame(a, null);
+    expect(events).toEqual(["u1", "u1"]);
+    hub.setGame(a, cs2);
+    hub.setIdle(a, true);
+    expect(hub.isAfk("u1")).toBe(true);
+    expect(hub.gameOf("u1")).toEqual(cs2);
+  });
+
+  it("drops the game with the connection that reported it and says so while the member stays online", () => {
+    const hub = new Hub();
+    const a = sock(), b = sock();
+    hub.add("u1", a, "s1"); hub.add("u1", b, "s2");
+    hub.setGame(a, cs2);
+    const events: string[] = [];
+    hub.onPresence((userId, online) => events.push(`${userId}:${online}`));
+    hub.remove(a);
+    expect(hub.gameOf("u1")).toBeNull();
+    expect(events).toEqual(["u1:true"]);
+    hub.setGame(b, balatro);
+    hub.remove(b);
+    expect(hub.gameOf("u1")).toBeNull();
+    expect(events).toEqual(["u1:true", "u1:true", "u1:false"]);
+  });
+});

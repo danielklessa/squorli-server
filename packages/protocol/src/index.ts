@@ -16,6 +16,7 @@ export * from "./mentions";
 export { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { DisplayName } from "./directory";
+import { GamePresence } from "./friends";
 
 /** Increment on incompatible changes. The server rejects older clients. */
 export const PROTOCOL_VERSION = 4; // v4: voice.moved/voice.stop, Member.streamBlocked, MODERATE_VOICE
@@ -316,6 +317,8 @@ export const Member = z.object({
   online: z.boolean(),
   /** Absent: online, but no activity on any connection for AFK_AFTER_MS (reported by the clients, event `activity`). Default for servers from before it. */
   afk: z.boolean().default(false),
+  /** The game the member plays, as one of their connections reported it (`activity`), null = none or not shared with servers. The server only relays it: viewers ask the directory's game library about `id`. Default for servers from before it. */
+  game: GamePresence.nullable().default(null),
   /** A moderator has blocked camera/screen for this member (overrides STREAM_VIDEO from roles). */
   streamBlocked: z.boolean(),
   /** Verified handle from the directory service (M6), otherwise null. */
@@ -445,7 +448,11 @@ export const ClientTyping = z.object({ type: z.literal("typing"), channelId: Uui
  * A connection counts as active until it says otherwise; a member is AFK once all their connections are idle. Sent only to
  * servers whose settings carry `afkChannelId` (older servers would answer `bad_message`).
  */
-export const ClientActivity = z.object({ type: z.literal("activity"), idle: z.boolean() });
+export const ClientActivity = z.object({
+  type: z.literal("activity"), idle: z.boolean(),
+  /** Game display (friends.ts `GamePresence`): what this connection's user plays, null = nothing; left out = says nothing about it. A server from before it drops the field unread. */
+  game: GamePresence.nullable().optional(),
+});
 
 export const ClientEvent = z.discriminatedUnion("type", [ClientHello, ClientPing, ClientVoiceJoin, ClientVoiceLeave, ClientTyping, ClientActivity]);
 

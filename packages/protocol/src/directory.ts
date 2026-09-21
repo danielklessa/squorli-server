@@ -267,6 +267,12 @@ export const AccountSettings = z.object({
     /** Speaker view: may you yourself be shown large as the active speaker? */
     featureSelf: z.boolean().default(true),
   }).default({}),
+  /**
+   * Game display (21 September 2026): `enabled` = detect running games and show friends what I play (off by default),
+   * `servers` = show it to the members of my chat servers too (the opt-out inside the feature). Optional without a default on
+   * purpose: an account stored before it, or by a directory that does not know it, says nothing, and the device's value stays.
+   */
+  games: z.object({ enabled: z.boolean().default(false), servers: z.boolean().default(true) }).optional(),
 });
 export type AccountSettings = z.infer<typeof AccountSettings>;
 export const AccountSettingsUpdateRequest = SignedActionRequest.extend({ settings: z.string().min(2).max(ACCOUNT_SETTINGS_MAX_LENGTH) });

@@ -2,18 +2,19 @@ import type { CustomProgram, DetectedGame, RunningGame } from "./platform/bridge
 import type { Platform } from "./platform/types";
 
 /**
- * Game detection of the desktop app (docs/features/games.md, user's decisions of 20 September 2026). Stage 2: everything
- * stays on this computer, nothing is sent to a server or the directory yet. Off until the user switches it on. The shell
- * reads which games the launchers installed and tells which one is in front (`platform.games`); this keeps the user's
- * settings per device (`chat.games.v1`): the switch, the games never to show, the programs added by hand. The hide list
- * lives on the device because it comes from what is installed here, and a list in the account would tell the directory's
- * operator what somebody owns and hides. When the display for others comes, the switch moves to the account's settings.
+ * Game detection of the desktop app (docs/features/games.md, user's decisions of 20 September 2026). Off until the user
+ * switches it on. The shell reads which games the launchers installed and tells which one is in front (`platform.games`).
+ * The two switches (detect and show at all, show on servers too) are user settings and follow the directory account
+ * (voice/settings.ts `games`, accountSettings.ts); App.tsx hands the first one in through `setEnabled`. What is kept here,
+ * per device (`chat.games.v1`): the games never to show and the programs added by hand. The hide list lives on the device
+ * because it comes from what is installed here, and a list in the account would tell the directory's operator what
+ * somebody owns and hides. What others get to see is decided in gamePresence.ts from `shown`.
  */
 const KEY = "chat.games.v1";
 const MAX_HIDDEN = 2000;
 
-export type GameSettings = { enabled: boolean; hidden: string[]; custom: CustomProgram[] };
-export type GameState = { settings: GameSettings; /** The detected game, hidden or not. */ running: RunningGame | null; /** What others would see: the running game unless detection is off or the game is hidden. */ shown: RunningGame | null };
+export type GameSettings = { hidden: string[]; custom: CustomProgram[] };
+export type GameState = { enabled: boolean; settings: GameSettings; /** The detected game, hidden or not. */ running: RunningGame | null; /** What others may see: the running game unless detection is off or the game is hidden. */ shown: RunningGame | null };
 
 /** A stored value made safe (pure, tested). The shell checks the programs' paths once more. */
 export function readGameSettings(raw: string | null): GameSettings {
@@ -25,14 +26,15 @@ export function readGameSettings(raw: string | null): GameSettings {
     const program = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
     return typeof program.path === "string" && program.path && typeof program.name === "string" ? [{ path: program.path, name: program.name }] : [];
   }) : [];
-  return { enabled: stored.enabled === true, hidden, custom };
+  return { hidden, custom };
 }
 
-export const shownGame = (settings: GameSettings, running: RunningGame | null): RunningGame | null => (settings.enabled && running && !settings.hidden.includes(running.id) ? running : null);
+export const shownGame = (enabled: boolean, settings: GameSettings, running: RunningGame | null): RunningGame | null => (enabled && running && !settings.hidden.includes(running.id) ? running : null);
 
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem">;
 
 export class GameDetection {
+  private enabled = false;
   private settings: GameSettings;
   private running: RunningGame | null = null;
   private current: GameState;
@@ -46,19 +48,25 @@ export class GameDetection {
   }
 
   /**
-   * Tell the shell what is stored and listen for the running game; returns the cleanup. An effect's job, not the
+   * Tell the shell what applies and listen for the running game; returns the cleanup. An effect's job, not the
    * constructor's: React's development mode runs every effect twice, and a cleanup that ended a subscription made in the
    * constructor left the detection deaf for good (the user's report, 21 September 2026).
    */
   start(): () => void {
-    this.source.setWatch({ enabled: this.settings.enabled, custom: this.settings.custom });
+    this.tellShell();
     return this.source.subscribe((game) => { this.running = game; this.changed(); });
   }
 
   get state(): GameState { return this.current; }
   subscribe = (fn: () => void): (() => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
 
-  setEnabled(enabled: boolean): void { this.save({ ...this.settings, enabled }, true); }
+  /** The user's switch (a setting of the account, handed in by App.tsx). Off = the shell watches nothing and reads no launcher. */
+  setEnabled(enabled: boolean): void {
+    if (enabled === this.enabled) return;
+    this.enabled = enabled;
+    this.tellShell();
+    this.changed();
+  }
   setHidden(id: string, hidden: boolean): void {
     const rest = this.settings.hidden.filter((other) => other !== id);
     this.save({ ...this.settings, hidden: hidden ? [...rest, id] : rest }, false);
@@ -69,7 +77,7 @@ export class GameDetection {
   }
   removeCustom(path: string): void {
     const id = `custom:${path.toLowerCase()}`;
-    this.save({ ...this.settings, custom: this.settings.custom.filter((other) => other.path.toLowerCase() !== path.toLowerCase()), hidden: this.settings.hidden.filter((other) => other !== id) }, true);
+    this.save({ custom: this.settings.custom.filter((other) => other.path.toLowerCase() !== path.toLowerCase()), hidden: this.settings.hidden.filter((other) => other !== id) }, true);
   }
   /** The installed games and added programs, read again by the shell. */
   scan(): Promise<DetectedGame[]> { return this.source.scan(); }
@@ -77,12 +85,13 @@ export class GameDetection {
   /** The added program behind a list entry, to remove it; null = an installed game. */
   customOf(id: string): CustomProgram | null { return this.settings.custom.find((program) => `custom:${program.path.toLowerCase()}` === id) ?? null; }
 
+  private tellShell(): void { this.source.setWatch({ enabled: this.enabled, custom: this.settings.custom }); }
   private save(next: GameSettings, tellShell: boolean): void {
     this.settings = next;
     try { this.storage?.setItem(KEY, JSON.stringify(next)); } catch { /* private mode: for this session only */ }
-    if (tellShell) this.source.setWatch({ enabled: next.enabled, custom: next.custom });
+    if (tellShell) this.tellShell();
     this.changed();
   }
-  private snapshot(): GameState { return { settings: this.settings, running: this.running, shown: shownGame(this.settings, this.running) }; }
+  private snapshot(): GameState { return { enabled: this.enabled, settings: this.settings, running: this.running, shown: shownGame(this.enabled, this.settings, this.running) }; }
   private changed(): void { this.current = this.snapshot(); for (const fn of this.listeners) fn(); }
 }

@@ -16,6 +16,7 @@ export function toAccountSettings(s: VoiceSettings, locale: LocalePreference): A
     camera: { quality: s.cameraQuality, blur: s.cameraBlur },
     sounds: { selfJoin: s.sounds.selfJoin, selfLeave: s.sounds.selfLeave, peerJoin: s.sounds.peerJoin, peerLeave: s.sounds.peerLeave, message: s.sounds.message, volume: s.sounds.volume },
     stage: { featureSelf: s.featureSelfInSpeakerView },
+    games: { enabled: s.games.enabled, servers: s.games.servers },
   };
 }
 
@@ -28,16 +29,19 @@ export function applyAccountSettings(local: VoiceSettings, remote: AccountSettin
     // An account stored before the message cue existed (or by a directory that does not know it) says nothing about it: this device's value stays.
     sounds: { ...remote.sounds, message: remote.sounds.message ?? local.sounds.message },
     featureSelfInSpeakerView: remote.stage.featureSelf,
+    // Like the message cue: an account from before the game display says nothing about it.
+    games: remote.games ? { enabled: remote.games.enabled, servers: remote.games.servers } : local.games,
   };
 }
 
 /**
  * Same settings? Compared in a fixed field order, so the key order of a parsed object does not matter. `tolerateMissing`: a
- * field one side does not have at all (`sounds.message` from an older account) counts as equal; for "does the account's copy
+ * field one side does not have at all (`sounds.message` or `games` from an older account) counts as equal; for "does the account's copy
  * change anything here", not for "must this be pushed".
  */
 export function sameAccountSettings(a: AccountSettings, b: AccountSettings, tolerateMissing = false): boolean {
   if (!(tolerateMissing && (a.sounds.message === undefined || b.sounds.message === undefined)) && a.sounds.message !== b.sounds.message) return false;
+  if (!(tolerateMissing && (a.games === undefined || b.games === undefined)) && (a.games?.enabled !== b.games?.enabled || a.games?.servers !== b.games?.servers)) return false;
   const canon = (s: AccountSettings) => JSON.stringify([
     s.locale, s.voice.mode, s.voice.pttKey, s.voice.vadThreshold, s.voice.vadHangoverMs, s.camera.quality, s.camera.blur,
     s.sounds.selfJoin, s.sounds.selfLeave, s.sounds.peerJoin, s.sounds.peerLeave, s.sounds.volume, s.stage.featureSelf,

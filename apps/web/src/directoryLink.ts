@@ -1,4 +1,4 @@
-import { DIRECTORY_WS_VERSION, DirectoryServerEvent, directoryWsAuthMessage, type DirectoryClientEvent } from "@squorli/protocol";
+import { DIRECTORY_WS_VERSION, DirectoryServerEvent, directoryWsAuthMessage, type DirectoryClientEvent, type GamePresence } from "@squorli/protocol";
 import { sign, type Identity } from "./identity";
 
 /**
@@ -18,6 +18,8 @@ export class DirectoryLink {
   private want = false;
   /** AFK detection: the user's activity state (activity.ts), reported when the directory knows the `activity` event (features.afk). */
   private idle = false;
+  /** Game display: what the user plays (store.ts), reported with the activity state; a fresh socket knows none. */
+  private game: GamePresence | null = null;
   private pingSentAt = 0;
   private lastHeard = 0;
 
@@ -28,7 +30,13 @@ export class DirectoryLink {
   setIdle(idle: boolean) {
     if (idle === this.idle) return;
     this.idle = idle;
-    if (this.reportsActivity) this.send({ type: "activity", idle });
+    if (this.reportsActivity) this.send({ type: "activity", idle, game: this.game });
+  }
+
+  setGame(game: GamePresence | null) {
+    if (game?.id === this.game?.id && game?.name === this.game?.name) return;
+    this.game = game;
+    if (this.reportsActivity) this.send({ type: "activity", idle: this.idle, game });
   }
 
   connect() {
@@ -55,7 +63,7 @@ export class DirectoryLink {
         if (this.ping) clearInterval(this.ping);
         this.pingSentAt = 0;
         this.ping = window.setInterval(() => this.heartbeat(), 25_000);
-        if (this.idle && this.reportsActivity) this.send({ type: "activity", idle: true });
+        if ((this.idle || this.game) && this.reportsActivity) this.send({ type: "activity", idle: this.idle, game: this.game });
       }
       if (e.type === "error" && (e.code === "version" || e.code === "unauthorized" || e.code === "unknown_account")) {
         // No reconnect: the client does not match the service, or the key has no account there.

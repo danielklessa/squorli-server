@@ -4,23 +4,27 @@ import { askInput } from "./dialogs";
 import type { GameDetection } from "./gameDetection";
 import { t, tOr } from "./i18n";
 import type { DetectedGame } from "./platform/bridge";
+import { loadVoiceSettings, saveVoiceSettings } from "./voice/settings";
+import { useVoiceSettings } from "./voice/useVoiceSettings";
 
 /**
- * Einstellungen > Spiele (desktop app only, docs/features/games.md): the switch for the game detection, what is detected
- * right now, and the list of installed games and added programs with a tick each: no tick = never shown. Stage 2: nothing
- * is shown to others yet, and the texts say so.
+ * Einstellungen > Spiele (desktop app only, docs/features/games.md): the two switches (detect and show at all, show on
+ * servers too; user settings that follow the account, voice/settings.ts `games`), what is detected right now, and the list
+ * of installed games and added programs with a tick each: no tick = never shown (kept on this device).
  */
 const SEARCH_FROM = 12;
 
 export function GamesTab({ games }: { games: GameDetection }) {
   const state = useSyncExternalStore(games.subscribe, () => games.state);
   const { settings, running } = state;
+  const display = useVoiceSettings().games;
+  const setDisplay = (next: Partial<typeof display>) => { const all = loadVoiceSettings(); saveVoiceSettings({ ...all, games: { ...all.games, ...next } }); };
   const [list, setList] = useState<DetectedGame[] | null>(null);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => { setError(null); games.scan().then(setList, (e) => setError(String(e))); }, [games]);
-  useEffect(() => { if (settings.enabled) load(); else setList(null); }, [settings.enabled, load]);
+  useEffect(() => { if (state.enabled) load(); else setList(null); }, [state.enabled, load]);
 
   const add = async () => {
     const picked = await games.pickProgram();
@@ -37,13 +41,19 @@ export function GamesTab({ games }: { games: GameDetection }) {
     <>
       <h3>{t("games.head")}</h3>
       <label className="check">
-        <input type="checkbox" checked={settings.enabled} onChange={(e) => games.setEnabled(e.target.checked)} />
+        <input type="checkbox" checked={display.enabled} onChange={(e) => setDisplay({ enabled: e.target.checked })} />
         {t("games.enable")}
       </label>
       <span className="muted small">{t("games.hint")}</span>
 
-      {settings.enabled && (
+      {display.enabled && (
         <>
+          <label className="check">
+            <input type="checkbox" checked={display.servers} onChange={(e) => setDisplay({ servers: e.target.checked })} />
+            {t("games.servers")}
+          </label>
+          <span className="muted small">{t("games.serversHint")}</span>
+
           <h3>{t("games.nowHead")}</h3>
           <span>{running ? (state.shown ? running.name : t("games.nowHidden", { name: running.name })) : <span className="muted">{t("games.nowNone")}</span>}</span>
           <span className="muted small">{t("games.nowHint")}</span>

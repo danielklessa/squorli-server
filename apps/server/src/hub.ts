@@ -1,4 +1,4 @@
-import { AFK_AFTER_MS, type ServerEvent } from "@squorli/protocol";
+import { AFK_AFTER_MS, type GamePresence, type ServerEvent } from "@squorli/protocol";
 import type { WebSocket } from "ws";
 
 /**
@@ -10,6 +10,11 @@ import type { WebSocket } from "ws";
  * closes and only idle ones remain, the user was active a moment ago: they turn AFK AFK_AFTER_MS later, unless something
  * happens before. Presence listeners also fire when the AFK state changes (`online` stays true). A connection whose client
  * code went silent (a frozen page, ws/liveness.ts) cannot report anything: it counts as idle until the client speaks again.
+ *
+ * Game display (docs/features/games.md): a client may report what its user plays, per connection like the idle state; the
+ * member's game is the one reported last among their connections and goes when that connection does. The server only
+ * relays it (viewers ask the directory's game library), and it is independent of the AFK state. Presence listeners fire
+ * when it changes.
  */
 export class Hub {
   private readonly byUser = new Map<string, Set<WebSocket>>();
@@ -21,6 +26,8 @@ export class Hub {
   /** Connections that answer pings but whose client sends nothing any more (ws/liveness.ts): idle for the AFK state. */
   private readonly stale = new Set<WebSocket>();
   private readonly afk = new Set<string>();
+  /** What a connection's client says its user plays; insertion order = the order of the reports, the last one counts. */
+  private readonly games = new Map<WebSocket, GamePresence>();
   /** Users whose active connection just closed: not AFK before this time (ms), with the timer that looks again then. */
   private readonly grace = new Map<string, { until: number; timer: NodeJS.Timeout }>();
   private readonly listeners = new Set<(userId: string, online: boolean) => void>();
@@ -45,6 +52,8 @@ export class Hub {
   remove(ws: WebSocket) {
     const userId = this.userOf.get(ws);
     if (!userId) return;
+    const gameBefore = this.gameOf(userId);
+    this.games.delete(ws);
     this.userOf.delete(ws);
     this.sessionOf.delete(ws);
     const wasStale = this.stale.delete(ws);
@@ -63,6 +72,25 @@ export class Hub {
       timer.unref();
       this.grace.set(userId, { until: Date.now() + AFK_AFTER_MS, timer });
     }
+    // The connection that reported the game is gone while the member stays online on another one.
+    if (this.isOnline(userId) && !sameGame(gameBefore, this.gameOf(userId))) for (const fn of this.listeners) fn(userId, true);
+  }
+
+  /** A connection reports what its user plays (null = nothing). */
+  setGame(ws: WebSocket, game: GamePresence | null) {
+    const userId = this.userOf.get(ws);
+    if (!userId) return;
+    const before = this.gameOf(userId);
+    this.games.delete(ws);
+    if (game) this.games.set(ws, game);
+    if (!sameGame(before, this.gameOf(userId))) for (const fn of this.listeners) fn(userId, true);
+  }
+
+  /** The game a member plays: the last report among their connections, null = none. */
+  gameOf(userId: string): GamePresence | null {
+    let last: GamePresence | null = null;
+    for (const [ws, game] of this.games) if (this.userOf.get(ws) === userId) last = game;
+    return last;
   }
 
   /** A connection reports its user idle (no activity for AFK_AFTER_MS) or back. */
@@ -142,3 +170,5 @@ export class Hub {
     for (const [ws, sid] of [...this.sessionOf]) if (sid === sessionId) ws.close(code, reason);
   }
 }
+
+const sameGame = (a: GamePresence | null, b: GamePresence | null): boolean => a?.id === b?.id && a?.name === b?.name;

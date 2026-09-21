@@ -679,6 +679,30 @@ await api("DELETE", `/api/channels/${voiceCh2.id}`, undefined, owner.token);
 const [, stAfkGone] = await api("GET", "/api/state", undefined, owner.token);
 check("deleting the afk channel clears the setting", stAfkGone.settings.afkChannelId === null, String(stAfkGone.settings.afkChannelId));
 
+// ---------- Game display: a connection reports what its member plays with the activity state; the server relays it to everybody
+const gameOfB = (test, from, ms = 9000) => wsA.waitFor((e) => e.type === "structure" && test(e.members?.find((x) => x.userId === B.userId)?.game) && wsA.events.indexOf(e) >= from, ms).catch(() => null);
+mark = wsA.events.length;
+wsB.send({ type: "activity", idle: true, game: { id: "steam:730", name: " Counter-Strike 2 " } });
+const evGameOn = await gameOfB((g) => g?.id === "steam:730" && g?.name === "Counter-Strike 2", mark);
+const memberB = evGameOn?.members.find((x) => x.userId === B.userId);
+check("a reported game reaches every member, next to the afk state", !!evGameOn && memberB?.afk === true, JSON.stringify(memberB?.game ?? null));
+// An id that is no launcher's (the path of an added program) is refused as a whole; a name alone is fine.
+mark = wsB.events.length;
+wsB.send({ type: "activity", idle: false, game: { id: "custom:d:\\games\\x.exe", name: "X" } });
+const evGameBad = await wsB.waitFor((e) => e.type === "error" && e.code === "bad_message" && wsB.events.indexOf(e) >= mark, 3000).catch(() => null);
+mark = wsA.events.length;
+wsB.send({ type: "activity", idle: false, game: { name: "Altes Spiel" } });
+const evGameName = await gameOfB((g) => g?.name === "Altes Spiel" && g?.id === undefined, mark); // a second change within seconds waits for its turn
+check("an id that is no launcher's is refused, a game by name alone is relayed", !!evGameBad && !!evGameName, `refused ${!!evGameBad}, relayed ${!!evGameName}`);
+mark = wsA.events.length;
+wsB.send({ type: "activity", idle: false }); // says nothing about games: the game stays
+const evGameKept = await gameOfB((g) => g === null, mark, 2000);
+const [, stGame] = await api("GET", "/api/state", undefined, owner.token);
+check("a report without the field leaves the game alone", stGame.members.find((x) => x.userId === B.userId)?.game?.name === "Altes Spiel" && !evGameKept, JSON.stringify(stGame.members.find((x) => x.userId === B.userId)?.game ?? null));
+mark = wsA.events.length;
+wsB.send({ type: "activity", idle: false, game: null });
+check("no game any more -> gone for everybody", !!(await gameOfB((g) => g === null, mark)));
+
 // ---------- Kick / ban
 const keyC = await newKey();
 const C = await login(keyC, invite.code);

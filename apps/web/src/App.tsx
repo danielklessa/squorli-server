@@ -1,6 +1,6 @@
 import { useVideoWindows } from "./VideoWindows";
 import { useStageWindow } from "./StageWindow";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AdminPanel } from "./AdminPanel";
 import { ChatView } from "./ChatView";
@@ -42,6 +42,7 @@ import { activity, watchActivity } from "./activity";
 import { resumeIdleDetection } from "./idleDetection";
 import { setOwnVideo, watchSystemActivity } from "./systemActivity";
 import { GameDetection } from "./gameDetection";
+import { directoryGameLookup, presenceOf } from "./gamePresence";
 import { t } from "./i18n";
 import { platform, type ScreenPick, type ScreenSource } from "./platform";
 import { formatDeepLink } from "./platform/deepLink";
@@ -53,7 +54,7 @@ export function App() {
   const store = useMemo(() => new Store({ home: platform.home, defaultDirectoryUrl: platform.defaultDirectoryUrl }), []);
   const client = useMemo(() => new VoiceClient(undefined, platform.media), []);
   const radio = useMemo(() => new RadioPlayer(), []);
-  // Desktop app: detection of running games, off until the user switches it on; nothing leaves the computer yet (gameDetection.ts).
+  // Desktop app: detection of running games, off until the user switches it on (gameDetection.ts); what goes out: further down.
   const games = useMemo(() => (platform.games ? new GameDetection(platform.games, window.localStorage) : null), []);
   useEffect(() => games?.start(), [games]);
   const [state, setState] = useState<State>(store.state);
@@ -82,6 +83,19 @@ export function App() {
   const [layout, setLayout] = useState<Layout>(loadLayout);
   const resizeColumn = (column: ColumnId, width: number, keep: boolean) => setLayout((prev) => { const next = { ...prev, [column]: width }; if (keep) saveLayout(next); return next; });
   const voiceSettings = useVoiceSettings();
+  // Game display: the account's switch turns the detection on; the game others may see goes to the directory (friends) and,
+  // unless the user keeps it to friends, to the chat servers. The directory's game library says what is a game at all
+  // (gamePresence.ts). A client that cannot detect (browser) reports nothing.
+  useEffect(() => games?.setEnabled(voiceSettings.games.enabled), [games, voiceSettings.games.enabled]);
+  const shownGame = useSyncExternalStore(useMemo(() => games?.subscribe ?? (() => () => {}), [games]), () => games?.state.shown ?? null);
+  const gameLookup = useMemo(() => (state.directoryUrl && state.directoryGameLibrary ? directoryGameLookup(state.directoryUrl) : null), [state.directoryUrl, state.directoryGameLibrary]);
+  const gameOnServers = voiceSettings.games.servers;
+  useEffect(() => {
+    if (!games) return;
+    let stale = false;
+    void presenceOf(shownGame, gameLookup).then((presence) => { if (!stale) store.setGame(presence, gameOnServers); });
+    return () => { stale = true; };
+  }, [games, store, shownGame, gameLookup, gameOnServers]);
   /** Camera picker open (list of cameras) when there is more than one at switch-on time. */
   const [cameraPick, setCameraPick] = useState<MediaDeviceInfo[] | null>(null);
   /**

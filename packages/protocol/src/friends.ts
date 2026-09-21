@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DisplayName, Handle } from "./directory";
+import { DisplayName, Handle, LibraryGameId } from "./directory";
 import { Iso, PublicKey, Signature, Uuid } from "./primitives";
 
 // COPY NOTE: also exists byte-identically in the squorli-directory repo (packages/protocol/src); the source is squorli-server, copy it over after any change.
@@ -21,6 +21,18 @@ export const DIRECTORY_WS_VERSION = 1;
  */
 export const AFK_AFTER_MS = 10 * 60_000;
 
+/**
+ * Game display (21 September 2026, docs/features/games.md): the game a user plays, as their client reports it together with
+ * the `activity` state, to the directory (friends see it) and, unless the user keeps it to friends, to their chat servers
+ * (members see it). Off until the user switches it on. `id` = the launcher's id when the directory's game library can know
+ * it; then viewers take name and icon from the directory and show nothing when it says `show: false`. `name` is what the
+ * playing client calls the game: the fallback, and all there is for a game without such an id (Epic, a program the user
+ * added); it is the user's own text like a display name. AFK and the game are independent: both may show at once.
+ */
+export const GameName = z.string().trim().min(1).max(64).regex(/^[^\p{Cc}\p{Zl}\p{Zp}]+$/u, "eine Zeile ohne Steuerzeichen");
+export const GamePresence = z.object({ id: LibraryGameId.optional(), name: GameName });
+export type GamePresence = z.infer<typeof GamePresence>;
+
 /** Signature on connect: bound to the directory's host like every other signature. */
 export function directoryWsAuthMessage(directoryHost: string, nonce: string): string {
   return `community-directory-ws\n${directoryHost}\n${nonce}`;
@@ -41,6 +53,8 @@ export const Friend = z.object({
   online: z.boolean().default(false),
   /** Online but absent: every socket of the account has reported `activity` idle. Only for confirmed friends, otherwise false. */
   afk: z.boolean().default(false),
+  /** The game the friend plays (any of their sockets reported it), null = none or not shared. Only for confirmed friends. */
+  game: GamePresence.nullable().default(null),
   /** Avatar: when the friend last stored an image, null = none (address: `directoryAvatarUrl`). Default for directories from before it. */
   avatarUpdatedAt: Iso.nullable().default(null),
 });
@@ -87,8 +101,12 @@ export const DM_DELETE_BOTH_MS = 5 * 60_000;
 export const DmDeleteRequest = z.object({ type: z.literal("dm.delete"), peer: PublicKey, id: Uuid });
 /** Delete a whole conversation for me (the other side keeps its copy). */
 export const DmClearRequest = z.object({ type: z.literal("dm.clear"), peer: PublicKey });
-/** This socket's user is idle (AFK_AFTER_MS without activity) or back; a socket counts as active until it says otherwise. Only sent when the directory reports `features.afk`. */
-export const DirectoryClientActivity = z.object({ type: z.literal("activity"), idle: z.boolean() });
+/**
+ * This socket's user is idle (AFK_AFTER_MS without activity) or back; a socket counts as active until it says otherwise. Only sent
+ * when the directory reports `features.afk`. `game`: what this socket's user plays, null = nothing; left out = this message says
+ * nothing about it (a client from before the game display). A service from before it drops the field unread.
+ */
+export const DirectoryClientActivity = z.object({ type: z.literal("activity"), idle: z.boolean(), game: GamePresence.nullable().optional() });
 export const DirectoryClientEvent = z.discriminatedUnion("type", [DirectoryClientAuth, DirectoryClientPing, DirectoryClientActivity, FriendRequest, DmSend, DmHistoryRequest, DmReadRequest, DmDeleteRequest, DmClearRequest])
   .or(FriendAction);
 export type DirectoryClientEvent = z.infer<typeof DirectoryClientEvent>;
@@ -108,7 +126,7 @@ export const DmReadEvent = z.object({ type: z.literal("dm.read"), peer: PublicKe
 export const DmDeletedEvent = z.object({ type: z.literal("dm.deleted"), peer: PublicKey, id: Uuid, both: z.boolean() });
 export const DmClearedEvent = z.object({ type: z.literal("dm.cleared"), peer: PublicKey });
 /** A confirmed friend has come online, gone, or turned absent/active (`afk`, only ever true while online). */
-export const FriendPresenceEvent = z.object({ type: z.literal("friends.presence"), publicKey: PublicKey, online: z.boolean(), afk: z.boolean().default(false) });
+export const FriendPresenceEvent = z.object({ type: z.literal("friends.presence"), publicKey: PublicKey, online: z.boolean(), afk: z.boolean().default(false), game: GamePresence.nullable().default(null) });
 export const DirectoryErrorCode = z.enum(["version", "unauthorized", "bad_message", "unknown_account", "self", "not_friends", "blocked", "declined_recently", "rate_limited", "too_large", "duplicate", "not_found"]);
 export type DirectoryErrorCode = z.infer<typeof DirectoryErrorCode>;
 /** `ref` = id of the message (dm.send) or key (friends.*) the error refers to. */

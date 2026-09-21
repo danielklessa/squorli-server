@@ -81,6 +81,7 @@ export async function loadMembers(db: Db, hub: Hub): Promise<Member[]> {
     joinedAt: r.joinedAt.toISOString(),
     online: hub.isOnline(r.userId),
     afk: hub.isAfk(r.userId),
+    game: hub.gameOf(r.userId),
     streamBlocked: r.streamBlocked,
     handle: r.handle,
     avatarUrl: r.avatarUrl,

@@ -1,6 +1,6 @@
 import {
   deriveDmKey, directoryServerUrl, openDm, sealDm,
-  type AccountServer, type AccountSettings, type AccountStatus, type DirectoryAccount, type DirectoryServerEvent, type DmConversation, type DmMessage, type Friend, type ServerLeaveResponse,
+  type AccountServer, type AccountSettings, type AccountStatus, type DirectoryAccount, type DirectoryServerEvent, type DmConversation, type DmMessage, type Friend, type GamePresence, type ServerLeaveResponse,
 } from "@squorli/protocol";
 import { activity } from "./activity";
 import { chooseInitialServer, loadClientData, parseServerAddress, saveClientData } from "./clientHome";
@@ -50,6 +50,8 @@ export type State = {
   directoryEmailRequired: boolean;
   /** The directory stores avatars (`features.avatars`): the settings offer the upload. False until the signed status was read. */
   directoryAvatars: boolean;
+  /** The directory has a game library (`GET /api/games/:id`, docs/features/games.md): names and icons of launcher game ids. */
+  directoryGameLibrary: boolean;
   /** Servers the handle has signed in on (directory, AccountStatus.servers): the server rail. null = unknown/no account. */
   accountServers: AccountServer[] | null;
   /** Last failure while saving the settings in the directory account (shown in the settings dialog); null = fine. */
@@ -118,6 +120,9 @@ export class Store {
   state: State;
   private conns = new Map<string, ServerConnection>();
   private link: DirectoryLink | null = null;
+  /** Game display: what goes out about the running game (gamePresence.ts), and whether chat servers get it or friends only. */
+  private game: GamePresence | null = null;
+  private gameOnServers = true;
   /** Pair key per friend (M7), derived from your own seed and the friend's key; clear it on an identity switch. */
   private dmKeys = new Map<string, Promise<CryptoKey>>();
   private listeners = new Set<(s: State) => void>();
@@ -142,7 +147,7 @@ export class Store {
     this.state = {
       identity: null, homeHost: this.homeHost, activeHost: this.homeHost, servers: home ? { [home.state.host]: home.state } : {},
       signedIn: false, localHosts: [], clientLogin: { busy: false, error: null }, joinInvites: {},
-      directoryUrl: null, directoryAccount: undefined, directoryError: null, directoryEmailRequired: false, directoryAvatars: false, accountServers: null, settingsSyncError: null, localeReloadPending: false,
+      directoryUrl: null, directoryAccount: undefined, directoryError: null, directoryEmailRequired: false, directoryAvatars: false, directoryGameLibrary: false, accountServers: null, settingsSyncError: null, localeReloadPending: false,
       directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null, friendsError: null, missed: 0, starting: true,
     };
     subscribeVoiceSettings((_s, source) => { if (source === "user") this.scheduleSettingsPush(); });
@@ -172,6 +177,7 @@ export class Store {
       onMention: (channelId) => this.incoming("mention", this.state.activeHost === host && !this.state.homeOpen && this.conns.get(host)?.state.currentChannelId === channelId),
     });
     conn.setIdle(activity.idle);
+    conn.setGame(this.gameOnServers ? this.game : null);
     this.conns.set(host, conn);
     return conn;
   }
@@ -439,6 +445,7 @@ export class Store {
     if (!health?.features.friends) return;
     const link = new DirectoryLink(url, id, (e) => this.handleDirectory(e), (status, error) => this.set({ directoryLink: status, directoryLinkError: error ?? null }), health.features.afk);
     link.setIdle(activity.idle);
+    link.setGame(this.game);
     this.link = link;
     link.connect();
   }
@@ -474,7 +481,7 @@ export class Store {
         break;
       }
       case "friends.presence":
-        this.set({ friends: (this.state.friends ?? []).map((f) => (f.publicKey === e.publicKey ? { ...f, online: e.online, afk: e.afk } : f)) });
+        this.set({ friends: (this.state.friends ?? []).map((f) => (f.publicKey === e.publicKey ? { ...f, online: e.online, afk: e.afk, game: e.game } : f)) });
         break;
       case "dm.message": {
         const m = e.message;
@@ -597,7 +604,7 @@ export class Store {
       // The public key lookup (refreshDirectory) never carries names; the signed status does: the global display name for the settings.
       const acc = this.state.directoryAccount;
       // The avatar's version comes along: an image changed on the account page shows in the settings without a reload of the lookup.
-      this.set({ accountServers: status.servers, directoryAvatars: health.features.avatars, ...(acc ? { directoryAccount: { ...acc, displayName: status.displayName, avatarUpdatedAt: status.avatarUpdatedAt } } : {}) });
+      this.set({ accountServers: status.servers, directoryAvatars: health.features.avatars, directoryGameLibrary: health.features.gameLibrary, ...(acc ? { directoryAccount: { ...acc, displayName: status.displayName, avatarUpdatedAt: status.avatarUpdatedAt } } : {}) });
       this.adoptAccountSettings(status);
       // Without a home server: a server added by address that the account's list names by now is the account's from here on.
       const local = this.state.localHosts.filter((h) => !status.servers.some((s) => this.hostFor(s.host) === h));
@@ -657,6 +664,18 @@ export class Store {
       this.accountSettings = next;
       if (this.state.settingsSyncError) this.set({ settingsSyncError: null });
     } catch (err) { this.set({ settingsSyncError: api.explainDirectoryError(err) }); }
+  }
+
+  /**
+   * Game display: what goes out about the running game (App.tsx computes it, gamePresence.ts). The directory always hears it
+   * (friends see it); the chat servers only when the user shows it to their members too. The store stays free of the platform:
+   * the detection lives in App.tsx.
+   */
+  setGame(game: GamePresence | null, onServers: boolean): void {
+    this.game = game;
+    this.gameOnServers = onServers;
+    for (const conn of this.conns.values()) conn.setGame(onServers ? game : null);
+    this.link?.setGame(game);
   }
 
   /** Change the UI language: stored on this device, saved in the account first (the reload would cut a pending push off), then reload. */

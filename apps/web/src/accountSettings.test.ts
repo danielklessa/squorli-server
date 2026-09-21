@@ -42,9 +42,21 @@ describe("account settings", () => {
     expect(sameAccountSettings(toAccountSettings(silent, "auto"), known, true)).toBe(false);
   });
 
+  it("keeps this device's game display when the account says nothing about it, takes the account's when it does, and pushes it", () => {
+    const local: VoiceSettings = { ...device, games: { enabled: true, servers: false } };
+    expect(applyAccountSettings(local, AccountSettings.parse({})).games).toEqual({ enabled: true, servers: false });
+    expect(applyAccountSettings(local, AccountSettings.parse({ games: { enabled: false } })).games).toEqual({ enabled: false, servers: true });
+    const pushed = toAccountSettings(local, "auto");
+    expect(pushed.games).toEqual({ enabled: true, servers: false });
+    expect(sameAccountSettings(pushed, AccountSettings.parse({}), true)).toBe(true);
+    expect(sameAccountSettings(pushed, AccountSettings.parse({}))).toBe(false);
+    expect(sameAccountSettings(pushed, { ...pushed, games: { enabled: true, servers: true } }, true)).toBe(false);
+  });
+
   it("notices every difference, whatever the key order", () => {
     const a = toAccountSettings(DEFAULT_VOICE_SETTINGS, "auto");
-    expect(sameAccountSettings(a, { stage: a.stage, sounds: a.sounds, camera: a.camera, voice: a.voice, locale: a.locale })).toBe(true);
+    expect(sameAccountSettings(a, { games: a.games, stage: a.stage, sounds: a.sounds, camera: a.camera, voice: a.voice, locale: a.locale })).toBe(true);
+    expect(sameAccountSettings(a, { ...a, games: { enabled: true, servers: true } })).toBe(false);
     expect(sameAccountSettings(a, { ...a, locale: "en" })).toBe(false);
     expect(sameAccountSettings(a, { ...a, stage: { featureSelf: false } })).toBe(false);
     expect(sameAccountSettings(a, { ...a, voice: { ...a.voice, vadHangoverMs: 450 } })).toBe(false);

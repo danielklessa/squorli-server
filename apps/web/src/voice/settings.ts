@@ -39,8 +39,20 @@ export type VoiceSettings = {
   sounds: SoundSettings;
   /** Speaker view of the stage: may you yourself be shown large as the active speaker? Off = only others are featured. */
   featureSelfInSpeakerView: boolean;
+  /**
+   * Game display (docs/features/games.md): `enabled` = detect running games (desktop app) and show friends what I play, off by
+   * default; `servers` = show it to the members of my chat servers too. Follows the directory account.
+   */
+  games: GameDisplaySettings;
   /** The defaults for a phone or tablet were applied once (`withDeviceDefaults`); what the user chooses afterwards stays. */
   mobileDefaults: boolean;
+};
+
+export type GameDisplaySettings = { enabled: boolean; servers: boolean };
+export const DEFAULT_GAME_DISPLAY: GameDisplaySettings = { enabled: false, servers: true };
+export const normalizeGameDisplay = (value: unknown): GameDisplaySettings => {
+  const stored = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return { enabled: stored.enabled === true, servers: stored.servers !== false };
 };
 
 /** Who changed the settings: the user on this device, or the directory account (applied from the account, not pushed back). */
@@ -63,6 +75,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   cameraBlur: 0,
   sounds: { ...DEFAULT_SOUND_SETTINGS },
   featureSelfInSpeakerView: true,
+  games: { ...DEFAULT_GAME_DISPLAY },
   mobileDefaults: false,
 };
 
@@ -83,7 +96,7 @@ function readStored(): VoiceSettings {
     if (!raw) return withDeviceDefaults({ ...DEFAULT_VOICE_SETTINGS }, detectMobile());
     const stored = JSON.parse(raw) as Partial<VoiceSettings>;
     // `sounds` is nested, so it needs its own merge: settings stored before the cues existed have no such field.
-    return withDeviceDefaults({ ...DEFAULT_VOICE_SETTINGS, ...stored, sounds: normalizeSoundSettings(stored.sounds), micBoost: normalizeMicBoost(stored.micBoost) }, detectMobile());
+    return withDeviceDefaults({ ...DEFAULT_VOICE_SETTINGS, ...stored, sounds: normalizeSoundSettings(stored.sounds), micBoost: normalizeMicBoost(stored.micBoost), games: normalizeGameDisplay(stored.games) }, detectMobile());
   } catch {
     return withDeviceDefaults({ ...DEFAULT_VOICE_SETTINGS }, detectMobile());
   }

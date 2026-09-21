@@ -1,4 +1,4 @@
-import { ClientEvent, PROTOCOL_VERSION, Permission, displayNameOf, type ServerEvent } from "@squorli/protocol";
+import { ClientEvent, PROTOCOL_VERSION, Permission, displayNameOf, type GamePresence, type ServerEvent } from "@squorli/protocol";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { WebSocket } from "ws";
@@ -12,6 +12,9 @@ import type { VoicePresence } from "../voice/presence";
 import type { RadioMetadata } from "../radio/metadata";
 import type { LivekitAdmin } from "../livekit/admin";
 import { Liveness, PING_EVERY_MS } from "./liveness";
+
+/** Game display: how often one connection may change what its member plays (each change is a broadcast to everybody). */
+const GAME_CHANGE_MS = 5000;
 
 /**
  * Real-time channel for everything except media: state after the handshake, presence, channel state, messages, typing.
@@ -42,6 +45,18 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
     const send = (e: ServerEvent) => hub.send(socket, e);
     const helloTimeout = setTimeout(() => socket.close(4001, "hello timeout"), 10_000);
     let lastTyping = 0;
+    // Game display: every change goes to all members, so a connection's reports take effect at most every GAME_CHANGE_MS;
+    // what arrives in between waits, and only the last one counts.
+    let lastGameAt = 0;
+    let gameTimer: NodeJS.Timeout | null = null;
+    let waitingGame: GamePresence | null = null;
+    const applyGame = (game: GamePresence | null) => { lastGameAt = Date.now(); hub.setGame(socket, game); };
+    const reportGame = (game: GamePresence | null) => {
+      const wait = lastGameAt + GAME_CHANGE_MS - Date.now();
+      if (wait <= 0 && !gameTimer) return applyGame(game);
+      waitingGame = game;
+      gameTimer ??= setTimeout(() => { gameTimer = null; applyGame(waitingGame); }, Math.max(wait, 0));
+    };
 
     socket.on("pong", () => { liveness.heard(socket, false); });
     socket.on("message", async (raw) => {
@@ -106,7 +121,10 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
           return presence.leave(socket);
         case "activity":
           // AFK detection: the hub turns the connections' reports into the member's state (index.ts broadcasts and moves).
-          return hub.setIdle(socket, ev.data.idle);
+          hub.setIdle(socket, ev.data.idle);
+          // Game display: left out = the client says nothing about it (one from before the feature).
+          if (ev.data.game !== undefined) reportGame(ev.data.game);
+          return;
         case "typing": {
           const now = Date.now();
           if (now - lastTyping < 2000) return; // Throttling: at most every 2 s
@@ -118,6 +136,7 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
 
     socket.on("close", () => {
       clearTimeout(helloTimeout);
+      if (gameTimer) clearTimeout(gameTimer);
       liveness.remove(socket);
       hub.remove(socket);
       presence.leave(socket);
