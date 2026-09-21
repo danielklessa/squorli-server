@@ -18,6 +18,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
+    "@squorli/link-preview": "workspace:*",
     "@squorli/protocol": "workspace:*",
     "@squorli/web": "workspace:*",
     "@types/node": "^24.0.0",

@@ -1,12 +1,14 @@
 import { AutoGrowTextarea } from "./AutoGrowTextarea";
 import { Avatar } from "./Avatar";
 import { DM_DELETE_BOTH_MS, type Friend } from "@squorli/protocol";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { askConfirm } from "./dialogs";
 import { EmojiButton } from "./EmojiPicker";
 import { GameLine } from "./GameLine";
 import { friendName } from "./Home";
 import { Icon } from "./Icon";
+import { DmPreviews } from "./LinkPreviews";
+import { visibleDms } from "./dmPreviews";
 import { MessageText } from "./MessageText";
 import type { DmThread, Store } from "./store";
 import { fmtDay, fmtTime, t } from "./i18n";
@@ -25,6 +27,8 @@ export function DmView({ friend, thread, myKey, store, avatarUrl, myAvatarUrl }:
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const stickToBottom = useRef(true);
   const name = friendName(friend);
+  // Instructions (a preview taken away) are no messages, and what their author removed is not shown.
+  const list = useMemo(() => visibleDms(thread.list), [thread.list]);
 
   useEffect(() => {
     const el = listRef.current;
@@ -74,8 +78,8 @@ export function DmView({ friend, thread, myKey, store, avatarUrl, myAvatarUrl }:
       <div className="messages" ref={listRef} onScroll={onScroll}>
         {thread.loading && <p className="muted center">{t("common.loading")}</p>}
         {thread.loaded && !thread.hasMore && <p className="muted center"><Icon name="lock" /> {t("dm.e2e", { name })}</p>}
-        {thread.list.map((m, i) => {
-          const prev = thread.list[i - 1];
+        {list.map((m, i) => {
+          const prev = list[i - 1];
           const grouped = prev && prev.from === m.from && new Date(m.sentAt).getTime() - new Date(prev.sentAt).getTime() < GROUP_MS;
           const newDay = !prev || fmtDay(prev.sentAt) !== fmtDay(m.sentAt);
           const mine = m.from === myKey;
@@ -95,6 +99,7 @@ export function DmView({ friend, thread, myKey, store, avatarUrl, myAvatarUrl }:
                   {m.text === null
                     ? <p className="muted"><Icon name="lock" /> {t("dm.undecryptable")}</p>
                     : <MessageText text={m.text} />}
+                  <DmPreviews messageId={m.id} peer={friend.publicKey} previews={m.shown} mine={mine} store={store} onError={setErr} />
                 </div>
                 <div className="msg-actions">
                   <button className="icon" title={both ? t("dm.deleteBoth") : t("dm.deleteMine")} onClick={() => {

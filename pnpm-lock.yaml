@@ -10,6 +10,9 @@ importers:
 
   apps/desktop:
     devDependencies:
+      '@squorli/link-preview':
+        specifier: workspace:*
+        version: link:../../packages/link-preview
       '@squorli/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -55,6 +58,9 @@ importers:
       '@noble/ed25519':
         specifier: ^2.1.0
         version: 2.3.0
+      '@squorli/link-preview':
+        specifier: workspace:*
+        version: link:../../packages/link-preview
       '@squorli/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -147,6 +153,18 @@ importers:
       vite:
         specifier: ^5.4.0
         version: 5.4.21(@types/node@24.13.5)
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@24.13.5)
+
+  packages/link-preview:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.5
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
       vitest:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@24.13.5)

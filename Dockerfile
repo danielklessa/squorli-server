@@ -5,6 +5,7 @@ RUN corepack enable
 WORKDIR /repo
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* ./
 COPY packages/protocol/package.json packages/protocol/
+COPY packages/link-preview/package.json packages/link-preview/
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
 COPY apps/desktop/package.json apps/desktop/

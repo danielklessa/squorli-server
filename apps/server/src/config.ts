@@ -48,6 +48,16 @@ const Env = z.object({
    * turned off. Not for operators: the admin area tells people "two minutes" (protocol RADIO_IDLE_STOP_MS).
    */
   RADIO_IDLE_STOP_MS: z.coerce.number().int().positive().optional(),
+  /**
+   * Link previews (docs/features/link-previews.md): the server fetches the pages members link to (public hosts only, title,
+   * description and one picture) and keeps the pictures under DATA_DIR/previews. false = no previews and no such requests.
+   */
+  LINK_PREVIEWS: z.enum(["true", "false", "1", "0"]).transform((v) => v === "true" || v === "1").default("true"),
+  /**
+   * For tests only: one origin (e.g. http://127.0.0.1:3198) the preview fetcher may reach although it is not public, so the
+   * smoke test can play the linked website. Never set it on a real server: it opens that address to every member.
+   */
+  LINK_PREVIEW_TEST_ORIGIN: z.string().url().optional(),
 });
 
 export type Config = z.infer<typeof Env> & { trustedProxies: string[]; livekitPublicUrl: string; directoryProofUrl: string };

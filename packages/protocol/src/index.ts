@@ -13,6 +13,7 @@ export * from "./useragent";
 export * from "./friends";
 export * from "./dm";
 export * from "./mentions";
+export * from "./links";
 export { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { DisplayName } from "./directory";
@@ -365,6 +366,25 @@ export const Attachment = z.object({
   /** Relative path for downloading. */
   url: z.string(),
 });
+/**
+ * Preview of a link in a message (docs/features/link-previews.md), made by the server: it fetches the page's title,
+ * description and picture once, and clients load the picture from this server only (`image` is a relative path here,
+ * never a foreign host: a remote picture would show every reader's address to that host). `url` is the link as the author
+ * wrote it and names the preview when the author removes it. `youtube` = a video that plays in the chat: `videoId` and
+ * `start` (seconds) feed the player, which a client loads only when the reader presses play.
+ */
+export const LinkPreview = z.object({
+  url: z.string().max(2100),
+  kind: z.enum(["page", "youtube"]),
+  siteName: z.string().max(100).nullable(),
+  title: z.string().max(300).nullable(),
+  description: z.string().max(500).nullable(),
+  image: z.string().nullable(),
+  videoId: z.string().regex(/^[\w-]{11}$/).optional(),
+  start: z.number().int().nonnegative().optional(),
+});
+/** The author removes one preview of their message (POST /api/messages/:id/previews/remove); it stays away when the message is edited. */
+export const RemovePreviewRequest = z.object({ url: z.string().min(1).max(2100) });
 export const Message = z.object({
   id: Uuid,
   /** Monotonically increasing per server, for ordering and cursors. */
@@ -373,6 +393,11 @@ export const Message = z.object({
   authorId: Uuid,
   content: z.string(),
   attachments: z.array(Attachment),
+  /**
+   * Optional = feature flag: a server from before link previews, or one that has them turned off, does not send the field.
+   * They arrive after the message itself, with a `message.update` once the server has looked the links up.
+   */
+  previews: z.array(LinkPreview).optional(),
   createdAt: Iso,
   editedAt: Iso.nullable(),
 });
@@ -540,6 +565,7 @@ export type Invite = z.infer<typeof Invite>;
 export type InvitePreview = z.infer<typeof InvitePreview>;
 export type Message = z.infer<typeof Message>;
 export type Attachment = z.infer<typeof Attachment>;
+export type LinkPreview = z.infer<typeof LinkPreview>;
 export type MessagePage = z.infer<typeof MessagePage>;
 export type ChannelReadState = z.infer<typeof ChannelReadState>;
 export type ReadStateResponse = z.infer<typeof ReadStateResponse>;

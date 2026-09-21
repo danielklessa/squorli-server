@@ -10,7 +10,21 @@
  */
 import { RADIO_QUEUE_MAX } from "@squorli/protocol";
 
+import { CHAT_PLAYER_MARK } from "./platform/bridge";
+
 export const YOUTUBE_PLAYER_ORIGIN = "https://www.youtube-nocookie.com";
+
+/**
+ * Address of the player for a video linked in the chat (LinkPreviews.tsx). Loaded only after the reader pressed play, so
+ * it starts playing, with sound and YouTube's own controls; nobody steers it from outside, so no `enablejsapi`.
+ */
+export function youtubeChatPlayerSrc(videoId: string, start: number): string {
+  const q = new URLSearchParams({ autoplay: "1", playsinline: "1", rel: "0" });
+  const s = Math.floor(Number.isFinite(start) ? Math.max(0, start) : 0);
+  if (s > 0) q.set("start", String(s));
+  // The mark tells the desktop shell that this player belongs to the chat (its sound goes where screen share audio goes).
+  return `${YOUTUBE_PLAYER_ORIGIN}/embed/${encodeURIComponent(videoId)}?${q.toString()}${CHAT_PLAYER_MARK}`;
+}
 
 /** Player states of YouTube's API. */
 export const YT = { UNSTARTED: -1, ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3, CUED: 5 } as const;

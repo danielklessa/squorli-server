@@ -169,6 +169,13 @@
       "when": 1789911413484,
       "tag": "0023_first_the_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789985127359,
+      "tag": "0024_fair_plazm",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-import { CreateMessageRequest, Permission, UpdateMessageRequest, type Attachment, type Message, type MessagePage } from "@squorli/protocol";
+import { CreateMessageRequest, Permission, RemovePreviewRequest, UpdateMessageRequest, type Attachment, type Message, type MessagePage } from "@squorli/protocol";
 import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { requireMember } from "../auth/session";
@@ -6,6 +6,7 @@ import { can } from "../authz";
 import type { Db } from "../db";
 import { attachments, channels, messages } from "../db/schema";
 import type { Hub } from "../hub";
+import { visiblePreviews, type LinkPreviews } from "../previews/service";
 
 const PAGE = 50;
 const Params = { type: "object", properties: { id: { type: "string", format: "uuid" } }, required: ["id"] } as const;
@@ -14,7 +15,8 @@ export function attachmentUrl(a: { id: string; name: string }): string {
   return `/api/attachments/${a.id}/${encodeURIComponent(a.name)}`;
 }
 
-export async function loadMessages(db: Db, rows: (typeof messages.$inferSelect)[]): Promise<Message[]> {
+/** `withPreviews` false = link previews are turned off: the field is left out, which is what tells clients so. */
+export async function loadMessages(db: Db, rows: (typeof messages.$inferSelect)[], withPreviews = true): Promise<Message[]> {
   const ids = rows.map((r) => r.id);
   const atts = ids.length ? await db.select().from(attachments).where(inArray(attachments.messageId, ids)) : [];
   const byMsg = new Map<string, Attachment[]>();
@@ -25,11 +27,13 @@ export async function loadMessages(db: Db, rows: (typeof messages.$inferSelect)[
   }
   return rows.map((r) => ({
     id: r.id, seq: r.seq, channelId: r.channelId, authorId: r.authorId, content: r.content,
-    attachments: byMsg.get(r.id) ?? [], createdAt: r.createdAt.toISOString(), editedAt: r.editedAt?.toISOString() ?? null,
+    attachments: byMsg.get(r.id) ?? [], ...(withPreviews ? { previews: visiblePreviews(r.previews) } : {}),
+    createdAt: r.createdAt.toISOString(), editedAt: r.editedAt?.toISOString() ?? null,
   }));
 }
 
-export async function registerMessageRoutes(app: FastifyInstance, db: Db, hub: Hub) {
+export async function registerMessageRoutes(app: FastifyInstance, db: Db, hub: Hub, previews: LinkPreviews) {
+  const load = (rows: (typeof messages.$inferSelect)[]) => loadMessages(db, rows, previews.enabled);
   async function textChannel(id: string) {
     const [c] = await db.select().from(channels).where(eq(channels.id, id)).limit(1);
     return c && c.kind === "text" ? c : null;
@@ -49,7 +53,7 @@ export async function registerMessageRoutes(app: FastifyInstance, db: Db, hub: H
         .where(before !== null && Number.isFinite(before) ? and(eq(messages.channelId, ch.id), lt(messages.seq, before)) : eq(messages.channelId, ch.id))
         .orderBy(desc(messages.seq)).limit(limit + 1);
       const hasMore = rows.length > limit;
-      const page = await loadMessages(db, rows.slice(0, limit).reverse());
+      const page = await load(rows.slice(0, limit).reverse());
       const out: MessagePage = { messages: page, hasMore };
       return out;
     });
@@ -74,8 +78,10 @@ export async function registerMessageRoutes(app: FastifyInstance, db: Db, hub: H
 
     const [row] = await db.insert(messages).values({ channelId: ch.id, authorId: m.userId, content: body.data.content }).returning();
     if (attIds.length) await db.update(attachments).set({ messageId: row!.id }).where(inArray(attachments.id, attIds));
-    const [msg] = await loadMessages(db, [row!]);
+    const [msg] = await load([row!]);
     hub.broadcast({ type: "message.create", message: msg! });
+    // The links are looked up afterwards; the previews follow as a `message.update`.
+    previews.schedule(row!.id);
     return msg;
   });
 
@@ -88,9 +94,23 @@ export async function registerMessageRoutes(app: FastifyInstance, db: Db, hub: H
     if (!row) return reply.code(404).send({ error: "not_found" });
     if (row.authorId !== m.userId) return reply.code(403).send({ error: "forbidden" }); // Only the author may edit
     const [updated] = await db.update(messages).set({ content: body.data.content, editedAt: new Date() }).where(eq(messages.id, row.id)).returning();
-    const [msg] = await loadMessages(db, [updated!]);
+    const [msg] = await load([updated!]);
     hub.broadcast({ type: "message.update", message: msg! });
+    previews.schedule(row.id);
     return msg;
+  });
+
+  /** The author takes one preview of their message away (the x next to it); nobody else may, a moderator deletes the message. */
+  app.post<{ Params: { id: string } }>("/api/messages/:id/previews/remove", { schema: { params: Params } }, async (req, reply) => {
+    const m = await requireMember(db, req, reply);
+    if (!m) return;
+    const body = RemovePreviewRequest.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "bad_request" });
+    const [row] = await db.select({ authorId: messages.authorId }).from(messages).where(eq(messages.id, req.params.id)).limit(1);
+    if (!row) return reply.code(404).send({ error: "not_found" });
+    if (row.authorId !== m.userId) return reply.code(403).send({ error: "forbidden" });
+    if (!(await previews.remove(req.params.id, body.data.url))) return reply.code(404).send({ error: "unknown_preview" });
+    return { ok: true };
   });
 
   app.delete<{ Params: { id: string } }>("/api/messages/:id", { schema: { params: Params } }, async (req, reply) => {

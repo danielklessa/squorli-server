@@ -10,6 +10,7 @@ import { autostartEnabled, autostartSupported, setAutostart } from "./autostartS
 import { loadConfig, saveConfig } from "./config";
 import { findDeepLink } from "./deepLinkArgs";
 import { handleGames } from "./gameWatch";
+import { handleLinkLookup } from "./linkLookup";
 import { handleDeepLinks } from "./deepLinks";
 import { handleDisplayMedia } from "./displayMedia";
 import { registerAppScheme, serveApp } from "./scheme";
@@ -172,13 +173,16 @@ else {
     // The embedded players' sound on the output device chosen for the web radio (the client names it by its label).
     const playerAudio = new PlayerAudioOutput(app.isPackaged ? undefined : (text) => console.log(text));
     applyPermissions(session.defaultSession, origins, () => playerAudio.granting());
-    ipcMain.on(IPC.playerOutput, (event, label: unknown) => { if (isClientFrame(event)) playerAudio.setLabel(readPlayerOutputLabel(label)); });
+    ipcMain.on(IPC.playerOutput, (event, label: unknown) => { if (isClientFrame(event)) playerAudio.setLabel("radio", readPlayerOutputLabel(label)); });
+    ipcMain.on(IPC.chatPlayerOutput, (event, label: unknown) => { if (isClientFrame(event)) playerAudio.setLabel("chat", readPlayerOutputLabel(label)); });
     if (app.isPackaged || !process.argv.includes("--no-player-fix")) letPlayersEmbed(session.defaultSession);
     const screenAudio = new ScreenAudioCapture();
     handleDisplayMedia(session.defaultSession, isClientFrame, screenAudio);
     ipcMain.on(IPC.screenAudioStop, (event) => { if (isClientFrame(event)) screenAudio.stop(); });
     // Controller input and "display required" for the client's AFK detection (native helper, Windows).
     const systemWatch = startSystemWatch(() => mainWindow, isClientFrame);
+    // Link previews of direct messages: the sender's app asks the linked host itself (linkLookup.ts).
+    handleLinkLookup(isClientFrame);
     // Game detection: the launchers' installed games, and the helper says when one of them is in front (gameWatch.ts).
     handleGames(() => mainWindow, isClientFrame, systemWatch);
     app.on("before-quit", () => { quitting = true; screenAudio.stop(); playerAudio.stop(); systemWatch.stop(); });

@@ -22,7 +22,7 @@ services:
       DIRECTORY_URL: ${DIRECTORY_URL:-}
       DIRECTORY_PROOF_URL: ${DIRECTORY_PROOF_URL:-}
       REQUIRE_ACCOUNT: ${REQUIRE_ACCOUNT:-}
-    volumes: [appdata:/app/data]   # attachments
+    volumes: [appdata:/app/data]   # attachments, pictures of link previews
     depends_on:
       postgres: { condition: service_healthy }
     networks: [internal]

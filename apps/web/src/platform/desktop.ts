@@ -60,10 +60,12 @@ export function desktopPlatform(bridge: DesktopBridge): Platform {
     // app:// is a secure scheme; only the development window (Vite over http) may load http resources.
     media: { mobile: false, blocksInsecureMedia: window.location.protocol !== "http:", screenSharePublishOverrides: () => null, takeScreenAudio: () => audio.take(), stopScreenAudio: () => audio.stop(),
       // An app older than this client has no such member.
-      setPlayerOutput: typeof bridge.setPlayerOutput === "function" ? (label) => bridge.setPlayerOutput(label) : null },
+      setPlayerOutput: typeof bridge.setPlayerOutput === "function" ? (label) => bridge.setPlayerOutput(label) : null,
+      setChatPlayerOutput: typeof bridge.setChatPlayerOutput === "function" ? (label) => bridge.setChatPlayerOutput(label) : null },
     links: {
       openExternal: (url) => bridge.openExternal(url),
       onDeepLink: (cb) => bridge.onDeepLink((raw) => { const link = parseDeepLink(raw); if (link) cb(link); }),
+      lookUp: typeof bridge.lookUpLink === "function" ? (request) => bridge.lookUpLink(request) : null,
     },
     screen: { setPicker: (next) => { picker = next; } },
     window: {

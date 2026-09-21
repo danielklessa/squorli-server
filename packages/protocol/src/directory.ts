@@ -124,7 +124,7 @@ export const BackupBlob = z.object({ handle: Handle, publicKey: PublicKey, ciphe
 
 // ---- M6c: signed account actions (authenticator, recovery codes, account status). Same pattern as registration
 // and backup: challenge + signature over host, nonce and payload (for actions with a code, the code is the payload).
-export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends", "server-leave", "sound-settings", "email-set", "email-verify", "email-code", "settings", "avatar-set"]);
+export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends", "server-leave", "sound-settings", "email-set", "email-verify", "email-code", "settings", "avatar-set", "link-lookup", "dm-blob-put"]);
 export type DirectoryAction = z.infer<typeof DirectoryAction>;
 export function directoryActionMessage(directoryHost: string, action: DirectoryAction, nonce: string, payload = ""): string {
   return `community-directory-${action}\n${directoryHost}\n${nonce}\n${payload}`;
@@ -156,6 +156,35 @@ export function directoryProfilePayload(server: string | null, displayName: stri
   return `${server ?? ""}\n${displayName ?? ""}`;
 }
 export const ProfileUpdateRequest = SignedActionRequest.extend({ server: ServerHost.nullable(), displayName: DisplayName.nullable() });
+
+// ---- Link previews in direct messages (21 September 2026, dm.ts). Two services for the SENDER's client, both switched on by
+// `features.dmPreviews`:
+//  - POST /api/link-lookup (signed action `link-lookup`, payload = the address, or "youtube:<video id>"): the directory looks a
+//    link up for a client that cannot do it itself (a browser may not read a foreign page). The desktop app asks the linked
+//    host itself and never uses this route, so the directory learns links only from senders in a browser.
+//  - POST /api/dm-blobs (signed action `dm-blob-put`, payload = SHA-256 hex of the bytes) stores a picture the sender has
+//    encrypted (dm.ts `sealDmBlob`); GET /api/dm-blobs/<id> hands it to whoever knows the id, which only travels inside the
+//    encrypted message. The directory keeps these bytes as long as direct messages and cannot read them.
+export const DM_BLOB_MAX_BYTES = 256 * 1024;
+export const LinkLookupRequest = SignedActionRequest.extend({ url: z.string().max(2100).optional(), youtube: z.string().regex(/^[\w-]{11}$/).optional() })
+  .refine((r) => (r.url === undefined) !== (r.youtube === undefined), "url or youtube");
+export type LinkLookupRequest = z.infer<typeof LinkLookupRequest>;
+export const directoryLinkLookupPayload = (r: { url?: string | undefined; youtube?: string | undefined }) => (r.youtube !== undefined ? `youtube:${r.youtube}` : r.url ?? "");
+/** `found` false = no preview (not reachable, not public, no title). The picture as it came from the host, base64, at most 2 MB. */
+export const LinkLookupResponse = z.object({
+  found: z.boolean(),
+  kind: z.enum(["page", "youtube"]).optional(),
+  siteName: z.string().nullable().optional(),
+  title: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+  image: z.object({ mime: z.string(), data: z.string() }).nullable().optional(),
+});
+export type LinkLookupResponse = z.infer<typeof LinkLookupResponse>;
+export const DmBlobPutRequest = SignedActionRequest.extend({ data: z.string().min(4).max(Math.ceil(DM_BLOB_MAX_BYTES / 3) * 4 + 4).regex(/^[A-Za-z0-9+/]+={0,2}$/) });
+export type DmBlobPutRequest = z.infer<typeof DmBlobPutRequest>;
+export const DmBlobPutResponse = z.object({ id: z.string().regex(/^[0-9a-f]{32}$/) });
+export type DmBlobPutResponse = z.infer<typeof DmBlobPutResponse>;
+export const directoryDmBlobUrl = (directoryUrl: string, id: string) => `${directoryUrl.replace(/\/+$/, "")}/api/dm-blobs/${id}`;
 
 // ---- Avatars (19 September 2026): one image per handle, shown instead of the initials. The clients crop to a square and scale to
 // AVATAR_SIZE before the upload, so the service (which has no image library) only checks type and size. The image is public like the
@@ -397,7 +426,7 @@ export const DirectoryHealth = z.object({
   /** Host that registration signatures are bound to. */
   host: z.string(),
   /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. `email`: SMTP configured (address, notices, e-mail code). `settings`: the account stores all client settings (action `settings`). `afk`: the socket takes `activity` and friends carry `afk` (AFK detection). `emailRequired`: new handles need a confirmed e-mail address (REQUIRE_EMAIL; registration in two steps, see DirectoryRegisterRequest). `avatars`: the account stores one avatar image (action `avatar-set`, GET /api/avatars/<key>). */
-  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false), settings: z.boolean().default(false), afk: z.boolean().default(false), emailRequired: z.boolean().default(false), avatars: z.boolean().default(false), gameLibrary: z.boolean().default(false) }),
+  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false), settings: z.boolean().default(false), afk: z.boolean().default(false), emailRequired: z.boolean().default(false), avatars: z.boolean().default(false), gameLibrary: z.boolean().default(false), dmPreviews: z.boolean().default(false) }),
   time: Iso,
 });
 

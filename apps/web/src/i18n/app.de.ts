@@ -30,5 +30,6 @@ export const appDe: Partial<Record<keyof typeof de, string>> = {
   "voice.connErrWs": "{message}. Die LiveKit-Adresse \"{url}\" läuft über ws:// (unverschlüsselt); die App blockiert das, wie ein Browser auf einer HTTPS-Seite. LIVEKIT_PUBLIC_URL auf wss:// umstellen.",
   "voice.errMic": "Mikrofon: {err}. Prüfen, ob ein Mikrofon angeschlossen ist, Squorli in den Datenschutz-Einstellungen des Systems darauf zugreifen darf und unter Einstellungen > Sprache und Audio das richtige gewählt ist.",
   "voice.errCameraBusy": "Kamera: {err}. Die Kamera ließ sich nicht starten: Sie wird gerade von einem anderen Programm benutzt oder wurde noch nicht wieder freigegeben. Andere Programme mit Kamerazugriff schließen und es noch einmal versuchen.",
+  "settings.screenAudioHint": "Ton geteilter Bildschirme getrennt ausgeben, z. B. auf die Lautsprecher statt ins Headset. Gilt in der App auch für YouTube-Videos im Chat (wenige Sekunden nach dem Start des Videos).",
   "settings.radioAudioHint": "Das Radio eines Sprachkanals getrennt ausgeben, z. B. auf die Lautsprecher statt ins Headset. Gilt in der App auch für Twitch- und YouTube-Quellen (wenige Sekunden nach dem Start des Players).",
 };

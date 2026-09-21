@@ -8,6 +8,7 @@
  * Not supported on purpose: raw HTML, indented code, setext headings, embedded images (an image becomes a link, a
  * remote image would reveal the reader's IP address to a foreign host).
  */
+import { readBareUrl } from "@squorli/protocol";
 import { EMOTICON_STARTS, emoticonAt, shortcodeAt, splitEmoji } from "./emoji/convert";
 
 export type Inline =
@@ -349,20 +350,3 @@ function readLink(text: string, at: number): { href: string; children: Inline[];
   return { href, children: parseInline(label, true), next: j + 1 };
 }
 
-/** Bare http(s) address at `at`; trailing punctuation and emphasis marks belong to the sentence, not to the address. */
-function readBareUrl(text: string, at: number): string | null {
-  const m = /^https?:\/\/[^\s<]+/i.exec(text.slice(at, at + 2100));
-  if (!m) return null;
-  let url = m[0];
-  const cut = url.indexOf("](");
-  if (cut >= 0) url = url.slice(0, cut);
-  for (;;) {
-    const last = url[url.length - 1]!;
-    if (/[.,;:!?*_~'"\]]/.test(last)) { url = url.slice(0, -1); continue; }
-    if (last === ")" && count(url, ")") > count(url, "(")) { url = url.slice(0, -1); continue; }
-    break;
-  }
-  return /^https?:\/\/[^/?#]/i.test(url) ? url : null;
-}
-
-const count = (s: string, ch: string) => s.split(ch).length - 1;

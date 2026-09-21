@@ -1,4 +1,5 @@
 import { bigint, bigserial, boolean, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
+import type { LinkPreview } from "@squorli/protocol";
 
 const ts = (name: string) => timestamp(name, { withTimezone: true });
 
@@ -152,6 +153,11 @@ export const messages = pgTable(
     channelId: uuid("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
     authorId: uuid("author_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     content: text("content").notNull(),
+    /**
+     * Link previews (previews/service.ts): what the server found for the message's links, in the order of the links, and
+     * with `removed` the ones the author took away (kept so that an edit does not bring them back). null = none looked up.
+     */
+    previews: jsonb("previews").$type<(LinkPreview & { removed?: boolean })[]>(),
     createdAt: ts("created_at").notNull().defaultNow(),
     editedAt: ts("edited_at"),
   },

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { askConfirm } from "./dialogs";
 import { EmojiButton } from "./EmojiPicker";
 import { Icon } from "./Icon";
+import { LinkPreviews } from "./LinkPreviews";
 import { MentionContext, MessageText } from "./MessageText";
 import { useMentionSuggest } from "./MentionSuggest";
 import { decodeMentions, encodeMentions, mentionsUser } from "./mentions";
@@ -157,6 +158,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
                           ? <a key={a.id} href={conn.api.abs(a.url)} target="_blank" rel="noreferrer"><img className="attachment-img" src={conn.api.abs(a.url)} alt={a.name} loading="lazy" /></a>
                           : <a key={a.id} className="attachment" href={conn.api.abs(a.url)} target="_blank" rel="noreferrer"><Icon name="paperclip" /> {a.name} <span className="muted">({fmtSize(a.size)})</span></a>
                       ))}
+                      {m.previews && <LinkPreviews messageId={m.id} previews={m.previews} mine={mine} conn={conn} onError={setErr} />}
                     </>
                   )}
                 </div>

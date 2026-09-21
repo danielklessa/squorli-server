@@ -1,10 +1,11 @@
 import { webContents, type WebFrameMain } from "electron";
-import { isPlayerFrameUrl, playerAudioScript, type PlayerAudioResult } from "./playerAudioScript";
+import { playerAudioScript, playerKindOf, type PlayerAudioResult, type PlayerKind } from "./playerAudioScript";
 
 const EVERY_MS = 3000;
 
 /**
- * Puts the embedded players' sound on the output device the user chose for the web radio (playerAudioScript.ts). The
+ * Puts the embedded players' sound on the output device the user chose: the web radio's players on the radio's device,
+ * the players of videos linked in the chat on the device of screen share audio (`playerKindOf`, playerAudioScript.ts). The
  * players make new media elements as they go (the next video, ads), so while a device is chosen every player frame is
  * looked at every few seconds; a pass that finds nothing to move does nothing.
  *
@@ -17,30 +18,32 @@ const EVERY_MS = 3000;
  * devices. Without a chosen device nothing is granted beyond our own call.
  */
 export class PlayerAudioOutput {
-  private label: string | null = null;
+  private readonly labels: Record<PlayerKind, string | null> = { radio: null, chat: null };
   private timer: ReturnType<typeof setInterval> | null = null;
   private running = 0;
   private busy = false;
 
   constructor(private readonly log: (text: string) => void = () => {}) {}
 
-  granting(): boolean { return this.label !== null || this.running > 0; }
+  private get chosen(): boolean { return this.labels.radio !== null || this.labels.chat !== null; }
 
-  setLabel(label: string | null): void {
-    if (label === this.label) return;
-    this.label = label;
-    if (label !== null) this.timer ??= setInterval(() => { void this.pass(); }, EVERY_MS);
+  granting(): boolean { return this.chosen || this.running > 0; }
+
+  setLabel(kind: PlayerKind, label: string | null): void {
+    if (label === this.labels[kind]) return;
+    this.labels[kind] = label;
+    if (this.chosen) this.timer ??= setInterval(() => { void this.pass(); }, EVERY_MS);
     else if (this.timer !== null) { clearInterval(this.timer); this.timer = null; }
     void this.pass(); // also for null: players already moved go back to the default device
   }
 
   stop(): void { if (this.timer !== null) { clearInterval(this.timer); this.timer = null; } }
 
-  private playerFrames(): WebFrameMain[] {
-    const frames: WebFrameMain[] = [];
+  private playerFrames(): { frame: WebFrameMain; kind: PlayerKind }[] {
+    const frames: { frame: WebFrameMain; kind: PlayerKind }[] = [];
     for (const contents of webContents.getAllWebContents()) {
       if (contents.isDestroyed()) continue;
-      try { for (const frame of contents.mainFrame.framesInSubtree) if (isPlayerFrameUrl(frame.url)) frames.push(frame); } catch { /* a window on its way out */ }
+      try { for (const frame of contents.mainFrame.framesInSubtree) { const kind = playerKindOf(frame.url); if (kind) frames.push({ frame, kind }); } } catch { /* a window on its way out */ }
     }
     return frames;
   }
@@ -50,13 +53,12 @@ export class PlayerAudioOutput {
     const frames = this.playerFrames();
     if (frames.length === 0) return;
     this.busy = true;
-    const script = playerAudioScript(this.label);
     this.running++;
     try {
-      for (const frame of frames) {
+      for (const { frame, kind } of frames) {
         try {
-          const result = await frame.executeJavaScript(script, true) as PlayerAudioResult;
-          if (result.moved > 0 || result.error) this.log(`player audio: ${new URL(frame.url).host} elements=${result.elements} moved=${result.moved}${result.error ? ` error=${result.error}` : ""}`);
+          const result = await frame.executeJavaScript(playerAudioScript(this.labels[kind]), true) as PlayerAudioResult;
+          if (result.moved > 0 || result.error) this.log(`player audio (${kind}): ${new URL(frame.url).host} elements=${result.elements} moved=${result.moved}${result.error ? ` error=${result.error}` : ""}`);
         } catch { /* the frame navigated or went away */ }
       }
     } finally { this.running--; this.busy = false; }

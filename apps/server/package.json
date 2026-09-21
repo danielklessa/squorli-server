@@ -14,6 +14,7 @@
     "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
+    "@squorli/link-preview": "workspace:*",
     "@squorli/protocol": "workspace:*",
     "@fastify/cors": "^10.0.0",
     "@fastify/multipart": "^9.4.0",

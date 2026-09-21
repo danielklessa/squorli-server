@@ -83,6 +83,7 @@ All variables are documented in [.env.example](.env.example). The most relevant 
 | `SERVER_NAME` | Initial name of the server (changeable in the admin panel) |
 | `OWNER_PUBLIC_KEY` | Public key (64 hex) that becomes owner on first login |
 | `MAX_UPLOAD_MB` | Upper limit for attachments, default 25 |
+| `LINK_PREVIEWS` | `true` (default): links in messages get a preview (title, description, picture; YouTube videos play in the chat). The server fetches the linked pages itself, from public hosts only, and serves the pictures from its data volume, so readers never contact the linked host. `false` turns previews and these outgoing requests off |
 | `LIVEKIT_NODE_IP` | Public IP of the host; empty = LiveKit detects it via STUN |
 | `LIVEKIT_PUBLIC_URL` | Only if clients should not reach LiveKit via `https://PUBLIC_DOMAIN/rtc` |
 | `DIRECTORY_URL` | `https://directory.squorli.com` or your own directory; empty = no directory |

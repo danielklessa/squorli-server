@@ -1,4 +1,4 @@
-import type { AppearanceState, CustomProgram, DetectedGame, GameWatchSettings, PlatformOs, RunningGame, ScreenPick, ScreenSource, SystemActivityEvent, UpdateState, WindowAppearance, WindowControl, WindowFrameState, WindowMaterial } from "./bridge";
+import type { AppearanceState, CustomProgram, DetectedGame, GameWatchSettings, PlatformOs, RunningGame, ScreenPick, ScreenSource, SystemActivityEvent, UpdateState, WindowAppearance, WindowControl, WindowFrameState, WindowMaterial, BridgeLinkLookup } from "./bridge";
 import type { DeepLink } from "./deepLink";
 
 export type { DeepLink } from "./deepLink";
@@ -31,6 +31,8 @@ export interface PlatformMedia {
    * a browser page cannot route a foreign iframe's sound, there it is null and the players use the default device.
    */
   readonly setPlayerOutput: ((label: string | null) => void) | null;
+  /** Output device (by label) of the players of videos linked in the chat; null = this platform cannot route them (a browser, an older app). */
+  readonly setChatPlayerOutput: ((label: string | null) => void) | null;
 }
 
 /**
@@ -78,6 +80,8 @@ export interface Platform {
     openExternal(url: string): void;
     /** `squorli://` links aimed at this app; the first subscription also delivers the one the app was started with. */
     onDeepLink(cb: (link: DeepLink) => void): () => void;
+    /** Look a link up from this computer for the preview of a direct message; null = this platform cannot (a browser, an older app): ask the directory. */
+    readonly lookUp: ((request: { url: string } | { youtube: string }) => Promise<BridgeLinkLookup>) | null;
   };
   readonly screen: {
     /** Desktop: the shell has no picker of its own and asks this one; web: ignored (the browser brings its own). */

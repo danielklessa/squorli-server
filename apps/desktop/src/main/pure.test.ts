@@ -146,12 +146,31 @@ describe("navigation", () => {
   });
 });
 
+describe("link lookup for direct messages", () => {
+  it("takes an http(s) address or a video id from the client and nothing else", async () => {
+    const { readLinkLookupRequest } = await import("./linkLookup");
+    expect(readLinkLookupRequest({ url: "https://example.org/a?b=1" })).toEqual({ url: "https://example.org/a?b=1" });
+    expect(readLinkLookupRequest({ youtube: "aqz-KE-bpKQ" })).toEqual({ youtube: "aqz-KE-bpKQ" });
+    for (const bad of [null, "https://example.org", {}, { url: "file:///C:/Windows/win.ini" }, { url: "javascript:alert(1)" }, { url: "https://" }, { url: `https://example.org/${"x".repeat(2100)}` },
+      { youtube: "zu-kurz" }, { url: "https://example.org", youtube: "aqz-KE-bpKQ" }, { url: 5 }]) expect(readLinkLookupRequest(bad)).toBeNull();
+  });
+});
+
 describe("player audio output", () => {
   it("knows the two player frames and nothing else", async () => {
     const { isPlayerFrameUrl } = await import("./playerAudioScript");
     expect(isPlayerFrameUrl("https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ?enablejsapi=1")).toBe(true);
     expect(isPlayerFrameUrl("https://player.twitch.tv/?channel=x&parent=squorli")).toBe(true);
     for (const url of ["https://www.youtube.com/embed/aqz-KE-bpKQ", "https://player.twitch.tv.evil.example/", "http://player.twitch.tv/", "app://squorli/", "about:blank", "", undefined]) expect(isPlayerFrameUrl(url)).toBe(false);
+  });
+
+  it("tells the chat's players from the radio's by the mark in the address", async () => {
+    const { playerKindOf } = await import("./playerAudioScript");
+    expect(playerKindOf("https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ?enablejsapi=1")).toBe("radio");
+    expect(playerKindOf("https://player.twitch.tv/?channel=x&parent=squorli")).toBe("radio");
+    expect(playerKindOf("https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ?autoplay=1&rel=0#squorli-chat")).toBe("chat");
+    expect(playerKindOf("https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ#anders")).toBe("radio");
+    for (const url of ["https://www.youtube.com/embed/aqz-KE-bpKQ#squorli-chat", "app://squorli/#squorli-chat", "", undefined]) expect(playerKindOf(url)).toBeNull();
   });
 
   it("takes a label or nothing from the client, and carries the label into the script as data", async () => {

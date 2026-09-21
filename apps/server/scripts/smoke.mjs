@@ -580,6 +580,77 @@ const [smuBad] = await api("PUT", "/api/me/mute", { muted: "ja" }, B.token);
 const [smuAnon] = await api("PUT", "/api/me/mute", { muted: true });
 check("mute: text channels only, valid input, signed in", smuVoice === 404 && smuBad === 400 && smuAnon === 401, `${smuVoice} ${smuBad} ${smuAnon}`);
 
+// ---------- Link previews (docs/features/link-previews.md)
+// The script plays the linked website on 127.0.0.1:3198. The server only fetches from there when it was started with
+// LINK_PREVIEW_TEST_ORIGIN=http://127.0.0.1:3198 (give the same value to this script); without it only the field is checked.
+{
+  const [, pvFirst] = await api("POST", `/api/channels/${textCh.id}/messages`, { content: "ohne Link" }, B.token);
+  check("link previews: a message carries the field (empty without links)", Array.isArray(pvFirst.previews) && pvFirst.previews.length === 0, JSON.stringify(pvFirst.previews));
+  await api("DELETE", `/api/messages/${pvFirst.id}`, undefined, B.token);
+  const SITE = process.env.LINK_PREVIEW_TEST_ORIGIN;
+  if (!SITE) console.log("info link previews: Server und Skript mit LINK_PREVIEW_TEST_ORIGIN=http://127.0.0.1:3198 starten, um den Abruf zu pruefen");
+  else {
+    const { createServer } = await import("node:http");
+    const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+    const hits = [];
+    let insideHits = 0;
+    const site = createServer((req, res) => {
+      hits.push(req.url);
+      const page = (title) => `<!doctype html><html><head><title>falscher Titel</title><meta property="og:title" content="${title}"><meta property="og:description" content="Eine &quot;Beschreibung&quot;"><meta property="og:site_name" content="Rauchseite"><meta property="og:image" content="/bild.png"></head><body><script>alert(1)</script></body></html>`;
+      if (req.url === "/seite") return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(page("Rauchtest &amp; Vorschau"));
+      if (req.url === "/zweite") return res.writeHead(200, { "content-type": "text/html" }).end(page("Zweite Seite"));
+      if (req.url === "/bild.png") return res.writeHead(200, { "content-type": "image/png" }).end(PNG);
+      if (req.url === "/text") return res.writeHead(200, { "content-type": "text/plain" }).end("<title>kein HTML</title>");
+      if (req.url === "/nach-innen") return res.writeHead(302, { location: "http://127.0.0.1:3197/geheim" }).end();
+      res.writeHead(404).end();
+    });
+    // What a member must never reach through the server: another address of the machine itself.
+    const inside = createServer((_req, res) => { insideHits++; res.writeHead(200, { "content-type": "text/html" }).end("<title>intern</title>"); });
+    await new Promise((r) => site.listen(3198, "127.0.0.1", r));
+    await new Promise((r) => inside.listen(3197, "127.0.0.1", r));
+    const post = (content) => api("POST", `/api/channels/${textCh.id}/messages`, { content }, B.token);
+    const updateOf = (id, pred) => wsA.waitFor((e) => e.type === "message.update" && e.message?.id === id && pred(e.message), 8000).catch(() => null);
+    const stored = async (id) => (await api("GET", `/api/channels/${textCh.id}/messages?limit=100`, undefined, owner.token))[1].messages.find((m) => m.id === id);
+
+    const [, pm] = await post(`Schau: ${SITE}/seite und nochmal ${SITE}/seite`);
+    const created = await wsA.waitFor((e) => e.type === "message.create" && e.message?.id === pm.id).catch(() => null);
+    const withPreview = await updateOf(pm.id, (m) => m.previews?.length === 1);
+    const pv = withPreview?.message.previews[0];
+    check("link previews: the message goes out at once, the preview follows as an update", created?.message.previews?.length === 0 && !!pv && withPreview.message.editedAt === null);
+    check("link previews: title, description and site name from the page's head, decoded, one preview per address", pv?.kind === "page" && pv.url === `${SITE}/seite` && pv.title === "Rauchtest & Vorschau" && pv.description === 'Eine "Beschreibung"' && pv.siteName === "Rauchseite", JSON.stringify(pv));
+    const img = pv?.image ? await api("GET", pv.image, undefined, undefined, true) : null;
+    check("link previews: the picture is a copy on this server", /^\/api\/previews\/[0-9a-f]{32}\.png$/.test(pv?.image ?? "") && img?.status === 200 && img.headers.get("content-type") === "image/png" && img.headers.get("x-content-type-options") === "nosniff" && Buffer.from(await img.arrayBuffer()).equals(PNG), `${pv?.image} ${img?.status}`);
+    check("link previews: the history carries it", (await stored(pm.id))?.previews?.[0]?.title === "Rauchtest & Vorschau");
+    const [sBad] = await api("GET", "/api/previews/..%2f..%2f.env");
+    const [sBad2] = await api("GET", `/api/previews/${"0".repeat(32)}.png`);
+    check("link previews: only names of stored pictures are served", sBad === 404 && sBad2 === 404, `${sBad} ${sBad2}`);
+
+    const [sRmOwner] = await api("POST", `/api/messages/${pm.id}/previews/remove`, { url: pv?.url }, owner.token);
+    const [sRmWrong] = await api("POST", `/api/messages/${pm.id}/previews/remove`, { url: `${SITE}/anders` }, B.token);
+    check("link previews: only the author removes one, and only one that is there", sRmOwner === 403 && sRmWrong === 404, `${sRmOwner} ${sRmWrong}`);
+    const [sRm] = await api("POST", `/api/messages/${pm.id}/previews/remove`, { url: pv?.url }, B.token);
+    const removed = await updateOf(pm.id, (m) => m.previews?.length === 0);
+    check("link previews: the author removes it for everybody", sRm === 200 && !!removed && removed.message.editedAt === null);
+    const hitsBefore = hits.length;
+    await api("PATCH", `/api/messages/${pm.id}`, { content: `Schau: ${SITE}/seite und ${SITE}/zweite` }, B.token);
+    const second = await updateOf(pm.id, (m) => m.previews?.length === 1 && m.previews[0].title === "Zweite Seite");
+    check("link previews: an edit looks the new link up and leaves the removed one away", !!second && !hits.slice(hitsBefore).includes("/seite"), JSON.stringify(hits.slice(hitsBefore)));
+
+    const [, quiet] = await post(`<${SITE}/seite> \`${SITE}/zweite\` ${SITE}/text ${SITE}/nach-innen`);
+    await new Promise((r) => setTimeout(r, 1500));
+    check("link previews: none for angle brackets, code, a text file and a redirect to the machine itself (never asked)", (await stored(quiet.id))?.previews?.length === 0 && insideHits === 0 && hits.includes("/nach-innen"), `${JSON.stringify((await stored(quiet.id))?.previews)} inside ${insideHits}`);
+
+    const [, yt] = await post(`https://youtu.be/${YT_ID}?t=42`);
+    const ytUpdate = await updateOf(yt.id, (m) => m.previews?.length === 1);
+    const yp = ytUpdate?.message.previews[0];
+    check("link previews: a youtube link becomes a video with title and a picture from this server", yp?.kind === "youtube" && yp.videoId === YT_ID && yp.start === 42 && typeof yp.title === "string" && yp.title.length > 0 && /^\/api\/previews\//.test(yp.image ?? ""), JSON.stringify(yp));
+    const [sRmYt] = await api("POST", `/api/messages/${yt.id}/previews/remove`, { url: yp?.url }, B.token);
+    check("link previews: the author removes the video too", sRmYt === 200 && !!(await updateOf(yt.id, (m) => m.previews?.length === 0)));
+    for (const m of [pm, quiet, yt]) await api("DELETE", `/api/messages/${m.id}`, undefined, B.token);
+    await new Promise((r) => site.close(r)); await new Promise((r) => inside.close(r));
+  }
+}
+
 // Deleting: a mod may delete others' messages, the author their own
 const [sd1] = await api("DELETE", `/api/messages/${page1.messages[1].id}`, undefined, B.token);
 const evDel = await wsA.waitFor((e) => e.type === "message.delete" && e.id === page1.messages[1].id).catch(() => null);

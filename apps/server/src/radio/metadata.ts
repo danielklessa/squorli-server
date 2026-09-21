@@ -1,9 +1,7 @@
-import { lookup as dnsLookup } from "node:dns";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
-import type { LookupFunction } from "node:net";
 import { IcyReader, decodeIcyText, isStationName, streamTitleOf } from "./icy";
-import { checkHost, isInternalAddress } from "./resolve";
+import { checkHost, publicLookup } from "./resolve";
 
 /** A voice channel whose radio somebody is listening to right now. */
 export type RadioTarget = { channelId: string; streamUrl: string; stationName: string };
@@ -146,15 +144,6 @@ export class RadioMetadata {
     }
   }
 }
-
-/** DNS for the stream connection itself: the address actually connected to must be public (closes the gap between check and connect). */
-const publicLookup: LookupFunction = (hostname, options, callback) => {
-  dnsLookup(hostname, options, (err, address, family) => {
-    const all = Array.isArray(address) ? address.map((a) => a.address) : [address];
-    if (!err && all.some((a) => isInternalAddress(a))) return callback(Object.assign(new Error("internal address"), { code: "EACCES" }), address as never, family);
-    callback(err, address as never, family);
-  });
-};
 
 /**
  * Not `fetch`: stations answer an `Icy-MetaData` request with sloppy HTTP often enough (bare line feeds in the header,

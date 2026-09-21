@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import { BRIDGE_GLOBAL, INFO_ARGUMENT, IPC, type CustomProgram, type DesktopBridge, type DesktopInfo, type DetectedGame, type GameWatchSettings, type RunningGame, type AppearanceState, type ScreenAudioEvent, type ScreenPick, type ScreenPickRequest, type SystemActivityEvent, type UpdateState, type WindowAppearance, type WindowControl, type WindowFrameState } from "@squorli/web/platform/bridge";
+import { BRIDGE_GLOBAL, INFO_ARGUMENT, IPC, type CustomProgram, type DesktopBridge, type DesktopInfo, type DetectedGame, type GameWatchSettings, type RunningGame, type AppearanceState, type ScreenAudioEvent, type ScreenPick, type ScreenPickRequest, type SystemActivityEvent, type UpdateState, type WindowAppearance, type WindowControl, type WindowFrameState, type BridgeLinkLookup } from "@squorli/web/platform/bridge";
 
 /**
  * Preload script (sandboxed, context-isolated): the only thing the page gets from the shell is this bridge. Plain data in
@@ -23,8 +23,10 @@ const bridge: DesktopBridge = {
   onScreenAudio: (cb) => subscribe<ScreenAudioEvent>(IPC.screenAudio, cb),
   stopScreenAudio: () => ipcRenderer.send(IPC.screenAudioStop),
   setPlayerOutput: (label: string | null) => ipcRenderer.send(IPC.playerOutput, label),
+  setChatPlayerOutput: (label: string | null) => ipcRenderer.send(IPC.chatPlayerOutput, label),
   onSystemActivity: (cb) => { const off = subscribe<SystemActivityEvent>(IPC.systemActivity, cb); ipcRenderer.send(IPC.systemActivityReady); return off; },
   scanGames: () => ipcRenderer.invoke(IPC.gamesScan) as Promise<DetectedGame[]>,
+  lookUpLink: (request: { url: string } | { youtube: string }) => ipcRenderer.invoke(IPC.linkLookup, request) as Promise<BridgeLinkLookup>,
   setGameWatch: (settings: GameWatchSettings) => ipcRenderer.send(IPC.gamesWatch, settings),
   pickGameProgram: () => ipcRenderer.invoke(IPC.gamesPick) as Promise<CustomProgram | null>,
   onRunningGame: (cb) => { const off = subscribe<RunningGame | null>(IPC.gameRunning, cb); ipcRenderer.send(IPC.gameRunningReady); return off; },

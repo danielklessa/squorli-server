@@ -22,7 +22,9 @@ import { registerAttachmentRoutes } from "./routes/attachments";
 import { registerChannelRoutes } from "./routes/channels";
 import { registerInviteRoutes } from "./routes/invites";
 import { registerMemberRoutes } from "./routes/members";
-import { registerMessageRoutes } from "./routes/messages";
+import { loadMessages, registerMessageRoutes } from "./routes/messages";
+import { registerPreviewRoutes } from "./routes/previews";
+import { LinkPreviews } from "./previews/service";
 import { registerReadStateRoutes } from "./routes/readState";
 import { RADIO_OFF, registerRadioRoutes } from "./routes/radio";
 import { RadioIdleStop } from "./radio/idle";
@@ -185,7 +187,15 @@ async function main() {
   await registerRoleRoutes(app, db, hub, presence, lk);
   await registerMemberRoutes(app, db, hub, presence, lk);
   await registerInviteRoutes(app, db);
-  await registerMessageRoutes(app, db, hub);
+  // Link previews: looked up after a message is stored; the result goes out as the message itself, once more.
+  const previews = new LinkPreviews(db, config, app.log, async (row) => {
+    const [message] = await loadMessages(db, [row]);
+    if (message) hub.broadcast({ type: "message.update", message });
+  });
+  await previews.init();
+  app.addHook("onClose", async () => previews.close());
+  await registerMessageRoutes(app, db, hub, previews);
+  await registerPreviewRoutes(app, previews);
   await registerReadStateRoutes(app, db, hub);
   await registerRadioRoutes(app, db, hub, presence, syncRadioMeta);
   await registerAttachmentRoutes(app, db, config);

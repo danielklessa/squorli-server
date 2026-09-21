@@ -1,3 +1,5 @@
+import { CHAT_PLAYER_MARK } from "@squorli/web/platform/bridge";
+
 /**
  * Output device of the embedded players (Twitch, YouTube as the web radio's source), pure part. A page cannot choose where a
  * foreign iframe plays (`setSinkId` exists per media element, inside the frame), so in a browser the players always use the
@@ -9,6 +11,18 @@ export const PLAYER_ORIGINS: readonly string[] = ["https://player.twitch.tv", "h
 export function isPlayerFrameUrl(url: string | undefined): boolean {
   if (!url) return false;
   try { const u = new URL(url); return PLAYER_ORIGINS.includes(`${u.protocol}//${u.host}`); } catch { return false; }
+}
+
+/**
+ * Two kinds of players, two devices: the web radio's players follow the radio's output device, the players of videos linked
+ * in the chat follow the device of screen share audio (user's wish, 21 September 2026). The client marks a chat player's
+ * address with the fragment CHAT_PLAYER_MARK, which never reaches the player's host. A frame that navigates inside itself
+ * keeps or loses the mark with its address; without the mark it counts as the radio's.
+ */
+export type PlayerKind = "radio" | "chat";
+export function playerKindOf(url: string | undefined): PlayerKind | null {
+  if (!isPlayerFrameUrl(url)) return null;
+  try { return new URL(url!).hash === CHAT_PLAYER_MARK ? "chat" : "radio"; } catch { return null; }
 }
 
 /** What the client may send: a device's label, or null = the system's default device. Anything else counts as null. */

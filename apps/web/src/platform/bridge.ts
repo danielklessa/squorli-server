@@ -105,10 +105,21 @@ export interface DesktopBridge {
   stopScreenAudio(): void;
   /** Output device of the embedded players (Twitch, YouTube), named by its label because device ids differ per origin; null = the system's default. */
   setPlayerOutput(label: string | null): void;
+  /**
+   * The same for the players of videos linked in the chat (LinkPreviews.tsx), which follow the output device of screen share
+   * audio, not the radio's. The shell tells the two kinds of player frames apart by CHAT_PLAYER_MARK. An app from before it
+   * has no such member and puts every player on the radio's device.
+   */
+  setChatPlayerOutput(label: string | null): void;
   /** Controller input and the "display required" state; the first subscription also gets the current display state. */
   onSystemActivity(cb: (event: SystemActivityEvent) => void): () => void;
   /** Read the launchers' installed games again; answers with them and the added programs, by name. */
   scanGames(): Promise<DetectedGame[]>;
+  /**
+   * Look a link up for the preview of a direct message: the app asks the linked host itself (public hosts only), so no
+   * server learns the link. An app from before it has no such member; the client then asks the directory like a browser.
+   */
+  lookUpLink(request: { url: string } | { youtube: string }): Promise<BridgeLinkLookup>;
   setGameWatch(settings: GameWatchSettings): void;
   /** Ask the user for a program to add (the system's file dialog); null = cancelled. */
   pickGameProgram(): Promise<CustomProgram | null>;
@@ -143,9 +154,11 @@ export const IPC = {
   screenAudio: "squorli:screen-audio",
   screenAudioStop: "squorli:screen-audio-stop",
   playerOutput: "squorli:player-output",
+  chatPlayerOutput: "squorli:chat-player-output",
   systemActivity: "squorli:system-activity",
   systemActivityReady: "squorli:system-activity-ready",
   gamesScan: "squorli:games-scan",
+  linkLookup: "squorli:link-lookup",
   gamesWatch: "squorli:games-watch",
   gamesPick: "squorli:games-pick",
   gameRunning: "squorli:game-running",
@@ -167,3 +180,14 @@ export const IPC = {
 /** Name of the global the preload script exposes, and of the argument that carries `DesktopInfo` (base64 JSON). */
 export const BRIDGE_GLOBAL = "squorliDesktop";
 export const INFO_ARGUMENT = "--squorli-info=";
+
+/** What a link lookup found: the fields of a preview and the picture as it came from the host (the client makes it small). */
+export type BridgeLinkLookup =
+  | { found: false }
+  | { found: true; kind: "page" | "youtube"; siteName: string | null; title: string | null; description: string | null; image: { mime: string; data: Uint8Array } | null };
+
+/**
+ * Fragment of a chat video's player address (`https://www.youtube-nocookie.com/embed/<id>?...#squorli-chat`). A fragment
+ * never reaches YouTube; the desktop shell reads it from the frame's address to give that player the chat's output device.
+ */
+export const CHAT_PLAYER_MARK = "#squorli-chat";

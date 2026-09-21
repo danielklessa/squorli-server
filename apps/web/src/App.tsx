@@ -48,6 +48,22 @@ import { t } from "./i18n";
 import { platform, type ScreenPick, type ScreenSource } from "./platform";
 import { formatDeepLink } from "./platform/deepLink";
 
+/**
+ * Tells the desktop shell on which output device a kind of embedded player should play, by the device's label (ids differ
+ * per origin), and again when devices come and go: the chosen one may be back. Returns the effect's cleanup.
+ */
+function tellPlayerOutput(setOutput: ((label: string | null) => void) | null, sink: string | null): (() => void) | undefined {
+  if (!setOutput) return undefined;
+  let stale = false;
+  const tell = () => {
+    if (!sink) { setOutput(null); return; }
+    void navigator.mediaDevices.enumerateDevices().then((devices) => { if (!stale) setOutput(devices.find((d) => d.kind === "audiooutput" && d.deviceId === sink)?.label || null); }).catch(() => {});
+  };
+  tell();
+  navigator.mediaDevices.addEventListener("devicechange", tell);
+  return () => { stale = true; navigator.mediaDevices.removeEventListener("devicechange", tell); };
+}
+
 const peerKeysOf = (members: Member[]): Record<string, string> => Object.fromEntries(members.map((m) => [m.userId, m.publicKey]));
 
 export function App() {
@@ -313,18 +329,10 @@ export function App() {
   useEffect(() => radio.setOutputDevice(radioSink), [radio, radioSink]);
   // The players of a Twitch or YouTube source are foreign iframes no page can route; the desktop app's shell can, and is
   // told the device by its label (ids differ per origin). Again when devices come and go: the chosen one may be back.
-  useEffect(() => {
-    const setPlayerOutput = platform.media.setPlayerOutput;
-    if (!setPlayerOutput) return;
-    let stale = false;
-    const tell = () => {
-      if (!radioSink) { setPlayerOutput(null); return; }
-      void navigator.mediaDevices.enumerateDevices().then((devices) => { if (!stale) setPlayerOutput(devices.find((d) => d.kind === "audiooutput" && d.deviceId === radioSink)?.label || null); }).catch(() => {});
-    };
-    tell();
-    navigator.mediaDevices.addEventListener("devicechange", tell);
-    return () => { stale = true; navigator.mediaDevices.removeEventListener("devicechange", tell); };
-  }, [radioSink]);
+  useEffect(() => tellPlayerOutput(platform.media.setPlayerOutput, radioSink), [radioSink]);
+  // Videos linked in the chat play where screen share audio plays (user's wish): "something I watch", not the radio.
+  const chatVideoSink = voiceSettings.screenOutputDeviceId ?? voiceSettings.outputDeviceId;
+  useEffect(() => tellPlayerOutput(platform.media.setChatPlayerOutput, chatVideoSink), [chatVideoSink]);
 
   // Permission VIEW_VIDEO: roles or members changed -> the running connection restricts its camera/screen to the members
   // who may watch (enforced by LiveKit), and stops receiving others' feeds when we lost the permission ourselves.

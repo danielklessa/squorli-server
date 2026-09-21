@@ -4,6 +4,7 @@ import {
   BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryActionMessage, directoryBackupMessage, directoryProfilePayload,
   directoryRegisterMessage, directorySoundSettingsPayload, openBackup, type AccountSettings, type SoundSettings,
   MuteState, ReadStateResponse, type Attachment, type Category, type Channel, type RadioStation, type Role,
+  DmBlobPutResponse, LinkLookupResponse, directoryDmBlobUrl, directoryLinkLookupPayload,
 } from "@squorli/protocol";
 import { z } from "zod";
 import { toBase64, type AvatarImage } from "./avatarImage";
@@ -83,6 +84,8 @@ export class ServerApi {
   }
   editMessage(id: string, content: string) { return this.request<Message>("PATCH", `/api/messages/${id}`, { content }).then((m) => Message.parse(m)); }
   deleteMessage(id: string) { return this.request("DELETE", `/api/messages/${id}`); }
+  /** The author takes one link preview of their message away; the change arrives as `message.update`. */
+  removePreview(id: string, url: string) { return this.request("POST", `/api/messages/${id}/previews/remove`, { url }); }
   async uploadAttachment(file: File): Promise<Attachment> {
     const form = new FormData();
     form.append("file", file, file.name);
@@ -250,6 +253,30 @@ export async function directorySetAvatar(dirUrl: string, id: Identity, image: Av
   return AvatarUpdateResponse.parse(await directoryFetch(dirUrl, "POST", "/api/avatar", {
     publicKey: id.publicKey, challengeId: ch.challengeId, signature, avatar: image ? { mime: image.mime, data: toBase64(image.bytes) } : null,
   }));
+}
+/**
+ * Link previews in direct messages, for a sender whose client cannot look a link up itself (a browser): the directory does it
+ * (signed, so only accounts ask, and limited per account). The desktop app never calls this: it asks the linked host itself.
+ */
+export async function directoryLinkLookup(dirUrl: string, id: Identity, request: { url: string } | { youtube: string }): Promise<LinkLookupResponse> {
+  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
+  const signature = await sign(id, directoryActionMessage(health.host, "link-lookup", ch.nonce, directoryLinkLookupPayload(request)));
+  return LinkLookupResponse.parse(await directoryFetch(dirUrl, "POST", "/api/link-lookup", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, ...request }));
+}
+/** Store a picture the client has encrypted (dm.ts `sealDmBlob`) in the directory's blob store; the signature covers the hash of the bytes. */
+export async function directoryPutDmBlob(dirUrl: string, id: Identity, ciphertext: Uint8Array): Promise<string> {
+  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", ciphertext as BufferSource)), (b) => b.toString(16).padStart(2, "0")).join("");
+  const signature = await sign(id, directoryActionMessage(health.host, "dm-blob-put", ch.nonce, digest));
+  return DmBlobPutResponse.parse(await directoryFetch(dirUrl, "POST", "/api/dm-blobs", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, data: toBase64(ciphertext) })).id;
+}
+/** The ciphertext of a blob; whoever has the id (it travels inside the encrypted message) may fetch it. */
+export async function directoryDmBlob(dirUrl: string, blobId: string): Promise<Uint8Array> {
+  const res = await fetch(directoryDmBlobUrl(dirUrl, blobId));
+  if (!res.ok) throw new ApiError("GET", "/api/dm-blobs", res.status, null, {});
+  return new Uint8Array(await res.arrayBuffer());
 }
 /** Voice cue settings in the account (signed): follow the account across chat servers and devices; read back via directoryAccountStatus(). */
 export async function directorySetSoundSettings(dirUrl: string, id: Identity, soundSettings: SoundSettings): Promise<void> {

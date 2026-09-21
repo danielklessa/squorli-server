@@ -13,16 +13,43 @@
  * Message: AES-GCM(key, random 12-byte IV, JSON { text }, AAD = "v1\n<from>\n<to>\n<id>"). The AAD binds sender,
  * recipient and message id so the directory cannot swap anything around; authenticity follows from the DH (only the two
  * key holders can produce a valid tag). No forward secrecy (deliberate, PLAN-friends-dm.md §8).
+ *
+ * Link previews (21 September 2026): the SENDER makes the preview and puts it into the plaintext (`previews`), so whoever
+ * reads a message never contacts the linked host and no server learns what the preview says. The picture is too large for
+ * a message: the sender encrypts it with a fresh random key (`sealDmBlob`), stores the ciphertext in the directory's blob
+ * store and names blob, key and IV in the plaintext; the directory keeps and serves bytes it cannot read. A preview is
+ * taken away by its author with a second message whose plaintext is a `control` (`preview.remove`); clients apply it only
+ * when it comes from the author of the message it names, and show it as nothing.
  */
 import { ed25519, x25519 } from "@noble/curves/ed25519.js";
+import { z } from "zod";
 import { base64ToBytes, bytesToBase64, bytesToHex, hexToBytes, randomHex } from "./backup";
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const subtle = () => globalThis.crypto.subtle;
 
 export const DM_VERSION = "v1";
+/** A picture in the directory's blob store, encrypted by the sender: AES-256-GCM with this key (hex) and IV (hex). */
+export const DmBlobRef = z.object({ blob: z.string().regex(/^[0-9a-f]{32}$/), key: z.string().regex(/^[0-9a-f]{64}$/), iv: z.string().regex(/^[0-9a-f]{24}$/), mime: z.enum(["image/webp", "image/jpeg", "image/png"]) });
+export type DmBlobRef = z.infer<typeof DmBlobRef>;
+/** Preview of a link, made by the sender. The fields of the chat's `LinkPreview`, the picture as a blob reference. */
+export const DmPreview = z.object({
+  url: z.string().max(2100),
+  kind: z.enum(["page", "youtube"]),
+  siteName: z.string().max(100).nullable(),
+  title: z.string().max(300).nullable(),
+  description: z.string().max(500).nullable(),
+  image: DmBlobRef.nullable(),
+  videoId: z.string().regex(/^[\w-]{11}$/).optional(),
+  start: z.number().int().nonnegative().optional(),
+});
+export type DmPreview = z.infer<typeof DmPreview>;
+export const DM_MAX_PREVIEWS = 3;
+/** A message that is an instruction, not text: the author of message `id` takes the preview of `url` away, for both sides. */
+export const DmControl = z.object({ type: z.literal("preview.remove"), id: z.string().uuid(), url: z.string().max(2100) });
+export type DmControl = z.infer<typeof DmControl>;
 /** Plaintext of a message; deliberately an object so fields (reply-to, attachments) can be added later. */
-export type DmPlaintext = { text: string };
+export type DmPlaintext = { text: string; previews?: DmPreview[]; control?: DmControl };
 
 /** X25519 counterpart of a friend's Ed25519 key (hex). */
 export function dmPublicKeyOf(ed25519PublicKeyHex: string): string {
@@ -54,6 +81,27 @@ export async function sealDm(key: CryptoKey, from: string, to: string, id: strin
 /** Decrypt a message; throws on a wrong key or modified fields (the AES-GCM tag does not match). */
 export async function openDm(key: CryptoKey, m: { from: string; to: string; id: string; iv: string; ciphertext: string }): Promise<DmPlaintext> {
   const pt = await subtle().decrypt({ name: "AES-GCM", iv: hexToBytes(m.iv), additionalData: utf8(dmAad(m.from, m.to, m.id)) }, key, base64ToBytes(m.ciphertext));
-  const parsed = JSON.parse(new TextDecoder().decode(pt)) as Partial<DmPlaintext>;
-  return { text: typeof parsed.text === "string" ? parsed.text : "" };
+  const parsed = JSON.parse(new TextDecoder().decode(pt)) as { text?: unknown; previews?: unknown; control?: unknown };
+  const out: DmPlaintext = { text: typeof parsed.text === "string" ? parsed.text : "" };
+  // What the other side sent is checked field by field: a preview that does not fit is dropped, the message stays.
+  if (Array.isArray(parsed.previews)) {
+    const previews = parsed.previews.slice(0, DM_MAX_PREVIEWS).flatMap((p) => { const r = DmPreview.safeParse(p); return r.success ? [r.data] : []; });
+    if (previews.length > 0) out.previews = previews;
+  }
+  const control = DmControl.safeParse(parsed.control);
+  if (control.success) out.control = control.data;
+  return out;
+}
+
+/** Encrypt a picture for the blob store with a key of its own; key and IV travel inside the encrypted message. */
+export async function sealDmBlob(bytes: Uint8Array): Promise<{ key: string; iv: string; ciphertext: Uint8Array }> {
+  const key = randomHex(32), iv = randomHex(12);
+  const k = await subtle().importKey("raw", hexToBytes(key), "AES-GCM", false, ["encrypt"]);
+  return { key, iv, ciphertext: new Uint8Array(await subtle().encrypt({ name: "AES-GCM", iv: hexToBytes(iv) }, k, bytes as BufferSource)) };
+}
+
+/** Decrypt a picture from the blob store; throws when the bytes are not what the sender stored. */
+export async function openDmBlob(ref: Pick<DmBlobRef, "key" | "iv">, ciphertext: Uint8Array): Promise<Uint8Array> {
+  const k = await subtle().importKey("raw", hexToBytes(ref.key), "AES-GCM", false, ["decrypt"]);
+  return new Uint8Array(await subtle().decrypt({ name: "AES-GCM", iv: hexToBytes(ref.iv) }, k, ciphertext as BufferSource));
 }

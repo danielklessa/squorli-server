@@ -1,6 +1,6 @@
 import { ed25519, x25519 } from "@noble/curves/ed25519.js";
 import { describe, expect, it } from "vitest";
-import { DirectoryClientEvent, DirectoryServerEvent, DmSend, bytesToHex, deriveDmKey, dmPublicKeyOf, openDm, sealDm } from "./index";
+import { DirectoryClientEvent, DirectoryServerEvent, DmSend, bytesToHex, deriveDmKey, dmPublicKeyOf, openDm, openDmBlob, sealDm, sealDmBlob, type DmPlaintext } from "./index";
 
 const seedA = "0a".repeat(32); const seedB = "0b".repeat(32); const seedC = "0c".repeat(32);
 const pubOf = (seed: string) => bytesToHex(ed25519.getPublicKey(Buffer.from(seed, "hex")));
@@ -40,5 +40,35 @@ describe("dm (M7): E2E-Verschluesselung", () => {
     expect(DirectoryClientEvent.safeParse({ type: "friends.accept", publicKey: pubA }).success).toBe(true);
     expect(DirectoryClientEvent.safeParse({ type: "friends.nope", publicKey: pubA }).success).toBe(false);
     expect(DirectoryServerEvent.safeParse({ type: "friends.update", publicKey: pubA, friend: null }).success).toBe(true);
+  });
+});
+
+describe("dm: link previews inside the plaintext", () => {
+  const image = { blob: "ab".repeat(16), key: "cd".repeat(32), iv: "ef".repeat(12), mime: "image/webp" as const };
+  const preview = { url: "https://example.org/a", kind: "page" as const, siteName: "Beispiel", title: "Titel", description: null, image };
+
+  it("carries previews and a control message, and drops what does not fit without losing the text", async () => {
+    const k = await deriveDmKey(seedA, pubA, pubB);
+    const open = async (plaintext: unknown) => openDm(k, { ...(await sealDm(k, pubA, pubB, ID, plaintext as DmPlaintext)), from: pubA, to: pubB, id: ID });
+    expect(await open({ text: "schau https://example.org/a", previews: [preview] })).toEqual({ text: "schau https://example.org/a", previews: [preview] });
+    expect(await open({ text: "x", previews: [preview, { url: 5 }, { ...preview, image: { ...image, key: "kurz" } }, "quatsch"] })).toEqual({ text: "x", previews: [preview] });
+    expect(await open({ text: "x", previews: "nein" })).toEqual({ text: "x" });
+    expect((await open({ text: "x", previews: Array.from({ length: 9 }, () => preview) })).previews).toHaveLength(3);
+    const control = { type: "preview.remove" as const, id: ID, url: "https://example.org/a" };
+    expect(await open({ text: "", control })).toEqual({ text: "", control });
+    expect(await open({ text: "", control: { type: "message.delete", id: ID } })).toEqual({ text: "" });
+  });
+
+  it("a picture for the blob store opens only with its key and unchanged", async () => {
+    const bytes = new Uint8Array([1, 2, 3, 4, 5, 250, 251]);
+    const sealed = await sealDmBlob(bytes);
+    expect(sealed.key).toMatch(/^[0-9a-f]{64}$/); expect(sealed.iv).toMatch(/^[0-9a-f]{24}$/);
+    expect(sealed.ciphertext.length).toBe(bytes.length + 16);
+    expect([...(await openDmBlob(sealed, sealed.ciphertext))]).toEqual([...bytes]);
+    await expect(openDmBlob({ key: "00".repeat(32), iv: sealed.iv }, sealed.ciphertext)).rejects.toThrow();
+    const broken = sealed.ciphertext.slice(); broken[0] = broken[0]! ^ 1;
+    await expect(openDmBlob(sealed, broken)).rejects.toThrow();
+    // A fresh key every time: the same picture sent twice looks different to the store.
+    expect((await sealDmBlob(bytes)).key).not.toBe(sealed.key);
   });
 });

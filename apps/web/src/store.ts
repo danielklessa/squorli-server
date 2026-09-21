@@ -1,7 +1,9 @@
 import {
-  deriveDmKey, directoryServerUrl, openDm, sealDm,
+  DM_MAX_CIPHERTEXT_CHARS, base64ToBytes, deriveDmKey, directoryServerUrl, openDm, sealDm, type DmControl, type DmPreview,
   type AccountServer, type AccountSettings, type AccountStatus, type DirectoryAccount, type DirectoryServerEvent, type DmConversation, type DmMessage, type Friend, type GamePresence, type ServerLeaveResponse,
 } from "@squorli/protocol";
+import { buildDmPreviews, type PreviewDeps } from "./dmPreviews";
+import { shrinkPreviewImage } from "./dmPreviewImage";
 import { activity } from "./activity";
 import { chooseInitialServer, loadClientData, parseServerAddress, saveClientData } from "./clientHome";
 import * as api from "./api";
@@ -14,6 +16,7 @@ import { seesIncoming } from "./attention";
 import { accountLocalePreference, detectLocale, locale, localePreference, markAccountLocalePreference, storeLocalePreference, t, type LocalePreference } from "./i18n";
 import { loadVoiceSettings, sameSoundSettings, saveVoiceSettings, subscribeVoiceSettings } from "./voice/settings";
 import { normalizeSoundSettings } from "./voice/sounds";
+import { platform } from "./platform";
 import type { PlatformHome } from "./platform/types";
 
 export type { ChannelMessages, Connection, RawLogEntry, ServerConnState } from "./serverConnection";
@@ -30,7 +33,8 @@ export type { ChannelMessages, Connection, RawLogEntry, ServerConnState } from "
  */
 
 /** Decrypted direct message (M7); text = null if it could not be opened (foreign key, corrupted). */
-export type Dm = { id: string; seq: number; from: string; to: string; sentAt: string; text: string | null };
+/** `previews` = what the sender put into the message; `control` = the message is an instruction (dmPreviews.ts `visibleDms`), not text. */
+export type Dm = { id: string; seq: number; from: string; to: string; sentAt: string; text: string | null; previews?: DmPreview[]; control?: DmControl };
 export type DmThread = { list: Dm[]; hasMore: boolean; loaded: boolean; loading: boolean };
 
 export type State = {
@@ -125,6 +129,8 @@ export class Store {
   private gameOnServers = true;
   /** Pair key per friend (M7), derived from your own seed and the friend's key; clear it on an identity switch. */
   private dmKeys = new Map<string, Promise<CryptoKey>>();
+  /** The directory has the blob store and the link lookup for previews in direct messages (`features.dmPreviews`). */
+  private dmPreviewsAtDirectory = false;
   private listeners = new Set<(s: State) => void>();
   /** Set by the voice client: a kick/session loss on `host` ends the voice connection if it runs there. */
   onRemoved: ((host: string) => void) | null = null;
@@ -443,6 +449,7 @@ export class Store {
     if (this.homeHost === null && !this.state.signedIn) return;
     const health = await api.directoryHealth(url).catch(() => null);
     if (!health?.features.friends) return;
+    this.dmPreviewsAtDirectory = health.features.dmPreviews;
     const link = new DirectoryLink(url, id, (e) => this.handleDirectory(e), (status, error) => this.set({ directoryLink: status, directoryLinkError: error ?? null }), health.features.afk);
     link.setIdle(activity.idle);
     link.setGame(this.game);
@@ -458,9 +465,11 @@ export class Store {
   private async decrypt(m: DmMessage): Promise<Dm> {
     const me = this.state.identity?.publicKey;
     const peer = m.from === me ? m.to : m.from;
-    let text: string | null = null;
-    try { text = (await openDm(await this.dmKey(peer), m)).text; } catch { text = null; }
-    return { id: m.id, seq: m.seq, from: m.from, to: m.to, sentAt: m.sentAt, text };
+    const base = { id: m.id, seq: m.seq, from: m.from, to: m.to, sentAt: m.sentAt };
+    try {
+      const opened = await openDm(await this.dmKey(peer), m);
+      return { ...base, text: opened.text, ...(opened.previews ? { previews: opened.previews } : {}), ...(opened.control ? { control: opened.control } : {}) };
+    } catch { return { ...base, text: null }; }
   }
   private thread(peer: string): DmThread { return this.state.dms[peer] ?? { list: [], hasMore: true, loaded: false, loading: false }; }
   private setThread(peer: string, t: DmThread) { this.set({ dms: { ...this.state.dms, [peer]: t } }); }
@@ -491,6 +500,13 @@ export class Store {
         if (t.loaded && !t.list.some((x) => x.id === dm.id)) this.setThread(peer, { ...t, list: [...t.list, dm].sort((a, b) => a.seq - b.seq) });
         const viewing = this.state.homeOpen && this.state.currentPeer === peer && document.visibilityState === "visible";
         const prev = this.state.conversations[peer];
+        if (dm.control) {
+          // An instruction (a preview taken away) is nothing to read: no unread mark, no sound, the conversation stays where
+          // it is in the list. With everything before it read, the read cursor moves past it, so it never counts later either.
+          if (prev) this.set({ conversations: { ...this.state.conversations, [peer]: { ...prev, lastSeq: m.seq } } });
+          if (m.from !== me && (viewing || (prev?.unread ?? 0) === 0)) this.link?.send({ type: "dm.read", peer, seq: m.seq });
+          break;
+        }
         const unread = m.from === me || viewing ? 0 : (prev?.unread ?? 0) + 1;
         this.set({ conversations: { ...this.state.conversations, [peer]: { peer, lastSeq: m.seq, lastAt: m.sentAt, unread } } });
         if (viewing && m.from !== me) this.link?.send({ type: "dm.read", peer, seq: m.seq });
@@ -571,13 +587,52 @@ export class Store {
   removeFriend(publicKey: string) { this.friendAction("friends.remove", publicKey); }
   blockFriend(publicKey: string) { this.friendAction("friends.block", publicKey); }
   unblockFriend(publicKey: string) { this.friendAction("friends.unblock", publicKey); }
-  /** Encrypt and send a direct message; it is displayed via the directory's echo (dm.message). */
+  /**
+   * Encrypt and send a direct message; it is displayed via the directory's echo (dm.message). Links get their previews
+   * first (dmPreviews.ts): made here, by the sender, and sent inside the encrypted message.
+   */
   async sendDm(peer: string, text: string) {
     const id = this.state.identity;
     if (!id) return;
     const msgId = crypto.randomUUID();
-    const sealed = await sealDm(await this.dmKey(peer), id.publicKey, peer, msgId, { text });
+    const key = await this.dmKey(peer);
+    const previews = await buildDmPreviews(text, this.previewDeps()).catch(() => []);
+    let sealed = await sealDm(key, id.publicKey, peer, msgId, previews.length > 0 ? { text, previews } : { text });
+    // A long text plus long descriptions may not fit into one message: the text matters, the previews go.
+    if (sealed.ciphertext.length > DM_MAX_CIPHERTEXT_CHARS && previews.length > 0) sealed = await sealDm(key, id.publicKey, peer, msgId, { text });
     if (!this.link?.send({ type: "dm.send", to: peer, id: msgId, ...sealed, sentAt: new Date().toISOString() })) throw new Error(t("dir.noLink"));
+  }
+  /** Who looks a link up and where the picture goes: the desktop app asks the linked host itself, a browser asks the directory. */
+  private previewDeps(): PreviewDeps {
+    const id = this.state.identity!; const url = this.state.directoryUrl;
+    const viaDirectory = url && this.dmPreviewsAtDirectory;
+    return {
+      lookUp: async (request) => {
+        if (platform.links.lookUp) {
+          const found = await platform.links.lookUp(request);
+          return found.found ? { kind: found.kind, siteName: found.siteName, title: found.title, description: found.description, image: found.image ? { mime: found.image.mime, bytes: found.image.data } : null } : null;
+        }
+        if (!viaDirectory) return null;
+        const found = await api.directoryLinkLookup(url, id, request);
+        if (!found.found || !found.kind) return null;
+        return { kind: found.kind, siteName: found.siteName ?? null, title: found.title ?? null, description: found.description ?? null, image: found.image ? { mime: found.image.mime, bytes: base64ToBytes(found.image.data) } : null };
+      },
+      shrink: shrinkPreviewImage,
+      putBlob: viaDirectory ? (ciphertext) => api.directoryPutDmBlob(url, id, ciphertext) : null,
+    };
+  }
+  /** The author takes a preview of their message away, for both sides: an encrypted instruction (dm.ts `DmControl`), shown as nothing. */
+  async removeDmPreview(peer: string, messageId: string, url: string) {
+    const id = this.state.identity;
+    if (!id) return;
+    const msgId = crypto.randomUUID();
+    const sealed = await sealDm(await this.dmKey(peer), id.publicKey, peer, msgId, { text: "", control: { type: "preview.remove", id: messageId, url } });
+    if (!this.link?.send({ type: "dm.send", to: peer, id: msgId, ...sealed, sentAt: new Date().toISOString() })) throw new Error(t("dir.noLink"));
+  }
+  /** Ciphertext of a preview's picture from the directory's blob store. */
+  fetchDmBlob(blobId: string): Promise<Uint8Array> {
+    const url = this.state.directoryUrl;
+    return url ? api.directoryDmBlob(url, blobId) : Promise.reject(new Error("no directory"));
   }
   deleteDm(peer: string, id: string) { this.link?.send({ type: "dm.delete", peer, id }); }
   clearDm(peer: string) { this.link?.send({ type: "dm.clear", peer }); }
