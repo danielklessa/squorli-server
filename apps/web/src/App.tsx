@@ -41,7 +41,7 @@ import { videoActive } from "./voice/videoWatch";
 import { activity, watchActivity } from "./activity";
 import { resumeIdleDetection } from "./idleDetection";
 import { setOwnVideo, watchSystemActivity } from "./systemActivity";
-import { GameDetection } from "./gameDetection";
+import { GameDetection, syncedHidden } from "./gameDetection";
 import { directoryGameLookup, presenceOf } from "./gamePresence";
 import { GameLibraryContext } from "./GameLine";
 import { t } from "./i18n";
@@ -115,6 +115,11 @@ export function App() {
     void presenceOf(shownGame, gameLookup).then((presence) => { if (!stale) store.setGame(presence, gameOnServers); });
     return () => { stale = true; };
   }, [games, store, shownGame, gameLookup, gameOnServers]);
+  // The hide list follows the account inside the sealed settings (store.ts): the account's list goes to the detection, which
+  // merges it with this device's, and the device's list goes to the store, which pushes it when it differs.
+  const hiddenGames = useSyncExternalStore(useMemo(() => games?.subscribe ?? (() => () => {}), [games]), () => games?.state.settings.hidden ?? null);
+  useEffect(() => { if (games && state.accountHiddenGames) games.adoptHidden(state.accountHiddenGames); }, [games, state.accountHiddenGames]);
+  useEffect(() => { if (games) store.setLocalHiddenGames(hiddenGames ? syncedHidden(hiddenGames) : null); }, [games, store, hiddenGames]);
   /** Camera picker open (list of cameras) when there is more than one at switch-on time. */
   const [cameraPick, setCameraPick] = useState<MediaDeviceInfo[] | null>(null);
   /**
@@ -547,7 +552,7 @@ export function App() {
       )}
       {settingsTab && (homeless || (active?.me && conn)) && (
         <SettingsDialog api={active?.me && conn ? conn.api : null} me={active?.me ?? null} publicKey={state.identity?.publicKey ?? null} displayName={me?.displayName ?? active?.me?.displayName ?? state.directoryAccount?.displayName ?? "…"} avatarUrl={myAvatarUrl} directoryUrl={state.directoryUrl} directoryAccount={state.directoryAccount}
-          serverDomain={active?.serverDomain ?? null} clientVersion={platform.app?.version ?? home?.serverVersion ?? null} syncError={state.settingsSyncError} client={client} voice={voice} games={games} initialTab={settingsTab}
+          serverDomain={active?.serverDomain ?? null} clientVersion={platform.app?.version ?? home?.serverVersion ?? null} syncError={state.settingsSyncError} sealed={state.settingsSealed} client={client} voice={voice} games={games} initialTab={settingsTab}
           onSaveServerName={(n) => store.setServerDisplayName(n)} onSaveGlobalName={(n) => store.setDirectoryName(null, n)} onSetAvatar={state.directoryAccount && state.directoryAvatars ? (file) => store.setAvatar(file) : null} onSetLocale={(pref) => store.setLocale(pref)} localePending={state.localeReloadPending}
           onCapturingKey={setCapturingPttKey} onClose={() => setSettingsTab(null)}
           onLogout={() => { setSettingsTab(null); void client.leave(); store.logout(); }}

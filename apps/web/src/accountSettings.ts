@@ -34,6 +34,12 @@ export function applyAccountSettings(local: VoiceSettings, remote: AccountSettin
   };
 }
 
+/** Same hide list of the game display (sealed settings)? The order plays no part, and no list counts as an empty one. */
+export function sameHiddenGames(a: string[] | null, b: string[] | null): boolean {
+  const left = new Set(a ?? []); const right = new Set(b ?? []);
+  return left.size === right.size && [...left].every((id) => right.has(id));
+}
+
 /**
  * Same settings? Compared in a fixed field order, so the key order of a parsed object does not matter. `tolerateMissing`: a
  * field one side does not have at all (`sounds.message` or `games` from an older account) counts as equal; for "does the account's copy

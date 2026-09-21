@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { epicGame, folderPath, gogGames, parseRegQuery, parseVdf, steamGame, steamLibraries, xboxGame, xboxRootFolder } from "./launchers";
+import { epicGame, fileInside, folderPath, gogGames, parseRegQuery, parseVdf, steamGame, steamIconFile, steamLibraries, xboxGame, xboxRootFolder } from "./launchers";
 
 const LIBRARIES = `"libraryfolders"
 {
@@ -41,7 +41,13 @@ describe("Steam", () => {
   });
 
   it("reads an app manifest into id, name and installation folder", () => {
-    expect(steamGame(parseVdf(MANIFEST), "H:\\SteamLibrary")).toEqual({ id: "steam:1133870", name: "Space Engineers 2", source: "steam", dir: "H:\\SteamLibrary\\steamapps\\common\\SpaceEngineers2\\" });
+    expect(steamGame(parseVdf(MANIFEST), "H:\\SteamLibrary")).toEqual({ id: "steam:1133870", name: "Space Engineers 2", source: "steam", dir: "H:\\SteamLibrary\\steamapps\\common\\SpaceEngineers2\\", icons: [] });
+  });
+
+  it("names where Steam's cache has the app's icon: the folder per app, and the file of before", () => {
+    expect(steamGame(parseVdf(MANIFEST), "H:\\SteamLibrary", "g:\\program files (x86)\\steam")?.icons).toEqual(["g:\\program files (x86)\\steam\\appcache\\librarycache\\1133870\\", "g:\\program files (x86)\\steam\\appcache\\librarycache\\1133870_icon.jpg"]);
+    expect(steamIconFile(["header.jpg", "library_600x900.jpg", "6b0312cda02f5f777efa2f3318c307ff9acafbb5.jpg", "logo.png"])).toBe("6b0312cda02f5f777efa2f3318c307ff9acafbb5.jpg");
+    expect(steamIconFile(["header.jpg", "logo.png"])).toBeNull();
   });
 
   it("keeps quotes and nested blocks of the format apart", () => {
@@ -61,7 +67,14 @@ describe("Epic", () => {
   const game = { AppName: "Sugar", DisplayName: "Rocket League®", InstallLocation: "F:/Epic Games/rocketleague", MainGameAppName: "Sugar", bIsApplication: true, bIsIncompleteInstall: false, AppCategories: ["public", "games", "applications"] };
 
   it("takes a whole installed game", () => {
-    expect(epicGame(game)).toEqual({ id: "epic:Sugar", name: "Rocket League®", source: "epic", dir: "F:\\Epic Games\\rocketleague\\" });
+    expect(epicGame(game)).toEqual({ id: "epic:Sugar", name: "Rocket League®", source: "epic", dir: "F:\\Epic Games\\rocketleague\\", icons: [] });
+  });
+
+  it("takes the icon from the executable the launcher starts, inside the installation only", () => {
+    expect(epicGame({ ...game, LaunchExecutable: "Binaries/Win64/RocketLeague.exe" })?.icons).toEqual(["F:\\Epic Games\\rocketleague\\Binaries\\Win64\\RocketLeague.exe"]);
+    expect(epicGame({ ...game, LaunchExecutable: "..\\..\\Windows\\notepad.exe" })?.icons).toEqual([]);
+    expect(epicGame({ ...game, LaunchExecutable: "C:\\Windows\\notepad.exe" })?.icons).toEqual([]);
+    expect(epicGame({ ...game, LaunchExecutable: "start.sh" })?.icons).toEqual([]);
   });
 
   it("leaves out plugins, engines, add-ons and unfinished installations", () => {
@@ -78,11 +91,11 @@ describe("GOG", () => {
   it("reads the registry listing and leaves add-ons out", () => {
     const output = [
       "", "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\GOG.com\\Games\\1207658924",
-      "    gameID    REG_SZ    1207658924", "    gameName    REG_SZ    The Witcher 3: Wild Hunt", "    path    REG_SZ    D:\\GOG Games\\The Witcher 3", "    dependsOn    REG_SZ    ",
+      "    gameID    REG_SZ    1207658924", "    gameName    REG_SZ    The Witcher 3: Wild Hunt", "    path    REG_SZ    D:\\GOG Games\\The Witcher 3", "    exe    REG_SZ    D:\\GOG Games\\The Witcher 3\\bin\\x64\\witcher3.exe", "    dependsOn    REG_SZ    ",
       "", "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\GOG.com\\Games\\1207658925",
       "    gameID    REG_SZ    1207658925", "    gameName    REG_SZ    Expansion Pass", "    path    REG_SZ    D:\\GOG Games\\The Witcher 3", "    dependsOn    REG_SZ    1207658924", "",
     ].join("\r\n");
-    expect(gogGames(parseRegQuery(output))).toEqual([{ id: "gog:1207658924", name: "The Witcher 3: Wild Hunt", source: "gog", dir: "D:\\GOG Games\\The Witcher 3\\" }]);
+    expect(gogGames(parseRegQuery(output))).toEqual([{ id: "gog:1207658924", name: "The Witcher 3: Wild Hunt", source: "gog", dir: "D:\\GOG Games\\The Witcher 3\\", icons: ["D:\\GOG Games\\The Witcher 3\\goggame-1207658924.ico", "D:\\GOG Games\\The Witcher 3\\bin\\x64\\witcher3.exe"] }]);
   });
 
   it("reads one value of one key, spaces in the value included", () => {
@@ -103,9 +116,18 @@ describe("Xbox", () => {
 
   it("takes a game with something to start and leaves add-on packs out", () => {
     const config = `<Game><Identity Name="X" /><ExecutableList><Executable Name="game.exe" Id="Game" /></ExecutableList><ShellVisuals DefaultDisplayName="Forza &amp; Friends" StoreLogo="a.png" /><StoreId>9nblggh4r315</StoreId></Game>`;
-    expect(xboxGame(config, "Forza", "H:\\XboxGames\\Forza\\Content")).toEqual({ id: "xbox:9NBLGGH4R315", name: "Forza & Friends", source: "xbox", dir: "H:\\XboxGames\\Forza\\Content\\" });
+    expect(xboxGame(config, "Forza", "H:\\XboxGames\\Forza\\Content")).toEqual({ id: "xbox:9NBLGGH4R315", name: "Forza & Friends", source: "xbox", dir: "H:\\XboxGames\\Forza\\Content\\", icons: ["H:\\XboxGames\\Forza\\Content\\a.png", "H:\\XboxGames\\Forza\\Content\\game.exe"] });
+    expect(xboxGame(config.replace('StoreLogo="a.png"', 'Square44x44Logo="Assets/Small.png" StoreLogo="..\\..\\b.png"'), "Forza", "H:\\X\\Content")?.icons).toEqual(["H:\\X\\Content\\Assets\\Small.png", "H:\\X\\Content\\game.exe"]);
     expect(xboxGame(`<Game><ShellVisuals DefaultDisplayName="BO6 DLC07" /><StoreId>9MVTS5ZKWLV4</StoreId></Game>`, "BO6 DLC07", "H:\\X\\Content")).toBeNull();
     expect(xboxGame(config.replace("Forza &amp; Friends", "ms-resource:AppName"), "Forza Horizon", "H:\\X\\Content")?.name).toBe("Forza Horizon");
+  });
+});
+
+describe("fileInside", () => {
+  it("joins a manifest's relative file to its folder and refuses what would leave it", () => {
+    expect(fileInside("F:/Games/a", "bin/game.exe")).toBe("F:\\Games\\a\\bin\\game.exe");
+    expect(fileInside("F:\\Games\\a\\", "\\game.exe")).toBe("F:\\Games\\a\\game.exe");
+    for (const bad of ["..\\x.exe", "a/../../x.exe", "C:\\x.exe", "", 7, null, "a\tb.exe"]) expect(fileInside("F:\\Games\\a", bad)).toBeNull();
   });
 });
 

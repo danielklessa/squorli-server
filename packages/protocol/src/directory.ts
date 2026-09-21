@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { base64ToBytes, hexToBytes, randomHex } from "./backup";
 import { Iso, PublicKey, Signature, Uuid } from "./primitives";
 
 // COPY NOTE: this file (like primitives.ts, backup.ts, useragent.ts including their tests) also exists byte-identically in the
@@ -124,7 +125,7 @@ export const BackupBlob = z.object({ handle: Handle, publicKey: PublicKey, ciphe
 
 // ---- M6c: signed account actions (authenticator, recovery codes, account status). Same pattern as registration
 // and backup: challenge + signature over host, nonce and payload (for actions with a code, the code is the payload).
-export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends", "server-leave", "sound-settings", "email-set", "email-verify", "email-code", "settings", "avatar-set", "link-lookup", "dm-blob-put"]);
+export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends", "server-leave", "sound-settings", "email-set", "email-verify", "email-code", "settings", "avatar-set", "link-lookup", "dm-blob-put", "settings-sealed"]);
 export type DirectoryAction = z.infer<typeof DirectoryAction>;
 export function directoryActionMessage(directoryHost: string, action: DirectoryAction, nonce: string, payload = ""): string {
   return `community-directory-${action}\n${directoryHost}\n${nonce}\n${payload}`;
@@ -310,6 +311,75 @@ export function parseAccountSettings(json: string | null | undefined): AccountSe
   if (!json) return null;
   try { const r = AccountSettings.safeParse(JSON.parse(json)); return r.success ? r.data : null; } catch { return null; }
 }
+
+// ---- Sealed settings (21 September 2026, user's wish: only the user can read what the account stores about them). The client
+// encrypts the settings before they leave it, and the directory keeps a blob it cannot read:
+//
+//   key  = HKDF-SHA256(the 32-byte seed of the identity key, salt = the public key, info "squorli-settings-v1") -> AES-256-GCM
+//   blob = AES-GCM(key, random 12-byte IV, JSON of `SealedSettingsContent` padded with spaces to a multiple of 1024 bytes,
+//          AAD = "squorli-settings-v1\n<public key>")
+//
+// Every device that has the seed (the key backup restores it) derives the same key, so there is no second password. The
+// directory can neither read nor change the content; it can only hand out an older blob of the same account. Written with the
+// signed action `settings-sealed`: the request carries the blob as a JSON *string* and exactly that string is signed, as with
+// `settings`. `features.settingsSealed` tells the client that the route exists. An account that has a sealed blob has no plaintext
+// settings any more: the directory deletes `settings` and `soundSettings` with the first sealed write and refuses the two older
+// actions with 409 `settings_sealed` from then on (clients that predate this keep their device's settings). A client that finds
+// plaintext settings only seals them at once. Because nobody else can read it, the content also carries what must not be stored
+// in the open: the games the user never wants shown (launcher ids only, never the path of an added program).
+export const SEALED_SETTINGS_MAX_LENGTH = 100_000;
+export const HIDDEN_GAMES_MAX = 1000;
+export const HIDDEN_GAME_ID_MAX = 64;
+export const SealedSettings = z.object({ v: z.literal(1), iv: z.string().regex(/^[0-9a-f]{24}$/), ciphertext: z.string().min(24).regex(/^[A-Za-z0-9+/]+={0,2}$/) });
+export type SealedSettings = z.infer<typeof SealedSettings>;
+export const SealedSettingsContent = z.object({
+  settings: AccountSettings,
+  /** Games never to show to anybody, by the launcher's id. Left out = the account says nothing (the device's list stays). */
+  hiddenGames: z.array(z.string().min(1).max(HIDDEN_GAME_ID_MAX)).max(HIDDEN_GAMES_MAX).optional(),
+});
+export type SealedSettingsContent = z.infer<typeof SealedSettingsContent>;
+export const SealedSettingsUpdateRequest = SignedActionRequest.extend({ sealed: z.string().min(2).max(SEALED_SETTINGS_MAX_LENGTH) });
+/** The blob in a stored or received JSON string; null when it is not valid JSON or does not fit the schema. */
+export function parseSealedSettings(json: string | null | undefined): SealedSettings | null {
+  if (!json) return null;
+  try { const r = SealedSettings.safeParse(JSON.parse(json)); return r.success ? r.data : null; } catch { return null; }
+}
+const SEALED_SETTINGS_INFO = "squorli-settings-v1";
+const SEALED_SETTINGS_PAD = 1024;
+const sealedUtf8 = (s: string) => new TextEncoder().encode(s);
+const sealedAad = (publicKeyHex: string) => sealedUtf8(`${SEALED_SETTINGS_INFO}\n${publicKeyHex}`);
+/** The key of an account's sealed settings, from the identity's seed (hex); cache it in the client. */
+export async function deriveSettingsKey(seedHex: string, publicKeyHex: string): Promise<CryptoKey> {
+  const subtle = globalThis.crypto.subtle;
+  const hk = await subtle.importKey("raw", hexToBytes(seedHex), "HKDF", false, ["deriveBits"]);
+  const bits = await subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: sealedUtf8(publicKeyHex), info: sealedUtf8(SEALED_SETTINGS_INFO) }, hk, 256);
+  return subtle.importKey("raw", bits, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+export async function sealSettings(key: CryptoKey, publicKeyHex: string, content: SealedSettingsContent): Promise<SealedSettings> {
+  const json = JSON.stringify(content);
+  // Spaces after the JSON (a parser skips them) hide how long the content is, up to the next step.
+  const plain = sealedUtf8(json);
+  const padded = new Uint8Array(Math.ceil(plain.length / SEALED_SETTINGS_PAD) * SEALED_SETTINGS_PAD).fill(0x20);
+  padded.set(plain);
+  const iv = randomHex(12);
+  const ct = new Uint8Array(await globalThis.crypto.subtle.encrypt({ name: "AES-GCM", iv: hexToBytes(iv), additionalData: sealedAad(publicKeyHex) }, key, padded));
+  // In steps: `bytesToBase64` spreads the whole array into one call, which a long hide list would overflow.
+  let binary = "";
+  for (let i = 0; i < ct.length; i += 0x8000) binary += String.fromCharCode(...ct.subarray(i, i + 0x8000));
+  return { v: 1, iv, ciphertext: btoa(binary) };
+}
+/** The content of a blob; null when the key is another one, the blob was changed or the content does not fit. A hidden id that does not fit is dropped alone. */
+export async function openSettings(key: CryptoKey, publicKeyHex: string, sealed: SealedSettings): Promise<SealedSettingsContent | null> {
+  try {
+    const pt = await globalThis.crypto.subtle.decrypt({ name: "AES-GCM", iv: hexToBytes(sealed.iv), additionalData: sealedAad(publicKeyHex) }, key, base64ToBytes(sealed.ciphertext));
+    const parsed = JSON.parse(new TextDecoder().decode(pt)) as { settings?: unknown; hiddenGames?: unknown };
+    const settings = AccountSettings.safeParse(parsed.settings);
+    if (!settings.success) return null;
+    const hiddenGames = Array.isArray(parsed.hiddenGames)
+      ? [...new Set(parsed.hiddenGames.filter((id): id is string => typeof id === "string" && id.length > 0 && id.length <= HIDDEN_GAME_ID_MAX))].slice(0, HIDDEN_GAMES_MAX) : undefined;
+    return { settings: settings.data, ...(hiddenGames ? { hiddenGames } : {}) };
+  } catch { return null; }
+}
 /** A chat server that has looked up the key (a sign-in there), with the display name that applies there (account page). `verified` = registered with the directory. */
 export const AccountServer = z.object({
   host: ServerHost, name: z.string().nullable(), displayName: DisplayName.nullable(), lastSeenAt: Iso, verified: z.boolean().default(false),
@@ -415,6 +485,8 @@ export const AccountStatus = DirectoryAccount.extend({
   soundSettings: SoundSettings.nullable().default(null),
   /** All client settings stored in the account (action `settings`); null = never set or a directory that predates them. */
   settings: AccountSettings.nullable().default(null),
+  /** The settings as a blob only the user can read (action `settings-sealed`); null = none. An account that has one has no `settings` and no `soundSettings`. */
+  settingsSealed: SealedSettings.nullable().default(null),
   /** Confirmed e-mail address (null = none) and an address waiting for its confirmation code (null = none). */
   email: EmailAddress.nullable().default(null),
   emailPending: EmailAddress.nullable().default(null),
@@ -425,8 +497,8 @@ export const DirectoryHealth = z.object({
   service: z.literal("directory"),
   /** Host that registration signatures are bound to. */
   host: z.string(),
-  /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. `email`: SMTP configured (address, notices, e-mail code). `settings`: the account stores all client settings (action `settings`). `afk`: the socket takes `activity` and friends carry `afk` (AFK detection). `emailRequired`: new handles need a confirmed e-mail address (REQUIRE_EMAIL; registration in two steps, see DirectoryRegisterRequest). `avatars`: the account stores one avatar image (action `avatar-set`, GET /api/avatars/<key>). */
-  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false), settings: z.boolean().default(false), afk: z.boolean().default(false), emailRequired: z.boolean().default(false), avatars: z.boolean().default(false), gameLibrary: z.boolean().default(false), dmPreviews: z.boolean().default(false) }),
+  /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. `email`: SMTP configured (address, notices, e-mail code). `settings`: the account stores all client settings (action `settings`). `afk`: the socket takes `activity` and friends carry `afk` (AFK detection). `emailRequired`: new handles need a confirmed e-mail address (REQUIRE_EMAIL; registration in two steps, see DirectoryRegisterRequest). `avatars`: the account stores one avatar image (action `avatar-set`, GET /api/avatars/<key>). `settingsSealed`: the account stores the settings as a blob the client encrypts (action `settings-sealed`). */
+  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false), settings: z.boolean().default(false), settingsSealed: z.boolean().default(false), afk: z.boolean().default(false), emailRequired: z.boolean().default(false), avatars: z.boolean().default(false), gameLibrary: z.boolean().default(false), dmPreviews: z.boolean().default(false) }),
   time: Iso,
 });
 

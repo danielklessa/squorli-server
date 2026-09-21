@@ -1,7 +1,8 @@
 import { app, dialog, ipcMain, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { IPC, type CustomProgram, type DetectedGame, type GameWatchSettings, type RunningGame } from "@squorli/web/platform/bridge";
 import type { InstalledGame } from "./games/launchers";
-import { detectedGames, fileTitle, gameOfPath, readGameWatch, watchLine } from "./games/match";
+import { GameIcons } from "./games/icons";
+import { detectedGames, fileTitle, gameOfPath, iconSources, readGameWatch, watchLine } from "./games/match";
 import { scanInstalledGames } from "./games/scan";
 import type { SystemWatch } from "./systemWatch";
 
@@ -19,6 +20,7 @@ export function handleGames(getWindow: () => BrowserWindow | null, isClientFrame
   let scanned = false;
   let running: RunningGame | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
+  const icons = new GameIcons();
 
   const tell = () => { const win = getWindow(); if (win && !win.isDestroyed()) win.webContents.send(IPC.gameRunning, running); };
   const apply = () => watch.setWatch(watchLine(installed, settings));
@@ -36,8 +38,14 @@ export function handleGames(getWindow: () => BrowserWindow | null, isClientFrame
     tell();
   });
   ipcMain.on(IPC.gameRunningReady, (event) => { if (isClientFrame(event)) tell(); });
-  // While detection is off the launchers' files are not even read.
-  ipcMain.handle(IPC.gamesScan, (event) => (isClientFrame(event) && settings.enabled ? scan() : []));
+  // While detection is off the launchers' files are not even read. The list for the settings gets each game's icon from this
+  // computer (games/icons.ts); the hourly scan needs none.
+  ipcMain.handle(IPC.gamesScan, async (event): Promise<DetectedGame[]> => {
+    if (!isClientFrame(event) || !settings.enabled) return [];
+    const games = await scan();
+    const found = await icons.of(iconSources(installed, settings.custom));
+    return games.map((game) => ({ ...game, icon: found.get(game.id) ?? null }));
+  });
   ipcMain.on(IPC.gamesWatch, (event, value: unknown) => {
     if (!isClientFrame(event)) return;
     settings = readGameWatch(value);

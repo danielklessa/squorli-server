@@ -50,6 +50,14 @@ export function gameOfPath(path: string, installed: readonly InstalledGame[], cu
   return best ? { id: best.id, name: best.name } : null;
 }
 
+/** Where the icon of each entry of that list may come from (games/icons.ts): the launcher's sources, an added program's own executable. */
+export function iconSources(installed: readonly InstalledGame[], custom: readonly CustomProgram[]): Map<string, readonly string[]> {
+  const byId = new Map<string, readonly string[]>();
+  for (const game of installed) if (!byId.has(game.id)) byId.set(game.id, game.icons);
+  for (const program of custom) byId.set(customId(program.path), [program.path]);
+  return byId;
+}
+
 /** The list for the settings: installed games and added programs by name, one entry per id. */
 export function detectedGames(installed: readonly InstalledGame[], custom: readonly CustomProgram[]): DetectedGame[] {
   const byId = new Map<string, DetectedGame>();

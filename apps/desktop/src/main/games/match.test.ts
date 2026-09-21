@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { InstalledGame } from "./launchers";
-import { customId, detectedGames, gameOfPath, readGameWatch, watchLine } from "./match";
+import { customId, detectedGames, gameOfPath, iconSources, readGameWatch, watchLine } from "./match";
 
 const installed: InstalledGame[] = [
-  { id: "steam:730", name: "Counter-Strike 2", source: "steam", dir: "G:\\Steam\\steamapps\\common\\Counter-Strike Global Offensive\\" },
-  { id: "epic:Sugar", name: "Rocket League", source: "epic", dir: "F:\\Epic Games\\rocketleague\\" },
-  { id: "steam:1", name: "Nested", source: "steam", dir: "F:\\Epic Games\\rocketleague\\mods\\nested\\" },
+  { id: "steam:730", name: "Counter-Strike 2", source: "steam", dir: "G:\\Steam\\steamapps\\common\\Counter-Strike Global Offensive\\", icons: ["G:\\Steam\\appcache\\librarycache\\730\\"] },
+  { id: "epic:Sugar", name: "Rocket League", source: "epic", dir: "F:\\Epic Games\\rocketleague\\", icons: [] },
+  { id: "steam:1", name: "Nested", source: "steam", dir: "F:\\Epic Games\\rocketleague\\mods\\nested\\", icons: [] },
 ];
 const custom = [{ path: "D:\\Spiele\\Alt\\alt.exe", name: "Altes Spiel" }];
 
@@ -53,5 +53,14 @@ describe("detectedGames", () => {
       { id: "steam:1", name: "Nested", source: "steam" },
       { id: "epic:Sugar", name: "Rocket League", source: "epic" },
     ]);
+  });
+});
+
+describe("iconSources", () => {
+  it("names the launcher's sources per game and an added program's own executable", () => {
+    const sources = iconSources(installed, custom);
+    expect(sources.get("steam:730")).toEqual(["G:\\Steam\\appcache\\librarycache\\730\\"]);
+    expect(sources.get("epic:Sugar")).toEqual([]);
+    expect(sources.get(customId("D:\\Spiele\\Alt\\alt.exe"))).toEqual(["D:\\Spiele\\Alt\\alt.exe"]);
   });
 });

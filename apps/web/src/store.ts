@@ -1,5 +1,5 @@
 import {
-  DM_MAX_CIPHERTEXT_CHARS, base64ToBytes, deriveDmKey, directoryServerUrl, openDm, sealDm, type DmControl, type DmPreview,
+  DM_MAX_CIPHERTEXT_CHARS, base64ToBytes, deriveDmKey, deriveSettingsKey, directoryServerUrl, openDm, openSettings, sealDm, sealSettings, type DmControl, type DmPreview,
   type AccountServer, type AccountSettings, type AccountStatus, type DirectoryAccount, type DirectoryServerEvent, type DmConversation, type DmMessage, type Friend, type GamePresence, type ServerLeaveResponse,
 } from "@squorli/protocol";
 import { buildDmPreviews, type PreviewDeps } from "./dmPreviews";
@@ -11,7 +11,7 @@ import { AvatarImageError, prepareAvatar, type AvatarImage } from "./avatarImage
 import { DirectoryLink, type LinkStatus } from "./directoryLink";
 import { loadOrCreateIdentity, storeIdentity, type Identity } from "./identity";
 import { ServerConnection, type ServerConnState } from "./serverConnection";
-import { applyAccountSettings, sameAccountSettings, toAccountSettings } from "./accountSettings";
+import { applyAccountSettings, sameAccountSettings, sameHiddenGames, toAccountSettings } from "./accountSettings";
 import { seesIncoming } from "./attention";
 import { accountLocalePreference, detectLocale, locale, localePreference, markAccountLocalePreference, storeLocalePreference, t, type LocalePreference } from "./i18n";
 import { loadVoiceSettings, sameSoundSettings, saveVoiceSettings, subscribeVoiceSettings } from "./voice/settings";
@@ -60,6 +60,10 @@ export type State = {
   accountServers: AccountServer[] | null;
   /** Last failure while saving the settings in the directory account (shown in the settings dialog); null = fine. */
   settingsSyncError: string | null;
+  /** The account keeps the settings as a blob only this user's key opens (directory `features.settingsSealed`); false = in the open, or no account. */
+  settingsSealed: boolean;
+  /** The games never to show, as the account's sealed settings hold them (App.tsx hands them to the game detection); null = the account says nothing. */
+  accountHiddenGames: string[] | null;
   /** A language change is stored but waits for the reload until the voice connection has ended (`reloadForLocale`). */
   localeReloadPending: boolean;
   // ---- M7: friends and direct messages over the directory socket
@@ -143,6 +147,17 @@ export class Store {
   private accountSettings: AccountSettings | null = null;
   /** The directory stores all settings (features.settings); false = one that predates them, then only the cue settings follow the account. */
   private settingsSupported = false;
+  /** The directory keeps the settings as a blob the client encrypts (features.settingsSealed); then nothing is written in the open any more. */
+  private sealedSupported = false;
+  /** What the account holds is such a blob already; false = plaintext settings or none, which the next push seals. */
+  private accountSealed = false;
+  /** The account's status was read once for this account: before that a push would not know what it overwrites and waits (`pushWanted`). */
+  private settingsLoaded = false;
+  private pushWanted = false;
+  /** Hide list of the game display: as the account holds it, and as this device has it (App.tsx; null = this client keeps none, a browser, and passes the account's on). */
+  private accountHidden: string[] | null = null;
+  private localHidden: string[] | null = null;
+  private settingsKey: { publicKey: string; key: Promise<CryptoKey> } | null = null;
   private settingsPushTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(opts: StoreOptions) {
@@ -153,7 +168,7 @@ export class Store {
     this.state = {
       identity: null, homeHost: this.homeHost, activeHost: this.homeHost, servers: home ? { [home.state.host]: home.state } : {},
       signedIn: false, localHosts: [], clientLogin: { busy: false, error: null }, joinInvites: {},
-      directoryUrl: null, directoryAccount: undefined, directoryError: null, directoryEmailRequired: false, directoryAvatars: false, directoryGameLibrary: false, accountServers: null, settingsSyncError: null, localeReloadPending: false,
+      directoryUrl: null, directoryAccount: undefined, directoryError: null, directoryEmailRequired: false, directoryAvatars: false, directoryGameLibrary: false, accountServers: null, settingsSyncError: null, settingsSealed: false, accountHiddenGames: null, localeReloadPending: false,
       directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null, friendsError: null, missed: 0, starting: true,
     };
     subscribeVoiceSettings((_s, source) => { if (source === "user") this.scheduleSettingsPush(); });
@@ -649,18 +664,20 @@ export class Store {
     const id = this.state.identity; const url = this.state.directoryUrl;
     if (!id || !url || !this.state.directoryAccount) {
       this.accountSettings = null;
+      this.accountSealed = false; this.settingsLoaded = false; this.pushWanted = false; this.accountHidden = null;
       if (this.settingsPushTimer) { clearTimeout(this.settingsPushTimer); this.settingsPushTimer = null; }
-      this.set({ accountServers: null });
+      this.set({ accountServers: null, settingsSealed: false, accountHiddenGames: null });
       return;
     }
     try {
       const [status, health] = await Promise.all([api.directoryAccountStatus(url, id), api.directoryHealth(url)]);
       this.settingsSupported = health.features.settings;
+      this.sealedSupported = health.features.settingsSealed;
       // The public key lookup (refreshDirectory) never carries names; the signed status does: the global display name for the settings.
       const acc = this.state.directoryAccount;
       // The avatar's version comes along: an image changed on the account page shows in the settings without a reload of the lookup.
       this.set({ accountServers: status.servers, directoryAvatars: health.features.avatars, directoryGameLibrary: health.features.gameLibrary, ...(acc ? { directoryAccount: { ...acc, displayName: status.displayName, avatarUpdatedAt: status.avatarUpdatedAt } } : {}) });
-      this.adoptAccountSettings(status);
+      await this.adoptAccountSettings(status);
       // Without a home server: a server added by address that the account's list names by now is the account's from here on.
       const local = this.state.localHosts.filter((h) => !status.servers.some((s) => this.hostFor(s.host) === h));
       if (local.length !== this.state.localHosts.length) { this.set({ localHosts: local }); this.saveClient(); }
@@ -672,12 +689,37 @@ export class Store {
   // localStorage (voice/settings.ts, the locale in i18n) stays the working copy, so servers without a directory keep working;
   // with an account the account's copy wins on load and every user change is pushed there (signed, coalesced for slider drags).
   // A directory that predates the full settings only gets the cue settings, as before.
+  // Sealed settings (21 September 2026, user's wish: only the user can read them): a directory with `features.settingsSealed` gets
+  // the settings as a blob encrypted with a key from the identity's seed (protocol, "Sealed settings") and nothing in the open.
+  // Plaintext settings found there are sealed at once, which makes the directory delete them. The blob also carries the game
+  // display's hide list, which must not be stored readable (gameDetection.ts).
   /** Account status arrived: take the account's settings over on this device, or seed the account with the local ones if it has none yet. */
-  private adoptAccountSettings(status: AccountStatus): void {
+  private async adoptAccountSettings(status: AccountStatus): Promise<void> {
+    const id = this.state.identity;
+    let remote = this.settingsSupported ? status.settings : null;
+    let sealed = false; let hidden: string[] | null = null;
+    const blob = this.sealedSupported ? status.settingsSealed : null;
+    if (id && blob) {
+      const content = await this.settingsKeyOf(id).then((key) => openSettings(key, id.publicKey, blob), () => null);
+      if (this.state.identity !== id) return;
+      // A blob this key does not open counts as none: the device's settings make a new one.
+      if (content) { remote = content.settings; hidden = content.hiddenGames ?? null; sealed = true; }
+    }
+    const first = !this.settingsLoaded;
+    this.accountSealed = sealed; this.accountHidden = hidden; this.settingsLoaded = true;
     // A change the user just made here is newer than what the status says; the pending push brings the account in step.
-    if (this.settingsPushTimer) return;
+    if (this.settingsPushTimer || this.pushWanted) {
+      // The hide list too, with one exception: a push that waited for this first status knows nothing of the account's list
+      // yet and must not drop from it what another device hid.
+      if (first && hidden && this.localHidden) this.localHidden = [...new Set([...this.localHidden, ...hidden])];
+      if (sealed !== this.state.settingsSealed) this.set({ settingsSealed: sealed });
+      if (!this.settingsPushTimer) this.scheduleSettingsPush(0);
+      return;
+    }
+    // The device's list is merged with the account's by the game detection; until App.tsx reports the result, the account's goes out.
+    if (hidden && !sameHiddenGames(this.localHidden, hidden)) this.localHidden = null;
+    if (sealed !== this.state.settingsSealed || (hidden === null) !== (this.state.accountHiddenGames === null) || !sameHiddenGames(hidden, this.state.accountHiddenGames)) this.set({ settingsSealed: sealed, accountHiddenGames: hidden });
     const local = loadVoiceSettings();
-    const remote = this.settingsSupported ? status.settings : null;
     if (!remote) {
       // Nothing stored yet (or an older directory): cue settings stored by an older client still win, the rest is seeded from this device.
       const sounds = status.soundSettings ? normalizeSoundSettings({ ...status.soundSettings, message: status.soundSettings.message ?? local.sounds.message }) : null;
@@ -688,6 +730,8 @@ export class Store {
     }
     this.accountSettings = remote;
     if (!sameAccountSettings(toAccountSettings(local, remote.locale), remote, true)) saveVoiceSettings(applyAccountSettings(local, remote), "directory");
+    // Settings still in the open, or a hide list the account lacks: the push seals them.
+    if (this.sealedSupported && (!sealed || !sameHiddenGames(this.hiddenForAccount(), hidden))) this.scheduleSettingsPush(0);
     // Language: a choice made on this device since it was last in step with the account (login footer) wins and is pushed;
     // otherwise the account's applies, with a reload only when the texts actually change.
     const pref = localePreference(); const synced = accountLocalePreference();
@@ -698,6 +742,19 @@ export class Store {
     this.reloadForLocale();
   }
   private localAccountSettings(): AccountSettings { return toAccountSettings(loadVoiceSettings(), localePreference()); }
+  private hiddenForAccount(): string[] | null { return this.localHidden ?? this.accountHidden; }
+  private settingsKeyOf(id: Identity): Promise<CryptoKey> {
+    if (this.settingsKey?.publicKey !== id.publicKey) this.settingsKey = { publicKey: id.publicKey, key: deriveSettingsKey(id.privateKey, id.publicKey) };
+    return this.settingsKey.key;
+  }
+  /**
+   * The game display's hide list of this device, the part that may follow the account (App.tsx, from the game detection;
+   * null = this client keeps none). It only ever travels inside the sealed settings.
+   */
+  setLocalHiddenGames(ids: string[] | null): void {
+    this.localHidden = ids;
+    if (this.sealedSupported && this.settingsLoaded && !sameHiddenGames(this.hiddenForAccount(), this.accountHidden)) this.scheduleSettingsPush();
+  }
   private scheduleSettingsPush(delayMs = 800): void {
     if (!this.state.identity || !this.state.directoryUrl || !this.state.directoryAccount) return;
     if (this.settingsPushTimer) clearTimeout(this.settingsPushTimer);
@@ -706,9 +763,20 @@ export class Store {
   private async pushSettings(): Promise<void> {
     const id = this.state.identity; const url = this.state.directoryUrl;
     if (!id || !url || !this.state.directoryAccount) return;
+    // Before the account's status was read, nobody knows what the directory can do or what a push would overwrite (the hide list).
+    if (!this.settingsLoaded) { this.pushWanted = true; return; }
+    this.pushWanted = false;
     const next = this.localAccountSettings(); const known = this.accountSettings;
     try {
-      if (this.settingsSupported) {
+      if (this.sealedSupported) {
+        const hidden = this.hiddenForAccount();
+        if (this.accountSealed && known && sameAccountSettings(known, next) && sameHiddenGames(hidden, this.accountHidden)) return;
+        const blob = await sealSettings(await this.settingsKeyOf(id), id.publicKey, { settings: next, ...(hidden ? { hiddenGames: hidden } : {}) });
+        await api.directorySetSealedSettings(url, id, blob);
+        markAccountLocalePreference(next.locale);
+        this.accountSealed = true; this.accountHidden = hidden;
+        this.set({ settingsSealed: true, accountHiddenGames: hidden });
+      } else if (this.settingsSupported) {
         if (known && sameAccountSettings(known, next)) return;
         await api.directorySetSettings(url, id, next);
         markAccountLocalePreference(next.locale);

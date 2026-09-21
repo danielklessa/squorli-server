@@ -53,7 +53,7 @@ const fmt = fmtDateTime;
  * the directory's account page, sign out, discard identity) and licenses (our own and the third-party notices, LicensesTab.tsx). With a directory account everything except the device selection
  * is stored there (store.ts pushes every change); sessions and the name on this server belong to the server shown.
  */
-export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, directoryUrl, directoryAccount, serverDomain, clientVersion, syncError, client, voice, initialTab, games, onSaveServerName, onSaveGlobalName, onSetAvatar, onSetLocale, localePending, onCapturingKey, onClose, onLogout, onForget }: {
+export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, directoryUrl, directoryAccount, serverDomain, clientVersion, syncError, sealed, client, voice, initialTab, games, onSaveServerName, onSaveGlobalName, onSetAvatar, onSetLocale, localePending, onCapturingKey, onClose, onLogout, onForget }: {
   /** The server on screen and who you are there; null = none is shown (client without a home server): the dialog then has
    *  no profile and no sessions, which belong to a server, and the account page names the directory account and `publicKey`. */
   api: ServerApi | null; me: Me | null; publicKey: string | null;
@@ -65,6 +65,8 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
   clientVersion: string | null;
   /** Last failure while saving the settings in the account; null = none. */
   syncError: string | null;
+  /** The account keeps the settings as a blob only this user's key opens (store `settingsSealed`). */
+  sealed: boolean;
   client: VoiceClient; voice: VoiceState; initialTab?: SettingsTab;
   /** Game detection of the desktop app; null = not available here, and the category is not shown. */
   games: GameDetection | null;
@@ -517,13 +519,13 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
                 <span className="muted small">{t("update.hint")}</span>
               </>
             )}
-            {tab === "games" && games && <GamesTab games={games} />}
+            {tab === "games" && games && <GamesTab games={games} hiddenInAccount={inAccount && sealed} />}
 
             {tab === "licenses" && <LicensesTab version={clientVersion} />}
 
             {SYNCED.includes(tab) && (
               <>
-                <span className="muted small settings-sync"><Icon name={inAccount ? "cloud" : "monitor"} /> {inAccount ? t("settings.syncAccount", { handle: directoryAccount?.handle ?? "" }) : t("settings.syncDevice")}</span>
+                <span className="muted small settings-sync"><Icon name={inAccount ? "cloud" : "monitor"} /> {inAccount ? t(sealed ? "settings.syncAccountSealed" : "settings.syncAccount", { handle: directoryAccount?.handle ?? "" }) : t("settings.syncDevice")}</span>
                 {syncError && <p className="error small">{t("settings.syncError", { error: syncError })}</p>}
               </>
             )}

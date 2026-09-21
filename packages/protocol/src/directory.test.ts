@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DirectoryGame, LibraryGameId, directoryGameIconUrl, directoryGameUrl, splitGameId } from "./directory";
 import {
   ACCOUNT_SETTINGS_MAX_LENGTH, AVATAR_MAX_BYTES, AccountSettings, AccountSettingsUpdateRequest, AvatarUpdateRequest, DirectoryAccount, DirectoryHealth, avatarDigest, directoryAvatarPayload, directoryAvatarUrl, sniffAvatarMime, DirectoryRegisterRequest, Handle, directoryRegisterMessage, parseAccountSettings,
+  HIDDEN_GAMES_MAX, HIDDEN_GAME_ID_MAX, SEALED_SETTINGS_MAX_LENGTH, SealedSettings, SoundSettings, deriveSettingsKey, openSettings, parseSealedSettings, sealSettings,
 } from "./directory";
 
 describe("registration", () => {
@@ -61,6 +62,58 @@ describe("account settings", () => {
     const base = { publicKey: "a".repeat(64), challengeId: "6f1c2a4e-1b2c-4d3e-8f90-123456789abc", signature: "b".repeat(128) };
     expect(AccountSettingsUpdateRequest.safeParse({ ...base, settings: "{}" }).success).toBe(true);
     expect(AccountSettingsUpdateRequest.safeParse({ ...base, settings: "x".repeat(ACCOUNT_SETTINGS_MAX_LENGTH + 1) }).success).toBe(false);
+  });
+  it("rejects a cue volume outside 0..1 (the directory's smoke test leaves this to us)", () => {
+    const cues = { selfJoin: true, selfLeave: false, peerJoin: true, peerLeave: false };
+    expect(SoundSettings.safeParse({ ...cues, volume: 0.35 }).success).toBe(true);
+    expect(SoundSettings.safeParse({ ...cues, volume: 2 }).success).toBe(false);
+  });
+});
+
+describe("sealed settings", () => {
+  const seed = "11".repeat(32); const publicKey = "a".repeat(64);
+  const content = { settings: AccountSettings.parse({ locale: "de", stage: { featureSelf: false } }), hiddenGames: ["steam:730", "epic:Fortnite"] };
+  it("opens what it sealed, on every device that has the seed", async () => {
+    const sealed = await sealSettings(await deriveSettingsKey(seed, publicKey), publicKey, content);
+    expect(SealedSettings.safeParse(sealed).success).toBe(true);
+    expect(await openSettings(await deriveSettingsKey(seed, publicKey), publicKey, sealed)).toEqual(content);
+    expect(parseSealedSettings(JSON.stringify(sealed))).toEqual(sealed);
+  });
+  it("shows nothing of the content and hides its length up to the next step", async () => {
+    const key = await deriveSettingsKey(seed, publicKey);
+    const short = await sealSettings(key, publicKey, { settings: content.settings });
+    const longer = await sealSettings(key, publicKey, content);
+    expect(JSON.stringify(longer)).not.toContain("steam");
+    expect(longer.ciphertext.length).toBe(short.ciphertext.length);
+    expect(longer.ciphertext).not.toBe(short.ciphertext);
+  });
+  it("opens nothing with another key, for another account or after a change", async () => {
+    const key = await deriveSettingsKey(seed, publicKey);
+    const sealed = await sealSettings(key, publicKey, content);
+    expect(await openSettings(await deriveSettingsKey("22".repeat(32), publicKey), publicKey, sealed)).toBeNull();
+    expect(await openSettings(key, "b".repeat(64), sealed)).toBeNull();
+    const flipped = (sealed.ciphertext[0] === "A" ? "B" : "A") + sealed.ciphertext.slice(1);
+    expect(await openSettings(key, publicKey, { ...sealed, ciphertext: flipped })).toBeNull();
+  });
+  it("carries the longest hide list the schema allows within the request's limit", async () => {
+    const hiddenGames = Array.from({ length: HIDDEN_GAMES_MAX }, (_, i) => `epic:${String(i).padStart(HIDDEN_GAME_ID_MAX - 5, "x")}`);
+    const key = await deriveSettingsKey(seed, publicKey);
+    const sealed = await sealSettings(key, publicKey, { settings: content.settings, hiddenGames });
+    expect(JSON.stringify(sealed).length).toBeLessThanOrEqual(SEALED_SETTINGS_MAX_LENGTH);
+    expect((await openSettings(key, publicKey, sealed))?.hiddenGames).toHaveLength(HIDDEN_GAMES_MAX);
+  });
+  it("drops a hidden id that does not fit and keeps the rest; settings that do not fit open as nothing", async () => {
+    const key = await deriveSettingsKey(seed, publicKey);
+    const odd = await sealSettings(key, publicKey, { settings: content.settings, hiddenGames: ["steam:730", "", "x".repeat(HIDDEN_GAME_ID_MAX + 1), "steam:730"] });
+    expect((await openSettings(key, publicKey, odd))?.hiddenGames).toEqual(["steam:730"]);
+    const broken = await sealSettings(key, publicKey, { settings: { ...content.settings, locale: "fr" as "de" } });
+    expect(await openSettings(key, publicKey, broken)).toBeNull();
+  });
+  it("reads the feature and the status field as absent from a directory that predates them", () => {
+    const h = DirectoryHealth.parse({ ok: true, service: "directory", host: "id.example.org", features: { backup: true, totp: true, email: true }, time: new Date().toISOString() });
+    expect(h.features.settingsSealed).toBe(false);
+    expect(parseSealedSettings("{nope")).toBeNull();
+    expect(parseSealedSettings(JSON.stringify({ v: 2, iv: "0".repeat(24), ciphertext: "A".repeat(24) }))).toBeNull();
   });
 });
 

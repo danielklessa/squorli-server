@@ -1,6 +1,6 @@
 import { AccountSettings } from "@squorli/protocol";
 import { describe, expect, it } from "vitest";
-import { applyAccountSettings, sameAccountSettings, toAccountSettings } from "./accountSettings";
+import { applyAccountSettings, sameAccountSettings, sameHiddenGames, toAccountSettings } from "./accountSettings";
 import { DEFAULT_VOICE_SETTINGS, type VoiceSettings } from "./voice/settings";
 
 const device: VoiceSettings = { ...DEFAULT_VOICE_SETTINGS, inputDeviceId: "mic-1", outputDeviceId: "out-1", screenOutputDeviceId: "out-2", radioOutputDeviceId: "out-3", cameraDeviceId: "cam-1" };
@@ -60,5 +60,14 @@ describe("account settings", () => {
     expect(sameAccountSettings(a, { ...a, locale: "en" })).toBe(false);
     expect(sameAccountSettings(a, { ...a, stage: { featureSelf: false } })).toBe(false);
     expect(sameAccountSettings(a, { ...a, voice: { ...a.voice, vadHangoverMs: 450 } })).toBe(false);
+  });
+});
+
+describe("hide list of the game display", () => {
+  it("compares without the order, and no list counts as an empty one", () => {
+    expect(sameHiddenGames(["steam:1", "gog:2"], ["gog:2", "steam:1"])).toBe(true);
+    expect(sameHiddenGames(null, [])).toBe(true);
+    expect(sameHiddenGames(["steam:1"], null)).toBe(false);
+    expect(sameHiddenGames(["steam:1"], ["steam:2"])).toBe(false);
   });
 });

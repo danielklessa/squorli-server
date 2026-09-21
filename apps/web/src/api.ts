@@ -2,7 +2,7 @@ import {
   AccountStatus, Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, DirectoryRegisterPending, EmailAddress, EmailCode, EmailCodeResponse, FriendSearchResponse, ServerLeaveResponse, ServerListResponse, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
   AvatarUpdateResponse, avatarDigest, directoryAvatarPayload,
   BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryActionMessage, directoryBackupMessage, directoryProfilePayload,
-  directoryRegisterMessage, directorySoundSettingsPayload, openBackup, type AccountSettings, type SoundSettings,
+  directoryRegisterMessage, directorySoundSettingsPayload, openBackup, type AccountSettings, type SealedSettings, type SoundSettings,
   MuteState, ReadStateResponse, type Attachment, type Category, type Channel, type RadioStation, type Role,
   DmBlobPutResponse, LinkLookupResponse, directoryDmBlobUrl, directoryLinkLookupPayload,
 } from "@squorli/protocol";
@@ -292,6 +292,14 @@ export async function directorySetSettings(dirUrl: string, id: Identity, account
   const settings = JSON.stringify(accountSettings);
   const signature = await sign(id, directoryActionMessage(health.host, "settings", ch.nonce, settings));
   await directoryFetch(dirUrl, "POST", "/api/settings", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, settings });
+}
+/** The settings as a blob only the user can read (directory `features.settingsSealed`; signed like `settings`: the JSON string itself is the payload). */
+export async function directorySetSealedSettings(dirUrl: string, id: Identity, blob: SealedSettings): Promise<void> {
+  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
+  const sealed = JSON.stringify(blob);
+  const signature = await sign(id, directoryActionMessage(health.host, "settings-sealed", ch.nonce, sealed));
+  await directoryFetch(dirUrl, "POST", "/api/settings/sealed", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, sealed });
 }
 /** Delete your account on one chat server (host = its PUBLIC_DOMAIN): signed at the directory, which notifies the server; it confirms and deletes the user. */
 export async function directoryLeaveServer(dirUrl: string, id: Identity, server: string): Promise<ServerLeaveResponse> {

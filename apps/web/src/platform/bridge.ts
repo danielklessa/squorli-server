@@ -58,7 +58,7 @@ export type SystemActivityEvent = { type: "input" } | { type: "display"; require
  * "custom:<path>" for an added program; install paths stay in the shell.
  */
 export type GameSource = "steam" | "epic" | "gog" | "xbox" | "custom";
-export type DetectedGame = { id: string; name: string; source: GameSource };
+export type DetectedGame = { id: string; name: string; source: GameSource; /** The game's icon as the computer itself has it, a small PNG as a data URL (shell from 21 September 2026); null or left out = none. */ icon?: string | null };
 export type RunningGame = { id: string; name: string };
 /** A program the user added by hand: the full path of its executable and the name to show. */
 export type CustomProgram = { path: string; name: string };

@@ -26,7 +26,7 @@ async function steam(): Promise<InstalledGame[]> {
   const libraries = [...new Map([...(folders ? steamLibraries(parseVdf(folders)) : []), root].map((p) => p.replace(/\\+$/, "")).reverse().map((p) => [p.toLowerCase(), p])).values()];
   const games = await Promise.all(libraries.map(async (library) => {
     const manifests = (await list(join(library, "steamapps"))).filter((name) => /^appmanifest_\d+\.acf$/i.test(name));
-    return Promise.all(manifests.map(async (name) => { const text = await readText(join(library, "steamapps", name)); return text ? steamGame(parseVdf(text), library) : null; }));
+    return Promise.all(manifests.map(async (name) => { const text = await readText(join(library, "steamapps", name)); return text ? steamGame(parseVdf(text), library, root) : null; }));
   }));
   return games.flat().filter((g): g is InstalledGame => g !== null);
 }

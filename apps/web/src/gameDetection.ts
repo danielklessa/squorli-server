@@ -1,3 +1,4 @@
+import { HIDDEN_GAMES_MAX, HIDDEN_GAME_ID_MAX } from "@squorli/protocol";
 import type { CustomProgram, DetectedGame, RunningGame } from "./platform/bridge";
 import type { Platform } from "./platform/types";
 
@@ -6,14 +7,19 @@ import type { Platform } from "./platform/types";
  * switches it on. The shell reads which games the launchers installed and tells which one is in front (`platform.games`).
  * The two switches (detect and show at all, show on servers too) are user settings and follow the directory account
  * (voice/settings.ts `games`, accountSettings.ts); App.tsx hands the first one in through `setEnabled`. What is kept here,
- * per device (`chat.games.v1`): the games never to show and the programs added by hand. The hide list lives on the device
- * because it comes from what is installed here, and a list in the account would tell the directory's operator what
- * somebody owns and hides. What others get to see is decided in gamePresence.ts from `shown`.
+ * per device (`chat.games.v1`): the games never to show and the programs added by hand. What others get to see is decided
+ * in gamePresence.ts from `shown`.
+ *
+ * The hide list follows the account where the directory stores the settings as a blob only the user can read (user's
+ * decision, 21 September 2026; store.ts, protocol "Sealed settings"): in the open it would tell the directory's operator
+ * what somebody owns and hides, so with a directory that cannot do that it stays on the device as before. Only launcher
+ * ids travel (`syncedHidden`); the id of an added program contains its path and never leaves the computer. What is
+ * installed is never part of it: that changes too often and belongs to one computer.
  */
 const KEY = "chat.games.v1";
 const MAX_HIDDEN = 2000;
 
-export type GameSettings = { hidden: string[]; custom: CustomProgram[] };
+export type GameSettings = { hidden: string[]; custom: CustomProgram[]; /** This device's hide list holds nothing the account has not seen: the account's list replaces it. False (a device that never met the account's list, or a change made here since) = both are joined. */ hiddenSynced: boolean };
 export type GameState = { enabled: boolean; settings: GameSettings; /** The detected game, hidden or not. */ running: RunningGame | null; /** What others may see: the running game unless detection is off or the game is hidden. */ shown: RunningGame | null };
 
 /** A stored value made safe (pure, tested). The shell checks the programs' paths once more. */
@@ -26,7 +32,22 @@ export function readGameSettings(raw: string | null): GameSettings {
     const program = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
     return typeof program.path === "string" && program.path && typeof program.name === "string" ? [{ path: program.path, name: program.name }] : [];
   }) : [];
-  return { hidden, custom };
+  return { hidden, custom, hiddenSynced: stored.hiddenSynced === true };
+}
+
+const travels = (id: string): boolean => !id.startsWith("custom:") && id.length <= HIDDEN_GAME_ID_MAX;
+/** The part of a hide list that follows the account: launcher ids, never an added program (its id is its path). */
+export const syncedHidden = (hidden: string[]): string[] => hidden.filter(travels).slice(0, HIDDEN_GAMES_MAX);
+/**
+ * The account's hide list arrived (pure, tested). While this device's list holds something the account has not seen (the
+ * first time on a device, or a change that did not reach the account) both are joined, so a game hidden here is never
+ * suddenly shown; otherwise the account's list counts, so a tick set on another computer arrives here too. Added programs
+ * stay as they are on this device.
+ */
+export function mergeHidden(settings: GameSettings, account: string[]): GameSettings {
+  const local = settings.hidden.filter((id) => !travels(id));
+  const mine = settings.hiddenSynced ? [] : settings.hidden.filter(travels);
+  return { ...settings, hidden: [...new Set([...local, ...account, ...mine])], hiddenSynced: true };
 }
 
 export const shownGame = (enabled: boolean, settings: GameSettings, running: RunningGame | null): RunningGame | null => (enabled && running && !settings.hidden.includes(running.id) ? running : null);
@@ -69,7 +90,14 @@ export class GameDetection {
   }
   setHidden(id: string, hidden: boolean): void {
     const rest = this.settings.hidden.filter((other) => other !== id);
-    this.save({ ...this.settings, hidden: hidden ? [...rest, id] : rest }, false);
+    // Not in step with the account until the store has pushed it and hands the list back (`adoptHidden`).
+    this.save({ ...this.settings, hidden: hidden ? [...rest, id] : rest, hiddenSynced: false }, false);
+  }
+  /** The hide list as the account holds it (App.tsx, from the store). */
+  adoptHidden(account: string[]): void {
+    const next = mergeHidden(this.settings, account);
+    if (this.settings.hiddenSynced && next.hidden.length === this.settings.hidden.length && next.hidden.every((id) => this.settings.hidden.includes(id))) return;
+    this.save(next, false);
   }
   addCustom(program: CustomProgram): void {
     const rest = this.settings.custom.filter((other) => other.path.toLowerCase() !== program.path.toLowerCase());
@@ -77,7 +105,7 @@ export class GameDetection {
   }
   removeCustom(path: string): void {
     const id = `custom:${path.toLowerCase()}`;
-    this.save({ custom: this.settings.custom.filter((other) => other.path.toLowerCase() !== path.toLowerCase()), hidden: this.settings.hidden.filter((other) => other !== id) }, true);
+    this.save({ ...this.settings, custom: this.settings.custom.filter((other) => other.path.toLowerCase() !== path.toLowerCase()), hidden: this.settings.hidden.filter((other) => other !== id) }, true);
   }
   /** The installed games and added programs, read again by the shell. */
   scan(): Promise<DetectedGame[]> { return this.source.scan(); }

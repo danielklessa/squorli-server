@@ -5,10 +5,28 @@ import type { GameSource } from "@squorli/web/platform/bridge";
  * docs/features/games.md). Pure parsers of their files, tested; `scan.ts` reads the files. The id is the launcher's own
  * (`steam:730`), never an executable's name: names like game.exe collide, and the directory can resolve an id by itself later.
  */
-export type InstalledGame = { id: string; name: string; source: GameSource; /** Folder of the installation, with a trailing backslash. */ dir: string };
+export type InstalledGame = {
+  id: string; name: string; source: GameSource;
+  /** Folder of the installation, with a trailing backslash. */
+  dir: string;
+  /**
+   * Where this computer has an icon of the game, best first (games/icons.ts reads the first that gives one): a picture, an
+   * executable whose icon Windows knows, or Steam's cache folder of the app. For the list in the settings only; like `dir`
+   * these paths stay in the main process.
+   */
+  icons: string[];
+};
 
 /** A Windows folder path with backslashes and exactly one at the end. */
 export const folderPath = (path: string): string => `${path.replace(/\//g, "\\").replace(/\\+$/, "")}\\`;
+
+/** A file a manifest names relative to its installation, as a full path; null for anything that would leave the folder. */
+export function fileInside(dir: string, relative: unknown): string | null {
+  if (typeof relative !== "string") return null;
+  const clean = relative.replace(/\//g, "\\").replace(/^\\+/, "").trim();
+  if (!clean || clean.length > 400 || /^[a-z]:/i.test(clean) || clean.split("\\").includes("..") || /[\t\r\n]/.test(clean)) return null;
+  return `${folderPath(dir)}${clean}`;
+}
 
 // --- Valve's text format (libraryfolders.vdf, appmanifest_*.acf): nested "key" "value" / "key" { ... }
 export type Vdf = { [key: string]: string | Vdf };
@@ -44,13 +62,20 @@ export function steamLibraries(vdf: Vdf): string[] {
 // Installed through Steam but nothing anybody plays: the redistributables every library has.
 const STEAM_NOT_GAMES = new Set(["228980"]);
 
-/** One `appmanifest_<id>.acf` of the library at `library`. */
-export function steamGame(vdf: Vdf, library: string): InstalledGame | null {
+/**
+ * Steam keeps the pictures of every app of the library in `<Steam>\appcache\librarycache`: since 2024 a folder per app, in
+ * which the small icon is the one picture named by its hash; before that `<appid>_icon.jpg` next to the others.
+ */
+export const steamIconFile = (names: readonly string[]): string | null => names.find((name) => /^[0-9a-f]{40}\.(jpg|png)$/i.test(name)) ?? null;
+
+/** One `appmanifest_<id>.acf` of the library at `library`; `steamRoot` = the Steam installation, whose cache has the icons. */
+export function steamGame(vdf: Vdf, library: string, steamRoot?: string): InstalledGame | null {
   const state = vdf.AppState;
   if (!state || typeof state === "string") return null;
   const { appid, name, installdir } = state;
   if (typeof appid !== "string" || !/^\d+$/.test(appid) || typeof name !== "string" || !name || typeof installdir !== "string" || !installdir || STEAM_NOT_GAMES.has(appid)) return null;
-  return { id: `steam:${appid}`, name, source: "steam", dir: folderPath(`${library}\\steamapps\\common\\${installdir}`) };
+  const cache = steamRoot ? `${folderPath(steamRoot)}appcache\\librarycache\\` : null;
+  return { id: `steam:${appid}`, name, source: "steam", dir: folderPath(`${library}\\steamapps\\common\\${installdir}`), icons: cache ? [`${cache}${appid}\\`, `${cache}${appid}_icon.jpg`] : [] };
 }
 
 /** One `.item` manifest of the Epic Games Launcher (JSON). Only whole games: no engine, no plugin, no add-on of another game. */
@@ -62,7 +87,8 @@ export function epicGame(json: unknown): InstalledGame | null {
   if (item.bIsApplication !== true || item.bIsIncompleteInstall === true) return null;
   if (!Array.isArray(AppCategories) || !AppCategories.includes("games")) return null;
   if (typeof MainGameAppName === "string" && MainGameAppName && MainGameAppName !== AppName) return null;
-  return { id: `epic:${AppName}`, name: DisplayName, source: "epic", dir: folderPath(InstallLocation) };
+  const exe = fileInside(InstallLocation, item.LaunchExecutable);
+  return { id: `epic:${AppName}`, name: DisplayName, source: "epic", dir: folderPath(InstallLocation), icons: exe && /\.exe$/i.test(exe) ? [exe] : [] };
 }
 
 /**
@@ -86,7 +112,9 @@ export function gogGames(keys: Map<string, Record<string, string>>): InstalledGa
   for (const values of keys.values()) {
     const { gameID, gameName, path, dependsOn } = values;
     if (!gameID || !/^\d+$/.test(gameID) || !gameName || !path || dependsOn) continue;
-    games.push({ id: `gog:${gameID}`, name: gameName, source: "gog", dir: folderPath(path) });
+    // GOG puts an icon next to every game; the executable's own is the second choice.
+    const exe = values.exe && /^[a-z]:\\[^\t\r\n]+\.exe$/i.test(values.exe) && !values.exe.includes("\\..\\") ? [values.exe] : [];
+    games.push({ id: `gog:${gameID}`, name: gameName, source: "gog", dir: folderPath(path), icons: [`${folderPath(path)}goggame-${gameID}.ico`, ...exe] });
   }
   return games;
 }
@@ -114,7 +142,11 @@ export function xboxGame(config: string, folderName: string, contentDir: string)
   if (!storeId) return null;
   const shown = /<ShellVisuals\s[^>]*DefaultDisplayName="([^"]+)"/.exec(config)?.[1] ?? "";
   const name = decodeXml(shown && !/^ms-resource:/i.test(shown) ? shown : folderName).trim();
-  return name ? { id: `xbox:${storeId.toUpperCase()}`, name, source: "xbox", dir: folderPath(contentDir) } : null;
+  // The store's small logo lies in the folder as a picture; the executable's icon is the second choice.
+  const visuals = /<ShellVisuals\s[^>]*>/.exec(config)?.[0] ?? "";
+  const logos = ["Square44x44Logo", "Square150x150Logo", "StoreLogo"].map((key) => fileInside(contentDir, new RegExp(`\\s${key}="([^"]+\\.png)"`, "i").exec(visuals)?.[1]));
+  const exe = fileInside(contentDir, /<Executable\s[^>]*Name="([^"]+\.exe)"/i.exec(config)?.[1]);
+  return name ? { id: `xbox:${storeId.toUpperCase()}`, name, source: "xbox", dir: folderPath(contentDir), icons: [...logos, exe].filter((file): file is string => file !== null) } : null;
 }
 
 const decodeXml = (text: string): string => text.replace(/&(amp|lt|gt|quot|apos);/g, (_all, name: string) => ({ amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'" })[name] ?? "");
