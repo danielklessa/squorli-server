@@ -2,6 +2,7 @@ import { Avatar } from "./Avatar";
 import { directoryAvatarUrl, type Friend, type FriendSearchResult, type Member } from "@squorli/protocol";
 import { useEffect, useMemo, useState } from "react";
 import { DmView } from "./DmView";
+import { GameLine } from "./GameLine";
 import { Icon } from "./Icon";
 import type { State, Store } from "./store";
 import { t } from "./i18n";
@@ -87,7 +88,7 @@ export function HomeSidebar({ state, store, members, onOpenChat }: { state: Stat
               <li key={f.publicKey} className={`channel friend ${state.currentPeer === f.publicKey ? "active" : ""} ${unread ? "unread" : ""} ${f.online ? "" : "offline"}`}>
                 <button className="channel-btn" onClick={() => { store.selectPeer(f.publicKey); onOpenChat(); }} title={`@${f.handle}`}>
                   <Avatar name={friendName(f)} src={friendAvatar(state.directoryUrl, f)} online={f.online} afk={f.afk} />
-                  <span className="channel-name">{friendName(f)}</span>
+                  <span className="friend-identity"><span className="channel-name">{friendName(f)}</span><GameLine game={f.online ? f.game : null} /></span>
                   {f.online && f.afk && <Icon name="moon" className="afk" title={t("members.afk")} />}
                   {unread > 0 && <span className="count">{unread}</span>}
                 </button>

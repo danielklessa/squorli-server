@@ -43,6 +43,7 @@ import { resumeIdleDetection } from "./idleDetection";
 import { setOwnVideo, watchSystemActivity } from "./systemActivity";
 import { GameDetection } from "./gameDetection";
 import { directoryGameLookup, presenceOf } from "./gamePresence";
+import { GameLibraryContext } from "./GameLine";
 import { t } from "./i18n";
 import { platform, type ScreenPick, type ScreenSource } from "./platform";
 import { formatDeepLink } from "./platform/deepLink";
@@ -90,6 +91,8 @@ export function App() {
   const shownGame = useSyncExternalStore(useMemo(() => games?.subscribe ?? (() => () => {}), [games]), () => games?.state.shown ?? null);
   const gameLookup = useMemo(() => (state.directoryUrl && state.directoryGameLibrary ? directoryGameLookup(state.directoryUrl) : null), [state.directoryUrl, state.directoryGameLibrary]);
   const gameOnServers = voiceSettings.games.servers;
+  // The viewing side (GameLine.tsx) asks the same library, in every client, the browser too.
+  const gameLibrary = useMemo(() => ({ directoryUrl: state.directoryUrl, lookup: gameLookup }), [state.directoryUrl, gameLookup]);
   useEffect(() => {
     if (!games) return;
     let stale = false;
@@ -451,7 +454,7 @@ export function App() {
   };
 
   return (
-    <>
+    <GameLibraryContext.Provider value={gameLibrary}>
     <TitleBar title={title} onRestartForUpdate={() => { void (async () => {
       // Restarting ends a voice connection: ask first while in one.
       if (voice.status !== "disconnected" && !await askConfirm({ title: t("update.restartTitle"), text: t("update.restartInVoice"), confirmLabel: t("update.restart") })) return;
@@ -543,7 +546,7 @@ export function App() {
           onForget={() => { setSettingsTab(null); void client.leave(); void store.forgetIdentity(); }} />
       )}
     </div>
-    </>
+    </GameLibraryContext.Provider>
   );
 }
 

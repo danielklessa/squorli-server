@@ -1,4 +1,4 @@
-import { DirectoryGame, GameName, LibraryGameId, directoryGameUrl, type GamePresence } from "@squorli/protocol";
+import { DirectoryGame, GameName, LibraryGameId, directoryGameIconUrl, directoryGameUrl, type GamePresence } from "@squorli/protocol";
 import type { RunningGame } from "./platform/bridge";
 
 /**
@@ -30,22 +30,54 @@ export async function presenceOf(shown: RunningGame | null, lookup: GameLookup |
   return name ? { id: id.data, name } : null;
 }
 
+/** A lookup that also says what it already knows without asking (`peek`), so a list that is drawn again does not blink. */
+export type GameLibraryLookup = GameLookup & { peek: (id: string) => DirectoryGame | "unknown" | undefined };
+
+/** A failed request leaves its id alone for this long: a member list asks for the same game from many rows. */
+export const GAME_LOOKUP_RETRY_MS = 60_000;
+
 /**
  * Asks the directory's game library, once per id and session (the browser's cache holds an answer for a day besides).
- * null = could not be asked (no answer, limited, a directory without the library).
+ * null = could not be asked (no answer, limited, a directory without the library); asked again after a minute at the earliest.
  */
-export function directoryGameLookup(directoryUrl: string, fetchImpl: typeof fetch = fetch): GameLookup {
-  const known = new Map<string, Promise<DirectoryGame | "unknown" | null>>();
-  return (id) => {
-    const cached = known.get(id);
+export function directoryGameLookup(directoryUrl: string, fetchImpl: typeof fetch = fetch, now: () => number = Date.now): GameLibraryLookup {
+  const asked = new Map<string, Promise<DirectoryGame | "unknown" | null>>();
+  const answers = new Map<string, DirectoryGame | "unknown">();
+  const failedAt = new Map<string, number>();
+  const lookup: GameLookup = (id) => {
+    const failed = failedAt.get(id);
+    if (failed !== undefined && now() - failed >= GAME_LOOKUP_RETRY_MS) { failedAt.delete(id); asked.delete(id); }
+    const cached = asked.get(id);
     if (cached) return cached;
-    const asked = fetchImpl(directoryGameUrl(directoryUrl, id)).then(async (res) => {
+    const request = fetchImpl(directoryGameUrl(directoryUrl, id)).then(async (res) => {
       if (res.status === 404) return "unknown" as const;
       if (!res.ok) return null;
       const game = DirectoryGame.safeParse(await res.json());
       return game.success ? game.data : null;
-    }, () => null).then((answer) => { if (answer === null) known.delete(id); return answer; });
-    known.set(id, asked);
-    return asked;
+    }, () => null).then((answer) => {
+      if (answer === null) failedAt.set(id, now());
+      else answers.set(id, answer);
+      return answer;
+    });
+    asked.set(id, request);
+    return request;
   };
+  return Object.assign(lookup, { peek: (id: string) => answers.get(id) });
+}
+
+/** What a viewer shows of somebody's game. */
+export type ShownGame = { name: string; iconUrl: string | null };
+
+/**
+ * The viewer's side: what to show of a reported game. `answer` is the directory's word about the game's id: undefined = not
+ * asked yet or still asking, null = could not be asked. A game with a launcher's id shows the directory's name and icon; what
+ * the directory does not call a game shows nothing, whatever the playing client says, and nothing shows while the answer is
+ * still out, so such a game never flashes up. A game without an id, one the catalog does not know and one the directory
+ * cannot be asked about show the reported name, which is the playing user's own text like a display name, and no icon.
+ */
+export function shownGameOf(game: GamePresence | null, answer: DirectoryGame | "unknown" | null | undefined, directoryUrl: string | null): ShownGame | null {
+  if (!game) return null;
+  if (!game.id || answer === null || answer === "unknown") return { name: game.name, iconUrl: null };
+  if (answer === undefined || !answer.show) return null;
+  return { name: cleanName(answer.name) ?? game.name, iconUrl: directoryUrl ? directoryGameIconUrl(directoryUrl, answer) : null };
 }

@@ -5,6 +5,7 @@ import { ContextMenu, ContextSubmenu, type MenuAnchor } from "./ContextMenu";
 import type { ServerApi } from "./api";
 import { askConfirm, askInput } from "./dialogs";
 import { Icon } from "./Icon";
+import { GameLine } from "./GameLine";
 import { UserVolumeControl } from "./UserVolumeControl";
 import type { VoiceClient } from "./voice/voiceClient";
 import { t } from "./i18n";
@@ -75,14 +76,14 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
                 <li key={m.userId} className={`member ${m.online ? "" : "offline"}`}>
                   <button className="member-btn" aria-haspopup="menu" aria-expanded={open?.userId === m.userId} onContextMenu={(e) => openMenu(e, m.userId)} onClick={(e) => openMenu(e, m.userId)}>
                     <Avatar name={m.displayName} src={m.avatarUrl} online={m.online} afk={m.afk} />
-                    <span className="member-identity"><span style={r?.color ? { color: r.color } : undefined}>{m.displayName}</span>{(m.handle || isMe) && <small>{m.handle && `@${m.handle}`}{m.handle && isMe && " "}{isMe && t("members.you")}</small>}</span>
+                    <span className="member-identity"><span style={r?.color ? { color: r.color } : undefined}>{m.displayName}</span><GameLine game={m.online ? m.game : null} fallback={(m.handle || isMe) && <small>{m.handle && `@${m.handle}`}{m.handle && isMe && " "}{isMe && t("members.you")}</small>} /></span>
                     {m.online && m.afk && <Icon name="moon" className="afk" title={t("members.afk")} />}
                     {m.isOwner && <Icon name="crown" className="owner" title={t("members.owner")} />}
                     {m.streamBlocked && <Icon name="video-off" className="muted" title={t("members.streamBlocked")} />}
                   </button>
                   {open?.userId === m.userId && (
                     <ContextMenu anchor={open} label={m.displayName} onClose={() => setOpen(null)}>
-                      <div className="context-identity" role="presentation"><Avatar name={m.displayName} src={m.avatarUrl} online={m.online} afk={m.afk} /><strong>{m.displayName}</strong></div>
+                      <div className="context-identity" role="presentation"><Avatar name={m.displayName} src={m.avatarUrl} online={m.online} afk={m.afk} /><div><strong>{m.displayName}</strong><GameLine game={m.online ? m.game : null} /></div></div>
                       <div className="muted small">{m.handle && <><strong>@{m.handle}</strong> · </>}{m.publicKey.slice(0, 16)}…</div>
                       {friends && !isMe && (() => {
                         // M7: add friend / write a message. Without a handle the member has no directory account, so friendship is not possible.
