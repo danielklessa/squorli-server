@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ScreenSource } from "./platform/bridge";
-import { defaultAudio, defaultCodec, quickSharePick, sortWindows } from "./screenPick";
+import { defaultAudio, defaultCodec, movingCodec, quickSharePick, sortWindows } from "./screenPick";
 
 const source = (over: Partial<ScreenSource>): ScreenSource => ({ id: "window:1:0", kind: "window", name: "x", thumbnail: "", icon: null, audio: true, ...over });
 
@@ -12,12 +12,17 @@ describe("screenPick", () => {
     expect(defaultAudio(null)).toBe(false);
   });
 
-  it("preselects H.264 for a game's window and the standing codec for everything else", () => {
-    expect(defaultCodec(source({ gameId: "steam:730" }))).toBe("h264");
-    expect(defaultCodec(source({}))).toBe("vp8");
-    expect(defaultCodec(source({ gameId: null }))).toBe("vp8");
-    expect(defaultCodec(source({ id: "screen:0:0", kind: "screen" }))).toBe("vp8");
-    expect(defaultCodec(null)).toBe("vp8");
+  it("preselects the codec for moving pictures for a game's window and the standing codec for everything else", () => {
+    expect(movingCodec(true)).toBe("h265");
+    expect(movingCodec(false)).toBe("h264");
+    expect(defaultCodec(source({ gameId: "steam:730" }), false)).toBe("h264");
+    expect(defaultCodec(source({ gameId: "steam:730" }), true)).toBe("h265");
+    for (const h265 of [true, false]) {
+      expect(defaultCodec(source({}), h265)).toBe("vp8");
+      expect(defaultCodec(source({ gameId: null }), h265)).toBe("vp8");
+      expect(defaultCodec(source({ id: "screen:0:0", kind: "screen" }), h265)).toBe("vp8");
+      expect(defaultCodec(null, h265)).toBe("vp8");
+    }
   });
 
   it("lists games first, then full screen windows, then the rest, each by name", () => {
@@ -26,10 +31,11 @@ describe("screenPick", () => {
     expect(list[0]!.name).toBe("zeta");
   });
 
-  it("quick share takes the game's topmost window with audio and H.264", () => {
+  it("quick share takes the game's topmost window with audio and the codec for moving pictures", () => {
     const sources = [source({ id: "screen:0:0", kind: "screen" }), source({ id: "window:5:0" }), source({ id: "window:7:0", gameId: "steam:730" }), source({ id: "window:9:0", gameId: "steam:730" })];
-    expect(quickSharePick(sources, "steam:730")).toEqual({ sourceId: "window:7:0", audio: true, codec: "h264" });
-    expect(quickSharePick([source({ id: "window:7:0", gameId: "steam:730", audio: false })], "steam:730")).toEqual({ sourceId: "window:7:0", audio: false, codec: "h264" });
-    expect(quickSharePick(sources, "epic:Fortnite")).toBeNull();
+    expect(quickSharePick(sources, "steam:730", false)).toEqual({ sourceId: "window:7:0", audio: true, codec: "h264" });
+    expect(quickSharePick(sources, "steam:730", true)).toEqual({ sourceId: "window:7:0", audio: true, codec: "h265" });
+    expect(quickSharePick([source({ id: "window:7:0", gameId: "steam:730", audio: false })], "steam:730", false)).toEqual({ sourceId: "window:7:0", audio: false, codec: "h264" });
+    expect(quickSharePick(sources, "epic:Fortnite", true)).toBeNull();
   });
 });

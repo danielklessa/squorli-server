@@ -15,7 +15,7 @@ export function desktopPlatform(bridge: DesktopBridge): Platform {
   bridge.onScreenPickRequest((request) => {
     const answer = picker ? picker(request.sources).catch(() => null) : Promise.resolve(null);
     void answer.then((pick) => {
-      pickedCodec = pick?.codec === "h264" ? "h264" : "vp8";
+      pickedCodec = pick?.codec === "h264" || pick?.codec === "h265" ? pick.codec : "vp8";
       // With the native helper the shell captures the audio itself and sends it over; the voice client takes it after the share started.
       audio.expect(!!pick?.audio && info.nativeScreenAudio);
       bridge.answerScreenPick(request.requestId, pick);
@@ -61,7 +61,7 @@ export function desktopPlatform(bridge: DesktopBridge): Platform {
       scan: () => bridge.scanGames(), setWatch: (settings) => bridge.setGameWatch(settings), pickProgram: () => bridge.pickGameProgram(), subscribe: (cb) => bridge.onRunningGame(cb),
     } : null,
     // app:// is a secure scheme; only the development window (Vite over http) may load http resources.
-    media: { mobile: false, blocksInsecureMedia: window.location.protocol !== "http:", screenSharePublishOverrides: () => (pickedCodec === "h264" ? { videoCodec: "h264" } : null), takeScreenAudio: () => audio.take(), stopScreenAudio: () => audio.stop(),
+    media: { mobile: false, blocksInsecureMedia: window.location.protocol !== "http:", screenSharePublishOverrides: () => (pickedCodec === "vp8" ? null : { videoCodec: pickedCodec }), takeScreenAudio: () => audio.take(), stopScreenAudio: () => audio.stop(),
       // An app older than this client has no such member.
       setPlayerOutput: typeof bridge.setPlayerOutput === "function" ? (label) => bridge.setPlayerOutput(label) : null,
       setChatPlayerOutput: typeof bridge.setChatPlayerOutput === "function" ? (label) => bridge.setChatPlayerOutput(label) : null },

@@ -141,7 +141,7 @@ export function App() {
   const quickShare = useRef<string | null>(null);
   useEffect(() => {
     platform.screen.setPicker((sources) => {
-      const quick = quickShare.current ? quickSharePick(sources, quickShare.current) : null;
+      const quick = quickShare.current ? quickSharePick(sources, quickShare.current, VoiceClient.supportsH265()) : null;
       quickShare.current = null;
       if (quick) return Promise.resolve(quick);
       return new Promise((resolve) => { setPickWindow(stageFocus.current()); setScreenPick((open) => { open?.resolve(null); return { sources, resolve }; }); });
@@ -553,7 +553,7 @@ export function App() {
         voice={view.active.voice} channels={view.server.channels} friends={friendsMenu} client={client} />}
 
       {showAdmin && view && <AdminPanel api={view.conn.api} server={view.server} myUserId={view.active.userId!} directoryUrl={view.active.directoryUrl} onClose={() => setShowAdmin(false)} />}
-      {screenPick && inPickWindow(<ScreenPicker sources={screenPick.sources} win={pickWindow ?? window}
+      {screenPick && inPickWindow(<ScreenPicker sources={screenPick.sources} h265={VoiceClient.supportsH265()} win={pickWindow ?? window}
         onPick={(pick) => { screenPick.resolve(pick); setScreenPick(null); }} onCancel={() => { screenPick.resolve(null); setScreenPick(null); }} />)}
       {cameraPick && inPickWindow(<CameraPicker cameras={cameraPick} initial={voiceSettings.cameraDeviceId} initialBlur={voiceSettings.cameraBlur} win={pickWindow ?? window} onPick={(id, b) => { void pickCamera(id, b); }} onCancel={() => setCameraPick(null)} />)}
       {miniProfile && active?.me && (

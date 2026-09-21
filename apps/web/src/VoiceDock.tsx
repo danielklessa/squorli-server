@@ -28,7 +28,7 @@ type Props = {
   onOpenStage: (() => void) | null;
   canStream: boolean;
   onToggleCamera: () => Promise<void>;
-  /** Desktop app, a game is detected and no share runs: share that game's window at once, with its audio and H.264 (App.tsx, ScreenPicker.tsx `quickSharePick`); null = no button. */
+  /** Desktop app, a game is detected and no share runs: share that game's window at once, with its audio and the codec for moving pictures (H.265 or H.264; App.tsx, ScreenPicker.tsx `quickSharePick`); null = no button. */
   quickShare: { name: string; onShare: () => void } | null;
   /** Moved to the AFK channel for inactivity: explain it and offer the way back (`name` null = that channel is gone). */
   afkReturn: { name: string | null; onReturn: () => void } | null;

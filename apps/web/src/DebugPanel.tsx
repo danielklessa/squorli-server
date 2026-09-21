@@ -27,7 +27,7 @@ export function DebugPanel({ log, client, voice }: { log: RawLogEntry[]; client:
         // Bitrate from the difference in cumulative bytes since the last measurement.
         const now = performance.now();
         const bytes: Record<string, number> = {}; const frames: Record<string, number> = {};
-        for (const v of s.videoSend) { bytes[`s:${v.source}:${v.rid}`] = v.bytesSent; }
+        for (const v of s.videoSend) { bytes[`s:${v.source}:${v.rid}:${v.codec}`] = v.bytesSent; }
         for (const v of s.videoRecv) { bytes[`r:${v.identity}:${v.source}`] = v.bytesReceived; frames[`r:${v.identity}:${v.source}`] = v.framesDecoded; }
         if (s.sender?.bytesSent !== undefined) bytes["s:audio"] = s.sender.bytesSent;
         for (const r of s.receivers) if (r.bytesReceived !== undefined) bytes[`r:${r.identity}:audio`] = r.bytesReceived;
@@ -73,8 +73,8 @@ export function DebugPanel({ log, client, voice }: { log: RawLogEntry[]; client:
           <tr><td>{t("debug.total")}</td><td>{t("debug.totalRow", { up: fmtKbps(totalUp), down: fmtKbps(totalDown), s: POLL_MS / 1000 })}</td></tr>
           <tr><td>{t("debug.audioSend")}</td><td>{stats.sender ? t("debug.audioSendRow", { rate: fmtKbps(rates["s:audio"]?.kbps), sent: stats.sender.packetsSent ?? "?", lost: stats.sender.packetsLost ?? 0, jitter: fmtMs(stats.sender.jitter), rtt: fmtMs(stats.sender.roundTripTime) }) : "–"}</td></tr>
           {stats.videoSend.map((v) => (
-            <tr key={`${v.source}${v.rid}`}><td>{v.source === "screen" ? t("debug.screen") : t("debug.camera")} {t("debug.send")} {v.rid}</td>
-              <td>{fmtKbps(rates[`s:${v.source}:${v.rid}`]?.kbps)}, {v.width}×{v.height} @ {Math.round(v.fps)} fps{v.limitation && v.limitation !== "none" ? t("debug.limitedBy", { what: v.limitation }) : ""}</td></tr>
+            <tr key={`${v.source}${v.rid}${v.codec}`}><td>{v.source === "screen" ? t("debug.screen") : t("debug.camera")} {t("debug.send")} {v.rid}</td>
+              <td>{fmtKbps(rates[`s:${v.source}:${v.rid}:${v.codec}`]?.kbps)}, {v.codec}{v.encoder ? ` (${v.encoder})` : ""}, {v.width}×{v.height} @ {Math.round(v.fps)} fps{v.limitation && v.limitation !== "none" ? t("debug.limitedBy", { what: v.limitation }) : ""}</td></tr>
           ))}
           {stats.receivers.map((r) => (
             <tr key={r.identity}><td>{t("debug.audioFrom", { id: r.identity.slice(0, 8) })}</td><td>{t("debug.audioRecvRow", { rate: fmtKbps(rates[`r:${r.identity}:audio`]?.kbps), recv: r.packetsReceived ?? "?", lost: r.packetsLost ?? 0, jitter: fmtMs(r.jitter) })}</td></tr>

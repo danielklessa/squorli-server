@@ -10,6 +10,7 @@ import {
   ScreenSharePresets,
   Track,
   VideoPresets,
+  supportsH265,
   type AudioCaptureOptions,
   type LocalTrack,
   type LocalTrackPublication,
@@ -27,6 +28,7 @@ import { cameraSwitch, type CameraRequest } from "./cameraSwitch";
 import type { VoiceSettings } from "./settings";
 import { DEFAULT_SOUND_SETTINGS, applyCueOutput, normalizeSoundSettings, playCue, shouldPlayCue, type SoundCue, type SoundSettings } from "./sounds";
 import { USER_VOLUME_MAX, clampUserVolume, loadUserVolumes, saveUserVolumes, withUserVolume, type UserVolumes } from "./userVolumes";
+import { screenSharePublish } from "./screenShareOptions";
 import { subscriptionPermissions, type VideoAccess } from "./videoAccess";
 import { VideoWatch, parseFeedId, type VideoSource } from "./videoWatch";
 import { t } from "../i18n";
@@ -147,7 +149,8 @@ export type JoinOptions = {
   afk?: boolean;
 };
 
-export type VideoSendStat = { source: "camera" | "screen"; rid: string; width: number; height: number; fps: number; bytesSent: number; limitation?: string | undefined };
+/** `codec` and `encoder` = what is really sent and what encodes it (a share that fell back to its backup codec shows both senders, the first one idle). */
+export type VideoSendStat = { source: "camera" | "screen"; rid: string; codec: string; encoder?: string | undefined; width: number; height: number; fps: number; bytesSent: number; limitation?: string | undefined };
 export type VideoRecvStat = { identity: string; source: "camera" | "screen"; width?: number | undefined; height?: number | undefined; framesDecoded: number; bytesReceived: number; packetsLost?: number | undefined };
 
 export type AudioStats = {
@@ -652,6 +655,9 @@ export class VoiceClient {
   /** Can this browser share a screen at all? Phones and tablets cannot (no getDisplayMedia); the stage then shows no button. */
   static supportsScreenShare(): boolean { return typeof navigator !== "undefined" && typeof navigator.mediaDevices?.getDisplayMedia === "function"; }
 
+  /** Can this computer send H.265? Chromium offers it only with an encoder in the graphics unit (it ships no software one). */
+  static supportsH265(): boolean { try { return supportsH265(); } catch { return false; } }
+
   /** Can this browser blur the background (WebGL2/WASM, MediaStreamTrackProcessor)? */
   static supportsBlur(): boolean { try { return supportsBackgroundProcessors(); } catch { return false; } }
 
@@ -733,7 +739,8 @@ export class VoiceClient {
     try {
       // No simulcast for the screen: with small tiles adaptiveStream would fetch the coarse layer and only scale up
       // seconds after enlarging; text needs the full layer. contentHint "detail" keeps the
-      // resolution and sacrifices frames per second instead when bandwidth is tight.
+      // resolution and sacrifices frames per second instead when bandwidth is tight (a share of moving pictures turns both
+      // around: screenShareOptions.ts).
       // The own tab can be shared too (selfBrowserSurface). restrictOwnAudio (Chromium 141+, ignored elsewhere) keeps this
       // tab's playback out of the captured audio, otherwise the others would hear their own voices back as screen audio.
       // Capture and publish are two steps (not LiveKit's setScreenShareEnabled(true)): the desktop app's picker also chooses
@@ -751,7 +758,9 @@ export class VoiceClient {
             contentHint: "detail",
             resolution: ScreenSharePresets.h1080fps30.resolution,
           });
-          const options: TrackPublishOptions = { simulcast: false, videoEncoding: ScreenSharePresets.h1080fps30.encoding, ...this.media?.screenSharePublishOverrides() };
+          const { options, contentHint } = screenSharePublish(this.media?.screenSharePublishOverrides());
+          // Moving pictures (H.264/H.265, a game): the capture asked for "detail" before the codec was known.
+          for (const track of tracks) if (track instanceof LocalVideoTrack && "contentHint" in track.mediaStreamTrack) track.mediaStreamTrack.contentHint = contentHint;
           if (this.room !== room) throw new DOMException("left the channel", "AbortError");
           await Promise.all(tracks.map((track) => room.localParticipant.publishTrack(track, options)));
           this.log(`bildschirm codec: ${options.videoCodec ?? "vp8"}`);
@@ -1099,8 +1108,15 @@ export class VoiceClient {
       const t = pub.track;
       if (!(t instanceof LocalVideoTrack)) continue;
       const source = pub.source === Track.Source.ScreenShare ? "screen" : "camera";
-      for (const s of (await t.getSenderStats().catch(() => [])) ?? []) {
-        videoSend.push({ source, rid: s.rid || "-", width: s.frameWidth, height: s.frameHeight, fps: s.framesPerSecond, bytesSent: s.bytesSent ?? 0, limitation: s.qualityLimitationReason });
+      // The raw reports of every sender (LiveKit's getSenderStats() knows neither the codec nor the backup codec's sender).
+      const senders = [t.sender, ...[...t.simulcastCodecs.values()].map((c) => c.sender)].filter((s): s is RTCRtpSender => !!s);
+      for (const sender of new Set(senders)) {
+        const report = await sender.getStats().catch(() => null);
+        report?.forEach((s) => {
+          if (s.type !== "outbound-rtp" || s.kind !== "video") return;
+          const codec = String(report.get(s.codecId)?.mimeType ?? "?").replace(/^video\//i, "");
+          videoSend.push({ source, rid: s.rid || "-", codec, encoder: s.encoderImplementation, width: s.frameWidth ?? 0, height: s.frameHeight ?? 0, fps: s.framesPerSecond ?? 0, bytesSent: s.bytesSent ?? 0, limitation: s.qualityLimitationReason });
+        });
       }
     }
     const videoRecv: VideoRecvStat[] = [];

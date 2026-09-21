@@ -3,7 +3,7 @@ import { Icon } from "./Icon";
 import { t } from "./i18n";
 import type { ScreenCodec, ScreenPick, ScreenSource } from "./platform";
 import { localeTag } from "./i18n";
-import { defaultAudio, defaultCodec, sortWindows } from "./screenPick";
+import { defaultAudio, defaultCodec, movingCodec, sortWindows } from "./screenPick";
 
 type Tab = "window" | "screen";
 
@@ -12,9 +12,10 @@ type Tab = "window" | "screen";
  * the shell lists the sources and asks the client (`platform.screen.setPicker`, App.tsx). Two tabs, windows first (user's
  * wish, 21 September 2026). Audio: for a window it is what that window's application plays and is ticked from the start, for
  * a screen what the computer plays, off until ticked (`source.audio` says whether the shell can deliver it; Windows only, and
- * never for the app's own windows). Codec: the standing one (VP8) or H.264, preselected for a detected game's window.
+ * never for the app's own windows). Codec: the standing one (VP8) or the one for moving pictures, preselected for a detected
+ * game's window: H.265 where this computer can send it (`h265`, its graphics unit encodes it), else H.264.
  */
-export function ScreenPicker({ sources, onPick, onCancel, win = window }: { sources: ScreenSource[]; onPick: (pick: ScreenPick) => void; onCancel: () => void; /** The window the dialog is shown in (the stage's own window, StageWindow.tsx). */ win?: Window }) {
+export function ScreenPicker({ sources, h265, onPick, onCancel, win = window }: { sources: ScreenSource[]; /** This computer can send H.265 (`VoiceClient.supportsH265()`). */ h265: boolean; onPick: (pick: ScreenPick) => void; onCancel: () => void; /** The window the dialog is shown in (the stage's own window, StageWindow.tsx). */ win?: Window }) {
   const screens = sources.filter((s) => s.kind === "screen");
   const windows = sortWindows(sources.filter((s) => s.kind === "window"), localeTag);
   const onlyScreen = screens.length === 1 ? screens[0]!.id : null;
@@ -25,7 +26,8 @@ export function ScreenPicker({ sources, onPick, onCancel, win = window }: { sour
   const [codecChoice, setCodecChoice] = useState<ScreenCodec | null>(null);
   const chosen = sources.find((s) => s.id === selected) ?? null;
   const audio = (source: ScreenSource | null) => !!source?.audio && (audioChoice ?? defaultAudio(source));
-  const codec = (source: ScreenSource | null) => codecChoice ?? defaultCodec(source);
+  const moving = movingCodec(h265);
+  const codec = (source: ScreenSource | null) => codecChoice ?? defaultCodec(source, h265);
   const anyAudio = sources.some((s) => s.audio);
   const list = tab === "window" ? windows : screens;
   const pick = (id = selected) => { const s = sources.find((x) => x.id === id); if (s) onPick({ sourceId: s.id, audio: audio(s), codec: codec(s) }); };
@@ -68,9 +70,9 @@ export function ScreenPicker({ sources, onPick, onCancel, win = window }: { sour
           <legend>{t("screenPick.codec")}</legend>
           <div className="screen-codec-options">
             <label className="check"><input type="radio" name="screen-codec" checked={shownCodec === "vp8"} onChange={() => setCodecChoice("vp8")} /> {t("screenPick.codecVp8")}</label>
-            <label className="check"><input type="radio" name="screen-codec" checked={shownCodec === "h264"} onChange={() => setCodecChoice("h264")} /> {t("screenPick.codecH264")}</label>
+            <label className="check"><input type="radio" name="screen-codec" checked={shownCodec === moving} onChange={() => setCodecChoice(moving)} /> {moving === "h265" ? t("screenPick.codecH265") : t("screenPick.codecH264")}</label>
           </div>
-          <span className="muted small" role="status">{shownCodec === "h264" ? t("screenPick.codecH264Hint") : t("screenPick.codecVp8Hint")}</span>
+          <span className="muted small" role="status">{shownCodec === "h265" ? t("screenPick.codecH265Hint") : shownCodec === "h264" ? t("screenPick.codecH264Hint") : t("screenPick.codecVp8Hint")}</span>
         </fieldset>
         <div className="dialog-actions">
           <button className="secondary" onClick={onCancel}>{t("common.cancel")}</button>

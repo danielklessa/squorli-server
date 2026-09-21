@@ -42,8 +42,8 @@ export type UpdateState =
  */
 export type ScreenSource = { id: string; kind: "screen" | "window"; name: string; thumbnail: string; icon: string | null; audio: boolean; gameId?: string | null; fullscreen?: boolean };
 export type ScreenPickRequest = { requestId: number; sources: ScreenSource[] };
-/** The video codec a share is sent with: "vp8" = the client's standing codec, "h264" = the user's choice for moving pictures (games). */
-export type ScreenCodec = "vp8" | "h264";
+/** The video codec a share is sent with: "vp8" = the client's standing codec; "h265" (where the computer's graphics unit encodes it) or else "h264" = the user's choice for moving pictures (games). */
+export type ScreenCodec = "vp8" | "h264" | "h265";
 /** `codec` stays in the client (the publish options of the share); the shell reads `sourceId` and `audio` only. */
 export type ScreenPick = { sourceId: string; audio: boolean; codec?: ScreenCodec };
 /** Audio the shell captures itself for a screen share (Windows, native helper): PCM 48 kHz, 16 bit signed, interleaved stereo. */

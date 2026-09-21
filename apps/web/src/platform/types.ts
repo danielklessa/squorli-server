@@ -18,9 +18,10 @@ export interface PlatformMedia {
   readonly blocksInsecureMedia: boolean;
   /**
    * Publish options that replace the client's defaults for a screen share; null = none. Asked AFTER the capture (so after the
-   * picker) and before publishing: the desktop app answers with the codec the user chose in its picker (H.264 or none).
+   * picker) and before publishing: the desktop app answers with the codec the user chose in its picker (H.264, H.265 or none);
+   * what follows from the codec is the voice core's business (voice/screenShareOptions.ts).
    */
-  screenSharePublishOverrides(): { videoCodec?: "vp8" | "h264" | "vp9" | "av1"; backupCodec?: boolean } | null;
+  screenSharePublishOverrides(): { videoCodec?: "vp8" | "h264" | "h265" } | null;
   /**
    * Right after a screen share started: the audio track the platform captured itself for it (desktop app on Windows: one
    * window's audio, or the system's without the app), or null = none (the share's own audio track, if any, applies).
