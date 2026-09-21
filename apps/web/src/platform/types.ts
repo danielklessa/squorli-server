@@ -2,7 +2,7 @@ import type { AppearanceState, CustomProgram, DetectedGame, GameWatchSettings, P
 import type { DeepLink } from "./deepLink";
 
 export type { DeepLink } from "./deepLink";
-export type { AppearanceState, CustomProgram, DetectedGame, GameWatchSettings, PlatformOs, RunningGame, ScreenPick, ScreenSource, SystemActivityEvent, UpdateState, WindowAppearance, WindowControl, WindowFrameState, WindowMaterial } from "./bridge";
+export type { AppearanceState, CustomProgram, DetectedGame, GameWatchSettings, PlatformOs, RunningGame, ScreenCodec, ScreenPick, ScreenSource, SystemActivityEvent, UpdateState, WindowAppearance, WindowControl, WindowFrameState, WindowMaterial } from "./bridge";
 
 /** The chat server that serves the page: its key in the store and the domain a login there signs. */
 export type PlatformHome = { host: string; signDomain: string };
@@ -16,7 +16,10 @@ export interface PlatformMedia {
   readonly mobile: boolean;
   /** The page may not load http/ws resources (https page, desktop app); only changes what hints say. */
   readonly blocksInsecureMedia: boolean;
-  /** Publish options that replace the client's defaults for a screen share (codec test on the desktop); null = none. */
+  /**
+   * Publish options that replace the client's defaults for a screen share; null = none. Asked AFTER the capture (so after the
+   * picker) and before publishing: the desktop app answers with the codec the user chose in its picker (H.264 or none).
+   */
   screenSharePublishOverrides(): { videoCodec?: "vp8" | "h264" | "vp9" | "av1"; backupCodec?: boolean } | null;
   /**
    * Right after a screen share started: the audio track the platform captured itself for it (desktop app on Windows: one

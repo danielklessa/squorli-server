@@ -4,7 +4,7 @@ import { CONTENT_SECURITY_POLICY, contentTypeOf, resolveAppFile } from "./appFil
 import { appearanceState, normalizeAppearance, supportedMaterials } from "./appearance";
 import { attentionText, badgeFile, readAttentionCount } from "./attention";
 import { AUTOSTART_ARG, entryStarts, linuxAutostartEntry, linuxAutostartFile, linuxExecutable, readAutostartBackground, startedBySystem, startsInBackground } from "./autostart";
-import { hwndOfHandle, hwndOfSource } from "./captureSource";
+import { hwndOfHandle, hwndOfSource, isDesktopWidget } from "./captureSource";
 import { findDeepLink } from "./deepLinkArgs";
 import { isAllowedExternal, windowOpenDecision } from "./navigation";
 import { SPLASH_SKIP_URL, mayInstallAtStart, splashHtml, splashScript, splashView } from "./splashPage";
@@ -114,6 +114,16 @@ describe("captureSource", () => {
     for (const id of ["window:abc:0", "window:12", "window:1 --x:0", ""]) expect(hwndOfSource(id), id).toBeNull();
     expect(hwndOfHandle(Uint8Array.from([0x59, 0x06, 0x14, 0x00, 0, 0, 0, 0]))).toBe(String(0x140659));
     expect(hwndOfHandle(Uint8Array.from([0x39, 0x30, 0, 0]))).toBe("12345");
+  });
+
+  it("leaves desktop widgets out of the picker", () => {
+    const rainmeter = "C:" + String.fromCharCode(92) + "Program Files" + String.fromCharCode(92) + "Rainmeter" + String.fromCharCode(92) + "Rainmeter.exe";
+    expect(isDesktopWidget({ hwnd: "1", tool: true, className: "RainmeterMeterWindow", path: rainmeter, fullscreen: false })).toBe(true);
+    expect(isDesktopWidget({ hwnd: "1", tool: false, className: "RainmeterMeterWindow", path: "", fullscreen: false })).toBe(true);
+    expect(isDesktopWidget({ hwnd: "1", tool: false, className: "Other", path: rainmeter, fullscreen: false })).toBe(true);
+    expect(isDesktopWidget({ hwnd: "1", tool: true, className: "SomeWidget", path: "", fullscreen: false })).toBe(true);
+    expect(isDesktopWidget({ hwnd: "1", tool: false, className: "Chrome_WidgetWin_1", path: "C:/Apps/NotRainmeter.exe", fullscreen: false })).toBe(false);
+    expect(isDesktopWidget({ hwnd: "1", tool: false, className: "UnrealWindow", path: "", fullscreen: false })).toBe(false);
   });
 });
 

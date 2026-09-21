@@ -1,6 +1,8 @@
 import { BrowserWindow, desktopCapturer, ipcMain, webContents, type IpcMainEvent, type Session } from "electron";
 import { IPC, type ScreenPick, type ScreenPickRequest, type ScreenSource } from "@squorli/web/platform/bridge";
-import { hwndOfHandle, hwndOfSource } from "./captureSource";
+import { hwndOfHandle, hwndOfSource, isDesktopWidget } from "./captureSource";
+import type { GameLookup } from "./gameWatch";
+import type { SystemWatch } from "./systemWatch";
 import { helperPath, type ScreenAudioCapture } from "./windowAudio";
 
 /**
@@ -11,10 +13,14 @@ import { helperPath, type ScreenAudioCapture } from "./windowAudio";
  * screen what the system plays without this app; the helper's PCM goes to the client separately and Chromium gets no audio
  * to capture. Without the helper only a screen has audio: Chromium's "loopback" (everything, the app included). The app's
  * own windows never carry audio: it would be the voices of the others.
+ *
+ * What the system watch helper says about the windows (Windows) leaves desktop widgets out of the list (`isDesktopWidget`)
+ * and marks a detected game's windows (`gameId`) and windows in full screen (`fullscreen`, the dialog lists them after the games): the client preselects H.264 for them and "Quick Share" picks one without
+ * the dialog (docs/features/voice-video.md, 21 September 2026). The codec is the client's business; the shell ignores it.
  */
 const PICK_TIMEOUT_MS = 120_000;
 
-export function handleDisplayMedia(ses: Session, isClientFrame: (event: IpcMainEvent) => boolean, capture: ScreenAudioCapture): void {
+export function handleDisplayMedia(ses: Session, isClientFrame: (event: IpcMainEvent) => boolean, capture: ScreenAudioCapture, watch: SystemWatch, games: GameLookup): void {
   let nextId = 1;
   const waiting = new Map<number, (pick: ScreenPick | null) => void>();
   ipcMain.on(IPC.screenPickAnswer, (event, requestId: unknown, pick: unknown) => {
@@ -37,12 +43,15 @@ export function handleDisplayMedia(ses: Session, isClientFrame: (event: IpcMainE
         const hwnd = hwndOfSource(id);
         return hwnd === null ? true : native && !own.has(hwnd);
       };
-      const found = await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 320, height: 180 }, fetchWindowIcons: true });
+      const all = await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 320, height: 180 }, fetchWindowIcons: true });
+      const infos = new Map((await watch.describeWindows(all.flatMap((s) => hwndOfSource(s.id) ?? []))).map((info) => [info.hwnd, info]));
+      const infoOf = (id: string) => infos.get(hwndOfSource(id) ?? "");
+      const found = all.filter((s) => { const info = infoOf(s.id); return !info || !isDesktopWidget(info); });
       const sources: ScreenSource[] = found.map((s) => ({
         id: s.id, kind: s.id.startsWith("screen:") ? "screen" : "window", name: s.name,
         thumbnail: s.thumbnail.isEmpty() ? "" : `data:image/jpeg;base64,${s.thumbnail.toJPEG(70).toString("base64")}`,
         icon: s.appIcon && !s.appIcon.isEmpty() ? s.appIcon.toDataURL() : null,
-        audio: audioFor(s.id),
+        audio: audioFor(s.id), fullscreen: infoOf(s.id)?.fullscreen === true, gameId: games.gameOfProgram(infoOf(s.id)?.path ?? "")?.id ?? null,
       }));
       const requestId = nextId++;
       const pick = await new Promise<ScreenPick | null>((resolve) => {

@@ -13,3 +13,18 @@ export function hwndOfHandle(handle: Uint8Array): string {
   for (let i = Math.min(handle.length, 8) - 1; i >= 0; i--) value = (value << 8n) | BigInt(handle[i]!);
   return value.toString();
 }
+
+/**
+ * What the system watch helper says about a window (Windows): its window class, whether it is a tool window (one the task
+ * bar and Alt+Tab leave out), its program's full path ("" = the process does not say) and whether it covers its whole monitor
+ * without being maximized (a game or a player in full screen; false from a helper that does not say).
+ */
+export type WindowInfo = { hwnd: string; tool: boolean; className: string; path: string; fullscreen: boolean };
+
+/**
+ * A window nobody shares, which the picker leaves out (user's report, 21 September 2026: every Rainmeter skin was offered):
+ * desktop widgets. They are tool windows; Rainmeter's are named as well, in case a skin is set up differently.
+ */
+export function isDesktopWidget(info: WindowInfo): boolean {
+  return info.tool || info.className === "RainmeterMeterWindow" || /(^|[\\/])rainmeter\.exe$/i.test(info.path);
+}

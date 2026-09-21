@@ -578,6 +578,13 @@ button.icon.on { color: var(--brand); }
 .screen-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .screen-name { display: flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .screen-name img { flex: none; }
+.screen-name > span:not(.screen-game) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.screen-game { flex: none; margin-left: auto; color: var(--brand); }
+.screen-tabs { flex: none; margin-top: 0.5rem; }
+.screen-tabs button { display: inline-flex; align-items: center; gap: 0.4rem; }
+.screen-codec { border: 0; margin: 0.6rem 0 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.screen-codec legend { padding: 0; margin-bottom: 0.25rem; font-size: 0.875rem; color: var(--muted); }
+.screen-codec-options { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; }
 /* Twitch as the radio's source: ONE iframe (TwitchPlayer) laid over whichever slot is on screen. Below menus and dialogs, above the page. */
 .embed-player { --embed-r: calc(var(--r-panel) - 2px); position: fixed; z-index: 4; overflow: hidden; border-radius: var(--embed-r); background: #000; }
 /* The rounding once more on the iframe itself, as a clip-path: a video the GPU shows on a plane of its own can ignore the rounded

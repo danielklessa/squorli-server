@@ -2,6 +2,7 @@ import { ipcMain, type BrowserWindow, type IpcMainEvent } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { IPC, type SystemActivityEvent } from "@squorli/web/platform/bridge";
+import type { WindowInfo } from "./captureSource";
 import { SystemWatchLines } from "./systemWatchLines";
 import { nativeHelperPath } from "./windowAudio";
 
@@ -15,12 +16,15 @@ export const systemWatchPath = (): string | null => nativeHelperPath("squorli-sy
 
 const RESTART_MS = 5000;
 const MAX_RESTARTS = 5;
+const WINDOWS_TIMEOUT_MS = 700;
 
 export type SystemWatch = {
   /** The helper's watch list (its stdin line, games/match.ts); kept and sent again when the helper had to be restarted. */
   setWatch(line: string): void;
   /** A watched program came to the front (its path), or null = it has ended. */
   onGame(cb: (path: string | null) => void): void;
+  /** What the helper says about these windows (decimal handles); a window it does not answer for is missing, without the helper all are. Never rejects. */
+  describeWindows(hwnds: readonly string[]): Promise<WindowInfo[]>;
   stop(): void;
 };
 
@@ -31,6 +35,8 @@ export function startSystemWatch(getWindow: () => BrowserWindow | null, isClient
   let stopped = false;
   let restarts = 0;
   let display: boolean | null = null;
+  let nextRequest = 1;
+  const asked = new Map<number, { found: WindowInfo[]; done: (found: WindowInfo[]) => void }>();
   const send = (event: SystemActivityEvent) => { const win = getWindow(); if (win && !win.isDestroyed()) win.webContents.send(IPC.systemActivity, event); };
   // A client that starts listening (a reload too) learns the display state as it is; input only counts from now on.
   ipcMain.on(IPC.systemActivityReady, (event) => { if (isClientFrame(event) && display !== null) send({ type: "display", required: display }); });
@@ -47,6 +53,8 @@ export function startSystemWatch(getWindow: () => BrowserWindow | null, isClient
     started.stdout?.on("data", (data: Buffer) => {
       for (const event of lines.push(decoder.write(data))) {
         if (event.type === "game") { gameListener(event.path); continue; }
+        if (event.type === "window") { asked.get(event.request)?.found.push(event.info); continue; }
+        if (event.type === "windows") { const open = asked.get(event.request); open?.done(open.found); continue; }
         if (event.type === "display") display = event.required;
         send(event);
       }
@@ -64,6 +72,16 @@ export function startSystemWatch(getWindow: () => BrowserWindow | null, isClient
   return {
     setWatch: (line) => { watch = line; child?.stdin?.write(`${line}\n`); },
     onGame: (cb) => { gameListener = cb; },
+    describeWindows: (hwnds) => new Promise((resolve) => {
+      const stdin = child?.stdin;
+      const ids = hwnds.filter((hwnd) => /^\d{1,20}$/.test(hwnd));
+      if (!stdin || ids.length === 0) { resolve([]); return; }
+      const request = nextRequest++;
+      // A helper from before the question never answers: the picker then shows everything, as it did.
+      const timer = setTimeout(() => { asked.delete(request); resolve([]); }, WINDOWS_TIMEOUT_MS);
+      asked.set(request, { found: [], done: (found) => { clearTimeout(timer); asked.delete(request); resolve(found); } });
+      stdin.write(`windows\t${request}\t${ids.join("\t")}\n`);
+    }),
     stop: () => {
       stopped = true;
       const running = child;

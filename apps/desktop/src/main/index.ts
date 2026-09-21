@@ -177,14 +177,14 @@ else {
     ipcMain.on(IPC.chatPlayerOutput, (event, label: unknown) => { if (isClientFrame(event)) playerAudio.setLabel("chat", readPlayerOutputLabel(label)); });
     if (app.isPackaged || !process.argv.includes("--no-player-fix")) letPlayersEmbed(session.defaultSession);
     const screenAudio = new ScreenAudioCapture();
-    handleDisplayMedia(session.defaultSession, isClientFrame, screenAudio);
     ipcMain.on(IPC.screenAudioStop, (event) => { if (isClientFrame(event)) screenAudio.stop(); });
     // Controller input and "display required" for the client's AFK detection (native helper, Windows).
     const systemWatch = startSystemWatch(() => mainWindow, isClientFrame);
     // Link previews of direct messages: the sender's app asks the linked host itself (linkLookup.ts).
     handleLinkLookup(isClientFrame);
     // Game detection: the launchers' installed games, and the helper says when one of them is in front (gameWatch.ts).
-    handleGames(() => mainWindow, isClientFrame, systemWatch);
+    const games = handleGames(() => mainWindow, isClientFrame, systemWatch);
+    handleDisplayMedia(session.defaultSession, isClientFrame, screenAudio, systemWatch, games);
     app.on("before-quit", () => { quitting = true; screenAudio.stop(); playerAudio.stop(); systemWatch.stop(); });
     ipcMain.handle(IPC.setAppearance, (event, next: unknown) => {
       if (!isClientFrame(event)) return look;

@@ -14,7 +14,12 @@ import type { SystemWatch } from "./systemWatch";
  */
 const RESCAN_MS = 60 * 60_000;
 
-export function handleGames(getWindow: () => BrowserWindow | null, isClientFrame: (event: IpcMainEvent | IpcMainInvokeEvent) => boolean, watch: SystemWatch): void {
+export type GameLookup = {
+  /** The game a program belongs to (its executable's full path); null = none, and always while detection is off. */
+  gameOfProgram(path: string): RunningGame | null;
+};
+
+export function handleGames(getWindow: () => BrowserWindow | null, isClientFrame: (event: IpcMainEvent | IpcMainInvokeEvent) => boolean, watch: SystemWatch): GameLookup {
   let settings: GameWatchSettings = { enabled: false, custom: [] };
   let installed: InstalledGame[] = [];
   let scanned = false;
@@ -62,4 +67,5 @@ export function handleGames(getWindow: () => BrowserWindow | null, isClientFrame
     const path = picked.canceled ? undefined : picked.filePaths[0];
     return path ? { path, name: fileTitle(path) } : null;
   });
+  return { gameOfProgram: (path) => (settings.enabled && path ? gameOfPath(path, installed, settings.custom) : null) };
 }

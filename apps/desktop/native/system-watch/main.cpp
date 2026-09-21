@@ -12,8 +12,16 @@
 //                them is ever reported. A program counts while it has a visible window of its own (minimized too), so a
 //                game started before the app is found, and a service that merely runs in the background is not.
 //
+//   window<TAB><request><TAB><hwnd><TAB><tool 0|1><TAB><class><TAB><path><TAB><fullscreen 0|1>
+//                the answer to "windows": one line per window asked for that exists (its window class, whether it is a tool
+//                window, which the task bar and Alt+Tab leave out, its program's full path, empty when the process does
+//                not say, and whether it covers its whole monitor without being maximized: a game or a player in full
+//                screen), then one line "windows<TAB><request>". The screen share's picker leaves desktop widgets out with
+//                it and knows which window is a game's (docs/features/voice-video.md, 21 September 2026).
+//
 // stdin:  one line "watch<TAB><path><TAB><path>..." replaces the watch list (UTF-8; a path ending in a backslash is a folder
 //         with everything below it, any other is one executable; "watch" alone = nothing is watched, which is the start).
+//         One line "windows<TAB><request><TAB><hwnd><TAB><hwnd>..." (decimal window handles) asks about those windows.
 // stdout: the lines above, after one line "ready". The helper ends when stdin closes (the parent is gone) or when it is killed.
 // Windows only. It reads no keyboard, no mouse and no window contents.
 #include <windows.h>
@@ -24,6 +32,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <fcntl.h>
 #include <io.h>
 #include <atomic>
@@ -197,7 +206,59 @@ std::string utf8(const std::wstring& text) {
   return bytes;
 }
 
+std::vector<std::string> fields(const std::string& line) {
+  std::vector<std::string> parts;
+  size_t from = 0;
+  for (;;) {
+    const size_t to = line.find('\t', from);
+    parts.push_back(line.substr(from, to == std::string::npos ? std::string::npos : to - from));
+    if (to == std::string::npos) return parts;
+    from = to + 1;
+  }
+}
+
+std::wstring pathOfProcess(DWORD pid) {
+  const HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+  if (!process) return L"";
+  std::vector<wchar_t> buffer(32768);
+  DWORD length = static_cast<DWORD>(buffer.size());
+  const bool ok = QueryFullProcessImageNameW(process, 0, buffer.data(), &length) != 0;
+  CloseHandle(process);
+  return ok ? std::wstring(buffer.data(), length) : L"";
+}
+
+// Runs on the thread that reads stdin. The whole answer is one write, so it never mixes with a line of the main thread.
+void describeWindows(const std::vector<std::string>& parts) {
+  if (parts.size() < 2 || parts[1].empty() || parts[1].size() > 20 || parts[1].find_first_not_of("0123456789") != std::string::npos) return;
+  std::string answer;
+  for (size_t i = 2; i < parts.size() && i < 1026; i++) {
+    const std::string& id = parts[i];
+    if (id.empty() || id.size() > 20 || id.find_first_not_of("0123456789") != std::string::npos) continue;
+    const HWND window = reinterpret_cast<HWND>(static_cast<UINT_PTR>(strtoull(id.c_str(), nullptr, 10)));
+    if (!IsWindow(window)) continue;
+    wchar_t name[257] = {};
+    const int length = GetClassNameW(window, name, 257);
+    std::wstring className(name, static_cast<size_t>(length > 0 ? length : 0));
+    for (wchar_t& c : className) if (c == L'\t' || c == L'\n' || c == L'\r') c = L' ';
+    const LONG_PTR style = GetWindowLongPtrW(window, GWL_EXSTYLE);
+    const bool tool = (style & WS_EX_TOOLWINDOW) != 0 && (style & WS_EX_APPWINDOW) == 0;
+    // Full screen = the window covers its monitor. A maximized window does too while the task bar hides itself, so it does not count.
+    bool fullscreen = false;
+    RECT rect = {};
+    MONITORINFO monitor = {};
+    monitor.cbSize = sizeof(monitor);
+    if (!IsZoomed(window) && !IsIconic(window) && GetWindowRect(window, &rect) && GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor))
+      fullscreen = rect.left <= monitor.rcMonitor.left && rect.top <= monitor.rcMonitor.top && rect.right >= monitor.rcMonitor.right && rect.bottom >= monitor.rcMonitor.bottom;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    answer += "window\t" + parts[1] + "\t" + id + "\t" + (tool ? "1" : "0") + "\t" + utf8(className) + "\t" + utf8(pid != 0 ? pathOfProcess(pid) : L"") + "\t" + (fullscreen ? "1" : "0") + "\n";
+  }
+  answer += "windows\t" + parts[1] + "\n";
+  if (fwrite(answer.data(), 1, answer.size(), stdout) != answer.size() || fflush(stdout) != 0) ExitProcess(0);
+}
+
 void onCommand(const std::string& line) {
+  if (line.rfind("windows\t", 0) == 0) { describeWindows(fields(line)); return; }
   if (line.rfind("watch", 0) != 0 || (line.size() > 5 && line[5] != '\t')) return;
   std::vector<std::wstring> folders, files;
   size_t from = 5;

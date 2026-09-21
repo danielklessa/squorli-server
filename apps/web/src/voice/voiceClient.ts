@@ -11,6 +11,7 @@ import {
   Track,
   VideoPresets,
   type AudioCaptureOptions,
+  type LocalTrack,
   type LocalTrackPublication,
   type Participant as LkParticipant,
   type RemoteTrack,
@@ -197,6 +198,8 @@ export class VoiceClient {
   private camera: { deviceId: string | null; quality: "360p" | "720p"; blur: number } = { deviceId: null, quality: "720p", blur: 0 };
   /** With which device and resolution the published camera track was opened (null = none published, or not by us); see cameraSwitch.ts. */
   private cameraOpened: CameraRequest | null = null;
+  /** A share is being captured or published: a second click must not open a second picker. */
+  private screenStarting = false;
   /** Background processor (MediaPipe segmentation, running in the browser); kept around for toggling. */
   private blur: BackgroundProcessorWrapper | null = null;
   /** One AudioContext for everything (microphone gate, other participants' levels); created inside a user gesture, see prepareAudio(). */
@@ -724,7 +727,7 @@ export class VoiceClient {
 
   /** Share the screen; audio is always requested and published as its own track (PLAN 3.6). Whether it arrives is up to the browser. */
   async setScreenShareEnabled(on: boolean): Promise<void> {
-    if (on && this.state.afkRoom) return;
+    if (on && (this.state.afkRoom || this.screenStarting)) return;
     const room = this.room;
     if (!room) return;
     try {
@@ -733,14 +736,30 @@ export class VoiceClient {
       // resolution and sacrifices frames per second instead when bandwidth is tight.
       // The own tab can be shared too (selfBrowserSurface). restrictOwnAudio (Chromium 141+, ignored elsewhere) keeps this
       // tab's playback out of the captured audio, otherwise the others would hear their own voices back as screen audio.
-      await room.localParticipant.setScreenShareEnabled(on, on ? {
-        audio: { restrictOwnAudio: true } as AudioCaptureOptions,
-        systemAudio: "include",
-        selfBrowserSurface: "include",
-        surfaceSwitching: "include",
-        contentHint: "detail",
-        resolution: ScreenSharePresets.h1080fps30.resolution,
-      } : undefined, on ? { simulcast: false, videoEncoding: ScreenSharePresets.h1080fps30.encoding, ...this.media?.screenSharePublishOverrides() } : undefined);
+      // Capture and publish are two steps (not LiveKit's setScreenShareEnabled(true)): the desktop app's picker also chooses
+      // the codec, which is known only after the capture (`screenSharePublishOverrides`, asked in between).
+      if (!on) await room.localParticipant.setScreenShareEnabled(false);
+      else if (!room.localParticipant.isScreenShareEnabled) {
+        this.screenStarting = true;
+        let tracks: LocalTrack[] = [];
+        try {
+          tracks = await room.localParticipant.createScreenTracks({
+            audio: { restrictOwnAudio: true } as AudioCaptureOptions,
+            systemAudio: "include",
+            selfBrowserSurface: "include",
+            surfaceSwitching: "include",
+            contentHint: "detail",
+            resolution: ScreenSharePresets.h1080fps30.resolution,
+          });
+          const options: TrackPublishOptions = { simulcast: false, videoEncoding: ScreenSharePresets.h1080fps30.encoding, ...this.media?.screenSharePublishOverrides() };
+          if (this.room !== room) throw new DOMException("left the channel", "AbortError");
+          await Promise.all(tracks.map((track) => room.localParticipant.publishTrack(track, options)));
+          this.log(`bildschirm codec: ${options.videoCodec ?? "vp8"}`);
+        } catch (err) {
+          for (const track of tracks) track.stop();
+          throw err;
+        } finally { this.screenStarting = false; }
+      }
       // Desktop app on Windows: the shell captured the audio itself (one window's, or the system's without the app); it becomes
       // the share's audio track. Stereo without DTX: it is programme material, not speech.
       const captured = on && room.localParticipant.isScreenShareEnabled ? await this.media?.takeScreenAudio() ?? null : null;

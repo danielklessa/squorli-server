@@ -28,6 +28,7 @@ import { ColumnHandle } from "./ColumnHandle";
 import { loadLayout, saveLayout, type ColumnId, type Layout } from "./layout";
 import { NoServers } from "./NoServers";
 import { ScreenPicker } from "./ScreenPicker";
+import { quickSharePick } from "./screenPick";
 import { TitleBar } from "./TitleBar";
 import { loadVoiceSettings, saveVoiceSettings } from "./voice/settings";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
@@ -107,6 +108,8 @@ export function App() {
   const shownGame = useSyncExternalStore(useMemo(() => games?.subscribe ?? (() => () => {}), [games]), () => games?.state.shown ?? null);
   const gameLookup = useMemo(() => (state.directoryUrl && state.directoryGameLibrary ? directoryGameLookup(state.directoryUrl) : null), [state.directoryUrl, state.directoryGameLibrary]);
   const gameOnServers = voiceSettings.games.servers;
+  /** The detected game, hidden from others or not: what "Quick Share" in the dock shares. */
+  const runningGame = useSyncExternalStore(useMemo(() => games?.subscribe ?? (() => () => {}), [games]), () => games?.state.running ?? null);
   // The viewing side (GameLine.tsx) asks the same library, in every client, the browser too.
   const gameLibrary = useMemo(() => ({ directoryUrl: state.directoryUrl, lookup: gameLookup }), [state.directoryUrl, gameLookup]);
   useEffect(() => {
@@ -134,8 +137,15 @@ export function App() {
    */
   /** Desktop app: the shell asks which screen or window to share (ScreenPicker.tsx); a browser has its own picker. */
   const [screenPick, setScreenPick] = useState<{ sources: ScreenSource[]; resolve: (pick: ScreenPick | null) => void } | null>(null);
+  /** "Quick Share" in the dock: the id of the game whose window the next request of the shell is answered with, without the dialog. */
+  const quickShare = useRef<string | null>(null);
   useEffect(() => {
-    platform.screen.setPicker((sources) => new Promise((resolve) => { setPickWindow(stageFocus.current()); setScreenPick((open) => { open?.resolve(null); return { sources, resolve }; }); }));
+    platform.screen.setPicker((sources) => {
+      const quick = quickShare.current ? quickSharePick(sources, quickShare.current) : null;
+      quickShare.current = null;
+      if (quick) return Promise.resolve(quick);
+      return new Promise((resolve) => { setPickWindow(stageFocus.current()); setScreenPick((open) => { open?.resolve(null); return { sources, resolve }; }); });
+    });
     return () => platform.screen.setPicker(null);
   }, []);
   // Desktop app: a `squorli://` link from a browser. The store shows the server (or keeps the link until after the login).
@@ -499,6 +509,7 @@ export function App() {
           displayName={me?.displayName ?? active?.me?.displayName ?? home?.me?.displayName ?? state.directoryAccount?.displayName ?? (state.directoryAccount ? `@${state.directoryAccount.handle}` : "…")} avatarUrl={myAvatarUrl} onLeave={leaveVoice} onOpenProfile={setMiniProfile} onOpenSettings={() => setSettingsTab("profile")} pttSuspended={capturingPttKey}
           onOpenStage={stageWindow.popped ? stageWindow.focus : voiceChannel && !showStage && voiceHost ? () => { store.openServer(voiceHost === state.homeHost ? homeDirHost : voiceHost); setStageOpen(true); setMobileContent(true); } : null}
           canStream={!!voiceServer?.server && hasPermission(voiceServer.server.myPermissions, Permission.STREAM_VIDEO)} onToggleCamera={toggleCamera}
+          quickShare={runningGame && voice.status === "connected" && !voice.screenOn ? { name: runningGame.name, onShare: () => { quickShare.current = runningGame.id; void client.setScreenShareEnabled(true).finally(() => { quickShare.current = null; }); } } : null}
           afkReturn={afkReturn && voice.afkRoom ? { name: afkReturnChannel?.name ?? null, onReturn: () => { void joinVoice(afkReturn.host, afkReturn.channelId).catch(() => {}); } } : null} />
       </div>
 

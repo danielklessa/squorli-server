@@ -19,6 +19,17 @@ describe("SystemWatchLines", () => {
     expect(lines.push("game G:\\Program Files (x86)\\Steam\\steamapps\\common\\Spiel Ä\\game.exe\r\ngame\r\n")).toEqual([{ type: "game", path: "G:\\Program Files (x86)\\Steam\\steamapps\\common\\Spiel Ä\\game.exe" }, { type: "game", path: null }]);
   });
 
+  it("reads the answer about windows, a window without a path included", () => {
+    const lines = new SystemWatchLines();
+    expect(lines.push("window\t3\t1312345\t1\tRainmeterMeterWindow\tC:/Program Files/Rainmeter/Rainmeter.exe\t0\r\nwindow\t3\t77\t0\tUnrealWindow\t\t1\r\nwindow\t3\t78\t0\tOld\t\r\nwindows\t3\r\n")).toEqual([
+      { type: "window", request: 3, info: { hwnd: "1312345", tool: true, className: "RainmeterMeterWindow", path: "C:/Program Files/Rainmeter/Rainmeter.exe", fullscreen: false } },
+      { type: "window", request: 3, info: { hwnd: "77", tool: false, className: "UnrealWindow", path: "", fullscreen: true } },
+      { type: "window", request: 3, info: { hwnd: "78", tool: false, className: "Old", path: "", fullscreen: false } },
+      { type: "windows", request: 3 },
+    ]);
+    expect(lines.push("window\tx\t1\nwindow\t3\tabc\t0\tA\t\nwindows\n")).toEqual([]);
+  });
+
   it("drops a line that never ends", () => {
     const lines = new SystemWatchLines();
     expect(lines.push("x".repeat(5000))).toEqual([]);

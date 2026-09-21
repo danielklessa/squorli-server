@@ -36,11 +36,16 @@ export type UpdateState =
 /**
  * One thing the desktop app can share (a screen or a window); thumbnail and icon are data URLs. `audio` = audio can go with
  * it: for a window what its application plays, for a screen what the system plays (without the app itself where the shell
- * has its native capture helper; the app's own windows never carry audio).
+ * has its native capture helper; the app's own windows never carry audio). `gameId` = the window belongs to a detected game
+ * (its id as in `RunningGame`; shell from 21 September 2026, only while game detection is on). `fullscreen` = the window
+ * covers its whole monitor without being maximized (a game or a player in full screen).
  */
-export type ScreenSource = { id: string; kind: "screen" | "window"; name: string; thumbnail: string; icon: string | null; audio: boolean };
+export type ScreenSource = { id: string; kind: "screen" | "window"; name: string; thumbnail: string; icon: string | null; audio: boolean; gameId?: string | null; fullscreen?: boolean };
 export type ScreenPickRequest = { requestId: number; sources: ScreenSource[] };
-export type ScreenPick = { sourceId: string; audio: boolean };
+/** The video codec a share is sent with: "vp8" = the client's standing codec, "h264" = the user's choice for moving pictures (games). */
+export type ScreenCodec = "vp8" | "h264";
+/** `codec` stays in the client (the publish options of the share); the shell reads `sourceId` and `audio` only. */
+export type ScreenPick = { sourceId: string; audio: boolean; codec?: ScreenCodec };
 /** Audio the shell captures itself for a screen share (Windows, native helper): PCM 48 kHz, 16 bit signed, interleaved stereo. */
 export type ScreenAudioEvent = { type: "start" } | { type: "data"; pcm: Uint8Array } | { type: "end" };
 
