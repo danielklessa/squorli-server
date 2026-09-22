@@ -177,6 +177,8 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 .rail-menu button { justify-content: flex-start; }
 .rail-badge { position: absolute; right: -4px; bottom: -4px; min-width: 1.1rem; height: 1.1rem; padding: 0 0.3rem; border-radius: 999px; background: var(--danger); color: var(--on-dark); font-size: 0.7rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; border: 2px solid var(--bg); }
 .app.home { grid-template-columns: 5rem var(--left-w, 17rem) minmax(0, 1fr); }
+/* Without the member list the main area is the last column: it keeps the gap to the window's edge that the list otherwise provides. */
+.app.home .main { margin-right: var(--gap); }
 .home-side { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .home-search { display: flex; align-items: center; gap: 0.2rem; padding: 0.5rem 0.6rem 0; }
 .home-search input { flex: 1; min-width: 0; }
