@@ -755,6 +755,13 @@ button.icon.on { color: var(--brand); }
 .dock-row button.icon { min-width: 2.25rem; min-height: 2.25rem; }
 .profile-preview { display: flex; align-items: center; gap: 1rem; padding: 1rem 0 1.5rem; border-bottom: 1px solid var(--line); margin-bottom: 0.5rem; overflow-wrap: anywhere; }
 .profile-preview > div { min-width: 0; }
+/* Crop editor for the profile picture (AvatarEditor.tsx): a square frame, the zoom slider between two icons, then the buttons. */
+.avatar-editor { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; max-width: 100%; }
+.avatar-editor-frame { display: block; width: min(16rem, 100%); aspect-ratio: 1; border-radius: var(--r); background: var(--bg); cursor: grab; touch-action: none; user-select: none; }
+.avatar-editor-frame:active { cursor: grabbing; }
+.avatar-editor-zoom { display: flex; align-items: center; gap: 0.5rem; width: min(16rem, 100%); color: var(--muted); }
+.avatar-editor-zoom > input { flex: 1; min-width: 0; }
+.avatar-editor > .row { margin-top: 0.25rem; }
 .login-card { border: 1px solid var(--line); }
 .login-head { padding: 0.5rem 0 1rem; }
 .login-foot { flex-wrap: wrap; justify-content: center; }

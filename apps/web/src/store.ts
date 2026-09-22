@@ -7,7 +7,7 @@ import { shrinkPreviewImage } from "./dmPreviewImage";
 import { activity } from "./activity";
 import { chooseInitialServer, loadClientData, parseServerAddress, saveClientData } from "./clientHome";
 import * as api from "./api";
-import { AvatarImageError, prepareAvatar, type AvatarImage } from "./avatarImage";
+import type { AvatarImage } from "./avatarImage";
 import { DirectoryLink, type LinkStatus } from "./directoryLink";
 import { loadOrCreateIdentity, storeIdentity, type Identity } from "./identity";
 import { ServerConnection, type ServerConnState } from "./serverConnection";
@@ -898,18 +898,13 @@ export class Store {
   }
 
   /**
-   * Store (null = remove) the avatar of the directory account from a file the user picked: normalized here (avatarImage.ts), signed,
-   * uploaded. The own account's state is updated at once; the chat servers get the directory's push and broadcast the member
-   * list, friends get a `friends.update`. Throws with a translated message.
+   * Store (null = remove) the avatar of the directory account: the image the settings dialog cropped and encoded (avatarImage.ts),
+   * signed, uploaded. The own account's state is updated at once; the chat servers get the directory's push and broadcast the
+   * member list, friends get a `friends.update`. Throws with a translated message.
    */
-  async setAvatar(file: Blob | null): Promise<void> {
+  async setAvatar(image: AvatarImage | null): Promise<void> {
     const id = this.state.identity; const url = this.state.directoryUrl;
     if (!id || !url || !this.state.directoryAccount) throw new Error(t("dir.none"));
-    let image: AvatarImage | null = null;
-    if (file) {
-      try { image = await prepareAvatar(file); }
-      catch (err) { throw new Error(err instanceof AvatarImageError ? t(err.reason === "too_large" ? "dir.avatar_too_large" : "profile.avatarUnreadable") : String(err)); }
-    }
     let res: Awaited<ReturnType<typeof api.directorySetAvatar>>;
     try { res = await api.directorySetAvatar(url, id, image); }
     catch (err) { throw new Error(api.explainDirectoryError(err)); }

@@ -77,3 +77,5 @@
 .ic-volume-x::before { content: "\e1ac"; }
 .ic-wand-sparkles::before { content: "\e35b"; }
 .ic-x::before { content: "\e1b2"; }
+.ic-zoom-in::before { content: "\e1b6"; }
+.ic-zoom-out::before { content: "\e1b7"; }
