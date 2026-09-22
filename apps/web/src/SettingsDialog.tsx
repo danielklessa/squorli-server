@@ -377,6 +377,8 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
                       <span className="muted small">{t("settings.hangoverHint")}</span>
                     </label>
                   </>
+                ) : platform.mobile ? (
+                  <span className="muted small">{t("settings.pttTouchHint", { key: settings.pttKey })}</span>
                 ) : (
                   <div className="stack">
                     <span>{t("settings.key")} <kbd>{settings.pttKey}</kbd> <button className="secondary small" onClick={() => setCapturingKey(true)}>{capturingKey ? t("settings.pressKey") : t("settings.change")}</button></span>

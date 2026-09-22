@@ -32,9 +32,11 @@ type Props = {
   onJoinVoice: (channelId: string) => void;
   onOpenAdmin: () => void;
   myUserId: string;
+  /** Phone: opens the member list over the navigation (button at the right end of the header); null = not offered. */
+  onOpenMembers: (() => void) | null;
 };
 
-export function Sidebar({ server, api, currentChannelId, voice, voiceState, client, unread, mentions, muted, radioTitles, canMute, onMuteChannel, connection, onSelect, onJoinVoice, onOpenAdmin, myUserId }: Props) {
+export function Sidebar({ server, api, currentChannelId, voice, voiceState, client, unread, mentions, muted, radioTitles, canMute, onMuteChannel, connection, onSelect, onJoinVoice, onOpenAdmin, myUserId, onOpenMembers }: Props) {
   // Right-click on a voice member: how loud to play them back (not for yourself).
   const [menu, setMenu] = useState<({ userId: string } & MenuAnchor) | null>(null);
   // Right-click on a text channel: mute it for myself.
@@ -111,6 +113,7 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, clie
         <strong>{server.settings.name}</strong>
         {connection !== "connected" && <span className="muted"> · {tOr(`conn.${connection}`, connection)}</span>}
         {canAdmin && <button className="icon" title={t("sidebar.admin")} onClick={onOpenAdmin}><Icon name="settings" /></button>}
+        {onOpenMembers && <button className="icon" title={t("sidebar.members")} aria-label={t("sidebar.members")} onClick={onOpenMembers}><Icon name="users" /></button>}
       </header>
       {channelMenu && menuChannel && (
         <ContextMenu anchor={channelMenu} label={menuChannel.name} onClose={() => setChannelMenu(null)}>

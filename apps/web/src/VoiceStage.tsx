@@ -7,6 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEv
 import { ContextMenu, type MenuAnchor } from "./ContextMenu";
 import { UserVolumeControl } from "./UserVolumeControl";
 import { RadioControl } from "./RadioControl";
+import { PushToTalkButton } from "./PushToTalkButton";
 import { EmbedSlot } from "./EmbedPlayer";
 import type { ServerApi } from "./api";
 import type { RadioPlayer } from "./voice/radioPlayer";
@@ -84,7 +85,11 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
   const hiddenStreams = !mayView && participants.some((p) => !p.isLocal && (p.cameraOn || p.screenOn));
 
   // Others win over yourself; whether you are featured at all while only you speak is the user's choice (settings > view).
-  const { featureSelfInSpeakerView } = useVoiceSettings();
+  const { featureSelfInSpeakerView, mode } = useVoiceSettings();
+  // A phone or tablet with push-to-talk: a hold button above the bar instead of a key (PushToTalkButton.tsx), and the mute
+  // button leaves the bar (user's wish, 22 September 2026), except while muted: the dock is out of sight on a phone, so
+  // the stage must still offer the way back.
+  const touchPtt = platform.mobile && mode === "ptt";
   useEffect(() => {
     const s = participants.find((p) => p.speaking && !p.isLocal) ?? (featureSelfInSpeakerView ? participants.find((p) => p.speaking) : undefined);
     if (s) setLastSpeaker(s.identity);
@@ -222,8 +227,9 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
         </ContextMenu>
       )}
 
+      {touchPtt && <div className="stage-ptt"><PushToTalkButton client={client} disabled={voice.afkRoom || voice.micMuted} /></div>}
       <footer className="stage-bar">
-        <button className={`bar-btn ${voice.micMuted ? "off" : ""}`} disabled={voice.afkRoom} title={voice.afkRoom ? t("dock.afkChannel") : voice.micMuted ? (voice.deafened ? t("voice.unmuteAll") : t("voice.unmute")) : t("voice.mute")} onClick={() => client.setMuted(!voice.micMuted)}><Icon name={voice.micMuted ? "mic-off" : "mic"} /></button>
+        {!(touchPtt && !voice.micMuted) && <button className={`bar-btn ${voice.micMuted ? "off" : ""}`} disabled={voice.afkRoom} title={voice.afkRoom ? t("dock.afkChannel") : voice.micMuted ? (voice.deafened ? t("voice.unmuteAll") : t("voice.unmute")) : t("voice.mute")} onClick={() => client.setMuted(!voice.micMuted)}><Icon name={voice.micMuted ? "mic-off" : "mic"} /></button>}
         <button className={`bar-btn ${voice.deafened ? "off" : ""}`} disabled={voice.afkRoom} title={voice.afkRoom ? t("dock.afkChannel") : voice.deafened ? t("voice.undeafen") : t("voice.deafen")} onClick={() => client.setDeafened(!voice.deafened)}><Icon name={voice.deafened ? "headphone-off" : "headphones"} /></button>
         <button className={`bar-btn ${voice.cameraOn ? "on" : ""}`} disabled={!canStream} title={voice.afkRoom ? t("dock.afkChannel") : canStream ? (voice.cameraOn ? t("voice.cameraOff") : t("voice.cameraOnBtn")) : t("stage.noStreamPermission")}
           onClick={() => { void onToggleCamera(); }}><Icon name={voice.cameraOn ? "video" : "video-off"} /></button>

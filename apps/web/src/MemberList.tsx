@@ -21,10 +21,12 @@ type Props = {
   friends: { stateOf: (publicKey: string) => Friend["state"] | null; onRequest: (publicKey: string) => void; onMessage: (publicKey: string) => void } | null;
   /** For the per-person playback volume in the menu. */
   client: VoiceClient;
+  /** Phone: the list is a panel slid in from the right; a header with this close button sits on top. null = the desktop column. */
+  onClose?: (() => void) | null;
 };
 
 /** Right column: owners at the very top, then members grouped by highest role, online first. Context actions depending on permissions. */
-export function MemberList({ api, members, roles, myUserId, myPermissions, ownerId, voice, channels, friends, client }: Props) {
+export function MemberList({ api, members, roles, myUserId, myPermissions, ownerId, voice, channels, friends, client, onClose = null }: Props) {
   const [open, setOpen] = useState<({ userId: string } & MenuAnchor) | null>(null);
   const openMenu = (event: MouseEvent<HTMLButtonElement>, userId: string) => {
     event.preventDefault();
@@ -63,7 +65,8 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
   }
 
   return (
-    <aside className="members-col">
+    <aside className="members-col" aria-label={t("members.title")}>
+      {onClose && <header className="members-head"><strong>{t("members.title")} · {members.length}</strong><button className="icon" title={t("members.close")} aria-label={t("members.close")} onClick={onClose}><Icon name="x" /></button></header>}
       {err && <p className="error small">{err}</p>}
       {ordered.map((g) => (
         <section key={g.name + g.position}>

@@ -81,9 +81,13 @@ export function App() {
   const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 700px)").matches);
   const [mobileContent, setMobileContent] = useState(false);
   const [voicePreview, setVoicePreview] = useState<string | null>(null);
+  /** Phone: the member list slid in from the right over the navigation (button in the server head, 22 September 2026). */
+  const [mobileMembers, setMobileMembers] = useState(false);
+  // It closes whenever the page moves on: content opens over it, the home view toggles, another server is shown.
+  useEffect(() => { setMobileMembers(false); }, [mobileContent, state.homeOpen, state.activeHost]);
   useEffect(() => {
     const query = window.matchMedia("(max-width: 700px)");
-    const update = () => { setMobile(query.matches); setVoicePreview(null); setMobileContent(false); };
+    const update = () => { setMobile(query.matches); setVoicePreview(null); setMobileContent(false); setMobileMembers(false); };
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
   }, []);
@@ -425,10 +429,14 @@ export function App() {
   const showStage = stageOpen && voiceChannel !== null && voiceHost === activeHost && !homeOpen && !stageWindow.popped && (!mobile || mobileContent);
   // The stage shows the voice connection's server, which in its own window need not be the one on screen.
   const voiceApi = voiceHost ? store.connection(voiceHost)?.api ?? null : null;
+  // Hanging up on a phone's stage goes back to the channel list (user's wish, 22 September 2026), not to the text channel
+  // that would otherwise appear under the vanished stage. The list slides in first, so the leave's wait is never seen.
+  // A plain function, not a hook: this point is below the early returns (login screen), where no hook may sit.
+  const hangUp = async () => { if (mobile) { setMobileContent(false); setStageOpen(false); } await leaveVoice(); };
   const stage = (detached: boolean) => voiceChannel && voiceServer?.server && voiceApi ? (
     <VoiceStage client={client} voice={voice} channel={voiceChannel} members={voiceServer.server.members} myPermissions={voiceServer.server.myPermissions}
       api={voiceApi} radio={radio} radioStations={voiceServer.server.radioStations} radioTitle={voiceServer.radioTitles[voiceChannel.id] ?? null} playerTile={embedKeyOf(embedSource)} playerOff={playerOff} onDismissPlayerOff={() => setPlayerOffDismissed(videoKey)} playerPopped={playerWindow.win !== null} onRestorePlayer={playerWindow.restore}
-      onToggleCamera={toggleCamera} onToggleBlur={toggleBlur} onLeave={leaveVoice} onPopout={videoWindows.open} poppedIds={videoWindows.poppedIds} onRestore={videoWindows.restore}
+      onToggleCamera={toggleCamera} onToggleBlur={toggleBlur} onLeave={hangUp} onPopout={videoWindows.open} poppedIds={videoWindows.poppedIds} onRestore={videoWindows.restore}
       detached={detached} onToggleWindow={detached ? stageWindow.close : stageWindow.open} />
   ) : null;
   /** A dialog the stage asked for from its own window is shown there. */
@@ -483,7 +491,7 @@ export function App() {
       if (voice.status !== "disconnected" && !await askConfirm({ title: t("update.restartTitle"), text: t("update.restartInVoice"), confirmLabel: t("update.restart") })) return;
       platform.updates?.restartAndInstall();
     })(); }} />
-    <div className={`app ${showRail ? "with-rail" : ""} ${homeOpen ? "home" : ""} ${mobileContent ? "mobile-content" : ""} ${showStage ? "mobile-stage" : ""}`} style={{ "--left-w": `${layout.left}px`, "--members-w": `${layout.members}px` } as CSSProperties}>
+    <div className={`app ${showRail ? "with-rail" : ""} ${homeOpen ? "home" : ""} ${mobileContent ? "mobile-content" : ""} ${showStage ? "mobile-stage" : ""} ${mobile && mobileMembers && !homeOpen && view ? "mobile-members" : ""}`} style={{ "--left-w": `${layout.left}px`, "--members-w": `${layout.members}px` } as CSSProperties}>
       <ColumnHandle column="left" width={layout.left} label={t("layout.resizeLeft")} onChange={(w) => resizeColumn("left", w, false)} onCommit={(w) => resizeColumn("left", w, true)} />
       {!homeOpen && view && <ColumnHandle column="members" width={layout.members} label={t("layout.resizeMembers")} onChange={(w) => resizeColumn("members", w, false)} onCommit={(w) => resizeColumn("members", w, true)} />}
       {videoWindows.windows}
@@ -504,6 +512,7 @@ export function App() {
           onMuteChannel={(id, muted) => { void view.conn.setChannelMuted(id, muted).catch(() => {}); }}
           connection={view.active.connection} onSelect={(id) => { view.conn.selectChannel(id); setStageOpen(false); setMobileContent(true); }}
           onJoinVoice={(id) => { if (mobile) setVoicePreview(id); else void joinVoice(view.active.host, id).catch(() => {}); }} onOpenAdmin={() => setShowAdmin(true)} myUserId={view.active.userId ?? ""}
+          onOpenMembers={mobile ? () => setMobileMembers(true) : null}
         /> : <nav className="sidebar"><header className="server-head"><img className="brand-mark" src="/brand/squorli-icon-small.svg" alt="" width="22" height="22" /><strong>{active?.serverName ?? active?.host ?? "Squorli"}</strong></header></nav>}
         <VoiceDock client={client} voice={voice} channel={voiceChannel} serverName={voiceHost && voiceHost !== activeHost ? voiceServer?.server?.settings.name ?? voiceHost : null}
           displayName={me?.displayName ?? active?.me?.displayName ?? home?.me?.displayName ?? state.directoryAccount?.displayName ?? (state.directoryAccount ? `@${state.directoryAccount.handle}` : "…")} avatarUrl={myAvatarUrl} onLeave={leaveVoice} onOpenProfile={setMiniProfile} onOpenSettings={() => setSettingsTab("profile")} pttSuspended={capturingPttKey}
@@ -550,7 +559,7 @@ export function App() {
           setStageOpen(true); setMobileContent(true); setVoicePreview(null);
         }} />}
       {!homeOpen && view && <MemberList api={view.conn.api} members={view.server.members} roles={view.server.roles} myUserId={view.active.userId!} myPermissions={view.server.myPermissions} ownerId={view.server.settings.ownerId}
-        voice={view.active.voice} channels={view.server.channels} friends={friendsMenu} client={client} />}
+        voice={view.active.voice} channels={view.server.channels} friends={friendsMenu} client={client} onClose={mobile ? () => setMobileMembers(false) : null} />}
 
       {showAdmin && view && <AdminPanel api={view.conn.api} server={view.server} myUserId={view.active.userId!} directoryUrl={view.active.directoryUrl} onClose={() => setShowAdmin(false)} />}
       {screenPick && inPickWindow(<ScreenPicker sources={screenPick.sources} h265={VoiceClient.supportsH265()} win={pickWindow ?? window}

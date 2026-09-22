@@ -7,6 +7,8 @@ import type { VoiceClient, VoiceState } from "./voice/voiceClient";
 import { Icon } from "./Icon";
 import { t, tOr } from "./i18n";
 import { usePushToTalk } from "./usePushToTalk";
+import { PushToTalkButton } from "./PushToTalkButton";
+import { platform } from "./platform";
 
 type Props = {
   client: VoiceClient;
@@ -46,6 +48,9 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, ava
   };
 
   usePushToTalk(window, client, joined, pttSuspended);
+  // A phone or tablet with push-to-talk: the hold button takes the mute button's place (user's wish, 22 September 2026),
+  // except while muted, when the way back has to be there. Same rule as the stage's bar.
+  const touchPtt = platform.mobile && settings.mode === "ptt";
 
   const levelPct = Math.min(100, Math.round(voice.level * 400));
   const thresholdPct = Math.min(100, Math.round(settings.vadThreshold * 400));
@@ -84,7 +89,7 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, ava
           </div>
           {/* quick actions of the voice connection: its own area above the name row */}
           <div className="dock-row dock-controls">
-            <button aria-label={t("voice.mute")} aria-pressed={voice.micMuted} className={`icon ${voice.micMuted ? "danger" : ""}`} disabled={voice.afkRoom} title={voice.afkRoom ? t("dock.afkChannel") : voice.micMuted ? (voice.deafened ? t("voice.unmuteAll") : t("voice.unmute")) : t("voice.mute")} onClick={() => client.setMuted(!voice.micMuted)}><Icon name={voice.micMuted ? "mic-off" : "mic"} /></button>
+            {touchPtt && !voice.micMuted ? <PushToTalkButton client={client} disabled={voice.afkRoom} compact /> : <button aria-label={t("voice.mute")} aria-pressed={voice.micMuted} className={`icon ${voice.micMuted ? "danger" : ""}`} disabled={voice.afkRoom} title={voice.afkRoom ? t("dock.afkChannel") : voice.micMuted ? (voice.deafened ? t("voice.unmuteAll") : t("voice.unmute")) : t("voice.mute")} onClick={() => client.setMuted(!voice.micMuted)}><Icon name={voice.micMuted ? "mic-off" : "mic"} /></button>}
             <button aria-label={t("voice.deafen")} aria-pressed={voice.deafened} className={`icon ${voice.deafened ? "danger" : ""}`} disabled={voice.afkRoom} title={voice.afkRoom ? t("dock.afkChannel") : voice.deafened ? t("voice.undeafen") : t("voice.deafen")} onClick={() => client.setDeafened(!voice.deafened)}><Icon name={voice.deafened ? "headphone-off" : "headphones"} /></button>
             {canStream && !voice.afkRoom && <button aria-label={t("voice.cameraOnBtn")} aria-pressed={voice.cameraOn} className={`icon ${voice.cameraOn ? "on" : ""}`} title={voice.cameraOn ? t("voice.cameraOff") : t("voice.cameraOnBtn")} onClick={() => { void onToggleCamera(); }}><Icon name={voice.cameraOn ? "video" : "video-off"} /></button>}
             {canStream && !voice.afkRoom && quickShare && <button aria-label={t("dock.quickShare")} className="icon" title={`${t("dock.quickShare")}: ${t("dock.quickShareHint", { name: quickShare.name })}`} onClick={quickShare.onShare}><Icon name="gamepad-2" /></button>}

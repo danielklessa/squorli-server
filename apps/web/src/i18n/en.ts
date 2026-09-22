@@ -95,6 +95,8 @@ export const en: Messages = {
   "screenPick.codecH264Hint": "Advantage of H.264: nearly every viewer's device plays it with its graphics unit, which spares their processor and battery with fast pictures. Good for games.",
   "screenPick.codecH265Hint": "Advantage of H.265: this computer's graphics unit encodes the picture and spares the processor, and the same picture needs less bandwidth. Good for games. If a viewer cannot play H.265 (Firefox), the share switches to VP8 for everyone.",
   "dock.quickShare": "Quick Share",
+  "dock.pttHold": "Talk",
+  "dock.pttOpen": "Open",
   "dock.quickShareHint": "Share {name} right away: the game's window with its audio, tuned for smooth motion",
   "layout.resizeLeft": "Change the channel list's width (drag, arrow keys, double click = default)",
   "layout.resizeMembers": "Change the member list's width (drag, arrow keys, double click = default)",
@@ -239,6 +241,7 @@ export const en: Messages = {
   // ---- Sidebar / rail / server browser
   "sidebar.dragHint": "Drag into another voice channel",
   "sidebar.admin": "Administration",
+  "sidebar.members": "Show members",
   "sidebar.mentions": "{n} mention(s)",
   "sidebar.muteChannel": "Mute channel",
   "sidebar.unmuteChannel": "Unmute channel",
@@ -467,6 +470,8 @@ export const en: Messages = {
   "home.pickFriend": "Pick a friend on the left to write. Direct messages are end-to-end encrypted: the directory only sees that you write, not what.",
 
   // ---- Member list
+  "members.title": "Members",
+  "members.close": "Close member list",
   "members.roles": "Roles",
   "members.owners": "Owners",
   "members.online": "Online",
@@ -643,6 +648,7 @@ export const en: Messages = {
   "settings.micBoostNow": "Right now: {pct} %.",
   "settings.micBoostHint": "Raises a quiet microphone to a normal speaking level ({max} % at most) before voice activation and the level meter; loud passages are rounded off instead of clipping. The automatic learns while you speak and remembers the value per microphone. It matters most in stereo channels: there the system's gain control is off and the microphone would otherwise arrive at its raw level. Applies to this device.",
   "settings.pttHint": "In the browser only while this tab has focus. A global hotkey is planned for the desktop app.",
+  "settings.pttTouchHint": "On this device the stage shows a button above its bar that opens the microphone while it is held. A connected keyboard still opens it with {key}.",
   "settings.input": "Input",
   "settings.microphone": "Microphone",
   "settings.default": "Default",
@@ -697,6 +703,8 @@ export const en: Messages = {
   "stage.grid": "Tiles",
   "stage.audioBlocked": "Sound is blocked until you click once.",
   "stage.empty": "Nobody in the channel yet.",
+  "stage.pttHold": "Hold to talk",
+  "stage.pttOpen": "Microphone open",
   "stage.noStreamPermission": "No permission: share camera and screen",
   "volume.user": "Volume for me",
   "volume.reset": "Reset to 100%",

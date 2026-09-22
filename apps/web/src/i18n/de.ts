@@ -96,6 +96,8 @@ export const de = {
   "screenPick.codecH264Hint": "Vorteil von H.264: fast jedes Gerät der Zuschauer spielt es mit seiner Grafikeinheit ab, das schont deren Prozessor und Akku bei schnellen Bildern. Gut für Spiele.",
   "screenPick.codecH265Hint": "Vorteil von H.265: die Grafikeinheit dieses Rechners kodiert das Bild und entlastet den Prozessor, und dasselbe Bild braucht weniger Bandbreite. Gut für Spiele. Kann ein Zuschauer H.265 nicht abspielen (Firefox), wechselt die Übertragung für alle auf VP8.",
   "dock.quickShare": "Quick Share",
+  "dock.pttHold": "Sprechen",
+  "dock.pttOpen": "Offen",
   "dock.quickShareHint": "{name} sofort teilen: das Spielfenster mit Ton, eingestellt auf flüssige Bilder",
   "layout.resizeLeft": "Breite der Kanalliste ändern (ziehen, Pfeiltasten, Doppelklick = Standard)",
   "layout.resizeMembers": "Breite der Mitgliederliste ändern (ziehen, Pfeiltasten, Doppelklick = Standard)",
@@ -240,6 +242,7 @@ export const de = {
   // ---- Sidebar / rail / server browser
   "sidebar.dragHint": "In einen anderen Sprachkanal ziehen",
   "sidebar.admin": "Verwaltung",
+  "sidebar.members": "Mitglieder anzeigen",
   "sidebar.mentions": "{n} Erwähnung(en)",
   "sidebar.muteChannel": "Kanal stumm schalten",
   "sidebar.unmuteChannel": "Stummschaltung aufheben",
@@ -468,6 +471,8 @@ export const de = {
   "home.pickFriend": "Wähle links einen Freund, um zu schreiben. Direktnachrichten sind Ende-zu-Ende verschlüsselt: das Verzeichnis sieht nur, dass ihr schreibt, nicht was.",
 
   // ---- Member list
+  "members.title": "Mitglieder",
+  "members.close": "Mitgliederliste schließen",
   "members.roles": "Rollen",
   "members.owners": "Eigentümer",
   "members.online": "Online",
@@ -644,6 +649,7 @@ export const de = {
   "settings.micBoostNow": "Gerade: {pct} %.",
   "settings.micBoostHint": "Hebt ein leises Mikrofon auf normale Sprechlautstärke an (höchstens {max} %), bevor Sprachaktivierung und Pegelanzeige greifen; laute Stellen werden abgerundet statt zu übersteuern. Die Automatik lernt beim Sprechen und merkt sich den Wert pro Mikrofon. Am meisten bringt sie in Stereo-Kanälen: Dort ist die Pegelregelung des Systems abgeschaltet und das Mikrofon kommt sonst mit seinem Rohpegel an. Gilt für dieses Gerät.",
   "settings.pttHint": "Im Browser nur, solange dieser Tab den Fokus hat. Ein globales Tastenkürzel ist für die Desktop-App geplant.",
+  "settings.pttTouchHint": "Auf diesem Gerät zeigt die Bühne über ihrer Leiste eine Taste, die das Mikrofon öffnet, solange sie gedrückt bleibt. Eine angeschlossene Tastatur öffnet es weiterhin mit {key}.",
   "settings.input": "Eingabe",
   "settings.microphone": "Mikrofon",
   "settings.default": "Standard",
@@ -698,6 +704,8 @@ export const de = {
   "stage.grid": "Kacheln",
   "stage.audioBlocked": "Ton ist blockiert, bis du einmal klickst.",
   "stage.empty": "Noch niemand im Kanal.",
+  "stage.pttHold": "Zum Sprechen halten",
+  "stage.pttOpen": "Mikrofon offen",
   "stage.noStreamPermission": "Kein Recht: Kamera und Bildschirm teilen",
   "volume.user": "Lautstärke für mich",
   "volume.reset": "Auf 100 % zurücksetzen",
