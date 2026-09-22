@@ -1073,6 +1073,8 @@ export class VoiceClient {
   }
 
   setNotice(text: string | null) { this.patch({ notice: text }); if (text) this.log(`hinweis: ${text}`); }
+  /** The error was shown (the modal in App.tsx closed): gone, so the same text can come again. */
+  clearError() { this.patch({ error: null }); }
 
   /** requestCamera = true asks for camera permission once so the device names are readable (for the picker at switch-on time). */
   static async listDevices(requestCamera = false): Promise<{ inputs: MediaDeviceInfo[]; outputs: MediaDeviceInfo[]; cameras: MediaDeviceInfo[] }> {

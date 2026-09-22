@@ -72,7 +72,7 @@ export type ConnectionHooks = {
   /** First welcome of a session (not after a reconnect): e.g. refresh the server list at the directory. */
   onConnected: () => void;
   /** Moderation (M3): moving to another voice channel (null = out) and stopping camera/screen. */
-  onVoiceMoved: (channelId: string | null, by: string, reason: "afk" | null) => void;
+  onVoiceMoved: (channelId: string | null, by: string, reason: "afk" | "elsewhere" | null) => void;
   onVoiceStop: (what: { camera: boolean; screen: boolean }, by: string) => void;
   /** A live message of someone else mentions me (also in the channel that is open: the store knows whether the user looks at it). */
   onMention: (channelId: string) => void;

@@ -139,7 +139,7 @@ export class Store {
   /** Set by the voice client: a kick/session loss on `host` ends the voice connection if it runs there. */
   onRemoved: ((host: string) => void) | null = null;
   /** Moderation (M3) on `host`: moving to another voice channel (null = out) and stopping camera/screen. */
-  onVoiceMoved: ((host: string, channelId: string | null, by: string, reason: "afk" | null) => void) | null = null;
+  onVoiceMoved: ((host: string, channelId: string | null, by: string, reason: "afk" | "elsewhere" | null) => void) | null = null;
   onVoiceStop: ((host: string, what: { camera: boolean; screen: boolean }, by: string) => void) | null = null;
   /** A direct message or a mention arrived that the user does not see right now (App.tsx plays the cue). */
   onIncoming: ((kind: "dm" | "mention") => void) | null = null;

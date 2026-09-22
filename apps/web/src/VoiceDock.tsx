@@ -72,14 +72,12 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, ava
             {!voice.canPlayback && <button className="small warn" title={t("dock.unblockAudioHint")} onClick={() => client.startAudio()}>{t("dock.unblockAudio")}</button>}
             {voice.status === "connected" && voice.audioContext !== "running" && voice.audioContext !== "none" && <button className="small warn" title={t("dock.unblockMicHint")} onClick={() => client.prepareAudio()}>{t("dock.unblockMic")}</button>}
           </div>
-          {voice.error && <p className="error small">{voice.error}</p>}
           {voice.afkRoom && (
             <div className="warn-box small dock-afk" role="status">
               <span><Icon name="moon" /> {afkReturn ? t("dock.afkMoved") : t("dock.afkChannel")}</span>
               {afkReturn?.name && <button className="small" onClick={afkReturn.onReturn}>{t("dock.afkReturn", { name: afkReturn.name })}</button>}
             </div>
           )}
-          {voice.notice && <p className="warn-box small">{voice.notice} <button className="icon" title={t("common.dismiss")} onClick={() => client.setNotice(null)}><Icon name="x" /></button></p>}
           <div className={`dock-input ${voice.micMuted ? "is-muted" : ""}`}>
             <span className="dock-input-label"><Icon name={voice.micMuted ? "mic-off" : "mic"} />{voice.micMuted ? t("voice.micMuted") : t("dock.micLevel")}</span>
             <div className="meter small-meter" aria-hidden="true">
@@ -97,7 +95,7 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, ava
           </div>
         </div>
       )}
-      {!joined && voice.error && <p className="error small">{voice.error}</p>}
+      {/* Notices and errors of the voice connection are a modal (App.tsx, `showNotice`), no line here (user's wish, 22 September 2026). */}
       <div className="dock-row">
         <button className="dock-name" aria-haspopup="menu" onClick={openProfile} title={t("dock.profile")}><Avatar name={displayName} src={avatarUrl} /><span className="dock-identity"><strong>{displayName}</strong><small>{t("profile.tab.profile")}</small></span></button>
         <button className="icon" title={t("dock.settings")} onClick={onOpenSettings}><Icon name="settings" /></button>

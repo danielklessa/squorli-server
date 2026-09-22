@@ -9,10 +9,13 @@ import { t } from "./i18n";
 type Base = { title: string; text?: string; confirmLabel?: string; cancelLabel?: string; danger?: boolean };
 export type ConfirmOptions = Base;
 export type InputOptions = Base & { label?: string; placeholder?: string; initial?: string; maxLength?: number; optional?: boolean };
+/** A message with one close button; a click beside the dialog or Escape closes it too (voice notices and errors, 22 September 2026). */
+export type NoticeOptions = { title: string; text: string; closeLabel?: string };
 
 type Pending =
   | { kind: "confirm"; opts: ConfirmOptions; resolve: (ok: boolean) => void }
-  | { kind: "input"; opts: InputOptions; resolve: (value: string | null) => void };
+  | { kind: "input"; opts: InputOptions; resolve: (value: string | null) => void }
+  | { kind: "notice"; opts: NoticeOptions; resolve: () => void };
 
 const queue: Pending[] = [];
 let notify: (() => void) | null = null;
@@ -21,6 +24,7 @@ const finish = () => { queue.shift(); notify?.(); };
 
 export const askConfirm = (opts: ConfirmOptions) => new Promise<boolean>((resolve) => enqueue({ kind: "confirm", opts, resolve }));
 export const askInput = (opts: InputOptions) => new Promise<string | null>((resolve) => enqueue({ kind: "input", opts, resolve }));
+export const showNotice = (opts: NoticeOptions) => new Promise<void>((resolve) => enqueue({ kind: "notice", opts, resolve }));
 
 export function DialogHost() {
   const [, rerender] = useState(0);
@@ -29,7 +33,21 @@ export function DialogHost() {
   if (!current) return null;
   return current.kind === "confirm"
     ? <ConfirmDialog key={queue.length} opts={current.opts} onDone={(ok) => { current.resolve(ok); finish(); }} />
-    : <InputDialog key={queue.length} opts={current.opts} onDone={(v) => { current.resolve(v); finish(); }} />;
+    : current.kind === "notice"
+      ? <NoticeDialog key={queue.length} opts={current.opts} onDone={() => { current.resolve(); finish(); }} />
+      : <InputDialog key={queue.length} opts={current.opts} onDone={(v) => { current.resolve(v); finish(); }} />;
+}
+
+function NoticeDialog({ opts, onDone }: { opts: NoticeOptions; onDone: () => void }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => { ref.current?.focus(); }, []);
+  return (
+    <Frame opts={opts} onCancel={onDone}>
+      <div className="dialog-actions">
+        <button ref={ref} className="secondary" onClick={onDone}>{opts.closeLabel ?? t("common.close")}</button>
+      </div>
+    </Frame>
+  );
 }
 
 function Frame({ opts, onCancel, children }: { opts: Base; onCancel: () => void; children: ReactNode }) {

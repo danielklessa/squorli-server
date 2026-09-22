@@ -4,6 +4,8 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 | Date | Change |
 |---|---|
+| 2026-09-22 | Voice notices and errors are a modal with one close button, closed by a click beside it or Escape (user's wish): `showNotice()` in dialogs.tsx, effects in App.tsx; the dock and the stage lost their message lines; a failed join on the phone closes the sheet and shows the modal. Details: `docs/features/voice-video.md`. |
+| 2026-09-22 | One voice connection per account and server (user's wish): a join from a second device or tab ends the account's voice elsewhere on that server (`voice.moved` reason `elsewhere`, LiveKit removal in another room), the old client hangs up with a notice, the new client asks with a confirm dialog first (phone sheet closes for it). Details: `docs/features/voice-video.md`. |
 | 2026-09-22 | Member list on a phone (user request): a `users` button at the right end of the server head slides the member list in from the right over rail and navigation, with a header and close button of its own; closes by itself when content opens, home toggles or the server changes. Details: `docs/features/ui-admin.md`. |
 | 2026-09-22 | A sign-in refused for want of an invite no longer lists the server for the directory account (user's report): the membership is read before the directory lookup, `directory.refresh(user, member)` sends `?member=0` for non-members (login and `/api/me`), a new member is looked up again after joining. Directory counterpart of the same date. Details: `docs/features/directory.md`. |
 | 2026-09-22 | Hanging up on a phone's stage shows the channel list again instead of the server's first text channel (user's report; `hangUp` in App.tsx). Details: `docs/features/voice-video.md`, mobile voice flow. |

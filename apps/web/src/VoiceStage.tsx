@@ -186,9 +186,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
           onClick={() => { try { onToggleWindow(); } catch (error) { client.setNotice(error instanceof Error ? error.message : t("stage.popupFailed")); } }}><Icon name={detached ? "undo-2" : "external-link"} /></button>
       </header>
 
-      {voice.error && <p className="error small stage-hint">{voice.error}</p>}
       {voice.afkRoom && <p className="warn-box small stage-hint"><Icon name="moon" /> {t("dock.afkChannel")}</p>}
-      {voice.notice && <p className="warn-box small stage-hint">{voice.notice} <button className="icon" title={t("common.dismiss")} onClick={() => client.setNotice(null)}><Icon name="x" /></button></p>}
       {screenHint && <p className="warn-box small stage-hint">{screenHint}</p>}
       {hiddenStreams && <p className="warn-box small stage-hint">{t("stage.noViewPermission")}</p>}
       {!voice.canPlayback && <p className="warn-box small stage-hint">{t("stage.audioBlocked")} <button className="small" onClick={() => client.startAudio()}>{t("dock.unblockAudio")}</button></p>}

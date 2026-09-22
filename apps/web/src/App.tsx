@@ -11,12 +11,13 @@ import { LoginScreen } from "./LoginScreen";
 import { MemberList } from "./MemberList";
 import { Sidebar } from "./Sidebar";
 import { MobileVoicePreview } from "./MobileVoicePreview";
+import { voiceElsewhere } from "./voice/elsewhere";
 import { VoiceDock } from "./VoiceDock";
 import { VoiceStage } from "./VoiceStage";
 import { CameraPicker } from "./CameraPicker";
 import { Icon } from "./Icon";
 import { attentionCount } from "./attention";
-import { askConfirm, askInput } from "./dialogs";
+import { askConfirm, askInput, showNotice } from "./dialogs";
 import type { MenuAnchor } from "./ContextMenu";
 import { MiniProfile } from "./MiniProfile";
 import { SettingsDialog, type SettingsTab } from "./SettingsDialog";
@@ -91,6 +92,18 @@ export function App() {
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
   }, []);
+  // Notices and errors of the voice connection (a moderator moved or removed you, the account joined elsewhere, a camera
+  // that failed, a lost connection) are a modal with one close button, closed as well by a click beside it or Escape, not
+  // a line in the dock or on the stage (user's wish, 22 September 2026). Closing clears the client's text when it is still
+  // the one shown, so a later text, even the same one, shows again; a text that changed meanwhile gets its own modal.
+  useEffect(() => {
+    const text = voice.notice;
+    if (text) void showNotice({ title: t("voice.noticeTitle"), text }).then(() => { if (client.state.notice === text) client.setNotice(null); });
+  }, [client, voice.notice]);
+  useEffect(() => {
+    const text = voice.error;
+    if (text) void showNotice({ title: t("voice.errorTitle"), text }).then(() => { if (client.state.error === text) client.clearError(); });
+  }, [client, voice.error]);
   /** Mini profile (click on your own name), anchored at the name in the dock. */
   const [miniProfile, setMiniProfile] = useState<MenuAnchor | null>(null);
   /** Settings dialog (gear): the category to open, null = closed. */
@@ -378,6 +391,10 @@ export function App() {
         const name = store.connection(host)?.state.server?.channels.find((c) => c.id === channelId)?.name ?? t("app.otherChannel");
         client.setNotice(t("app.movedNotice", { by, name }));
         void joinVoice(host, channelId).catch(() => {});
+      } else if (reason === "elsewhere") {
+        // The same account joined a voice channel of this server from another device or tab: that one takes over.
+        client.setNotice(t("app.voiceElsewhereNotice"));
+        void leaveVoice();
       } else {
         client.setNotice(t("app.removedNotice", { by }));
         void leaveVoice();
@@ -433,6 +450,24 @@ export function App() {
   // that would otherwise appear under the vanished stage. The list slides in first, so the leave's wait is never seen.
   // A plain function, not a hook: this point is below the early returns (login screen), where no hook may sit.
   const hangUp = async () => { if (mobile) { setMobileContent(false); setStageOpen(false); } await leaveVoice(); };
+  // The account already sits in a voice channel of that server from another device or tab: joining from here ends that
+  // connection (the server does it at voice.join), so the user confirms first (user's wish, 22 September 2026). A seat of
+  // this client is not "elsewhere". Without anything to confirm the join starts synchronously in the click, as the
+  // microphone request needs (voice/AGENTS.md); after the confirm the dialog's own click is that gesture.
+  const elsewhereName = (host: string): string | null => {
+    const conn = store.connection(host);
+    if (!conn?.state.userId || (voiceHostRef.current === host && client.state.status !== "disconnected")) return null;
+    const channelId = voiceElsewhere(conn.state.voice, conn.state.userId);
+    return channelId ? conn.state.server?.channels.find((c) => c.id === channelId)?.name ?? t("app.otherChannel") : null;
+  };
+  const confirmElsewhere = (name: string) => askConfirm({ title: t("voice.elsewhereTitle"), text: t("voice.elsewhereText", { channel: name }), confirmLabel: t("voice.elsewhereJoin") });
+  const joinVoiceAsked = (host: string, channelId: string): Promise<void> => {
+    const name = elsewhereName(host);
+    return name ? confirmElsewhere(name).then((ok) => (ok ? joinVoice(host, channelId) : undefined)) : joinVoice(host, channelId);
+  };
+  // A join that failed before the voice client had a say (the token, the server) has no text in the client's state, which
+  // the modal above would show: it gets the same modal with the bare error.
+  const reportJoinError = (err: unknown) => { if (!client.state.error) void showNotice({ title: t("voice.errorTitle"), text: err instanceof Error ? err.message : String(err) }); };
   const stage = (detached: boolean) => voiceChannel && voiceServer?.server && voiceApi ? (
     <VoiceStage client={client} voice={voice} channel={voiceChannel} members={voiceServer.server.members} myPermissions={voiceServer.server.myPermissions}
       api={voiceApi} radio={radio} radioStations={voiceServer.server.radioStations} radioTitle={voiceServer.radioTitles[voiceChannel.id] ?? null} playerTile={embedKeyOf(embedSource)} playerOff={playerOff} onDismissPlayerOff={() => setPlayerOffDismissed(videoKey)} playerPopped={playerWindow.win !== null} onRestorePlayer={playerWindow.restore}
@@ -511,7 +546,7 @@ export function App() {
           voiceState={voiceHost === activeHost ? voice : null} client={client} radioTitles={view.active.radioTitles} unread={view.active.unread} mentions={view.active.mentions} muted={view.active.muted} canMute={view.active.readSync}
           onMuteChannel={(id, muted) => { void view.conn.setChannelMuted(id, muted).catch(() => {}); }}
           connection={view.active.connection} onSelect={(id) => { view.conn.selectChannel(id); setStageOpen(false); setMobileContent(true); }}
-          onJoinVoice={(id) => { if (mobile) setVoicePreview(id); else void joinVoice(view.active.host, id).catch(() => {}); }} onOpenAdmin={() => setShowAdmin(true)} myUserId={view.active.userId ?? ""}
+          onJoinVoice={(id) => { if (mobile) setVoicePreview(id); else void joinVoiceAsked(view.active.host, id).catch(reportJoinError); }} onOpenAdmin={() => setShowAdmin(true)} myUserId={view.active.userId ?? ""}
           onOpenMembers={mobile ? () => setMobileMembers(true) : null}
         /> : <nav className="sidebar"><header className="server-head"><img className="brand-mark" src="/brand/squorli-icon-small.svg" alt="" width="22" height="22" /><strong>{active?.serverName ?? active?.host ?? "Squorli"}</strong></header></nav>}
         <VoiceDock client={client} voice={voice} channel={voiceChannel} serverName={voiceHost && voiceHost !== activeHost ? voiceServer?.server?.settings.name ?? voiceHost : null}
@@ -554,8 +589,17 @@ export function App() {
         connected={voiceHost === activeHost && voice.channelId === voicePreview && voice.status !== "disconnected"}
         onClose={() => setVoicePreview(null)}
         onJoin={async () => {
-          // The sheet shows what went wrong; the voice client's text explains it, the bare error does not.
-          try { await joinVoice(view.active.host, voicePreview); } catch (err) { throw new Error(client.state.error ?? (err instanceof Error ? err.message : String(err))); }
+          const host = view.active.host, channelId = voicePreview;
+          // The sheet is a native modal dialog in the top layer, where the confirm dialog could not show: it closes first
+          // and comes back when the user cancels, or with the error when the join fails after the confirm.
+          const name = elsewhereName(host);
+          if (name) {
+            setVoicePreview(null);
+            if (!await confirmElsewhere(name)) { setVoicePreview(channelId); return; }
+          }
+          // A failed join closes the sheet (a native dialog in the top layer, above the modal) and shows the error as the
+          // modal every voice error gets: the client's own text through the effect above, else the bare one.
+          try { await joinVoice(host, channelId); } catch (err) { setVoicePreview(null); reportJoinError(err); return; }
           setStageOpen(true); setMobileContent(true); setVoicePreview(null);
         }} />}
       {!homeOpen && view && <MemberList api={view.conn.api} members={view.server.members} roles={view.server.roles} myUserId={view.active.userId!} myPermissions={view.server.myPermissions} ownerId={view.server.settings.ownerId}
