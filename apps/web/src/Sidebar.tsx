@@ -124,7 +124,7 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, clie
       )}
       {menu && menuMember && (
         <ContextMenu anchor={menu} label={menuMember.displayName} onClose={() => setMenu(null)}>
-          <div className="context-identity" role="presentation"><Avatar name={menuMember.displayName} src={menuMember.avatarUrl} online={menuMember.online} /><strong>{menuMember.displayName}</strong></div>
+          <div className="context-identity" role="presentation"><Avatar name={menuMember.displayName} src={menuMember.avatarUrl} online={menuMember.online} afk={menuMember.afk} /><strong>{menuMember.displayName}</strong></div>
           <UserVolumeControl client={client} publicKey={menuMember.publicKey} />
         </ContextMenu>
       )}

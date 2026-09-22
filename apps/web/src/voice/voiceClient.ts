@@ -27,7 +27,7 @@ import { micPermissionState, micRefusal } from "./micPermission";
 import { isCameraBusy, retryCameraBusy } from "./cameraRetry";
 import { cameraSwitch, type CameraRequest } from "./cameraSwitch";
 import type { VoiceSettings } from "./settings";
-import { DEFAULT_SOUND_SETTINGS, applyCueOutput, normalizeSoundSettings, playCue, shouldPlayCue, type SoundCue, type SoundSettings } from "./sounds";
+import { DEFAULT_SOUND_SETTINGS, FEEDBACK_TONES, applyCueOutput, normalizeSoundSettings, playCue, playTones, shouldPlayCue, type SoundCue, type SoundSettings } from "./sounds";
 import { USER_VOLUME_MAX, clampUserVolume, loadUserVolumes, saveUserVolumes, withUserVolume, type UserVolumes } from "./userVolumes";
 import { screenSharePublish } from "./screenShareOptions";
 import { subscriptionPermissions, type VideoAccess } from "./videoAccess";
@@ -363,6 +363,16 @@ export class VoiceClient {
       return;
     }
     playCue(ctx, cue, this.sounds.volume);
+  }
+
+  /**
+   * Confirmation of a global shortcut or a command from outside the window (docs/features/hotkeys.md): a short tone for
+   * the state it left behind (on = rising, off = falling), whoever pressed it cannot see the window. Deafened or not; only
+   * the common volume at 0 keeps it quiet.
+   */
+  playFeedback(on: boolean): void {
+    if (this.sounds.volume <= 0) return;
+    playTones(this.ensureCtx(), on ? FEEDBACK_TONES.on : FEEDBACK_TONES.off, this.sounds.volume);
   }
 
   /** Output device of the cues outside a voice room (the message cue); a join and `setOutputDevice` set it as before. */

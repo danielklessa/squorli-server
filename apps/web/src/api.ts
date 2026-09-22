@@ -4,6 +4,7 @@ import {
   BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryActionMessage, directoryBackupMessage, directoryProfilePayload,
   directoryRegisterMessage, directorySoundSettingsPayload, openBackup, type AccountSettings, type SealedSettings, type SoundSettings,
   MuteState, ReadStateResponse, type Attachment, type Category, type Channel, type RadioStation, type Role,
+  type DiscordImportRequest, type DiscordImportResult, type ImportPlan,
   DmBlobPutResponse, LinkLookupResponse, directoryDmBlobUrl, directoryLinkLookupPayload,
 } from "@squorli/protocol";
 import { z } from "zod";
@@ -113,6 +114,9 @@ export class ServerApi {
   updateChannel(id: string, patch: { name?: string; topic?: string | null; categoryId?: string | null; position?: number; audioBitrate?: number; audioStereo?: boolean }) { return this.request("PATCH", `/api/channels/${id}`, patch); }
   deleteChannel(id: string) { return this.request("DELETE", `/api/channels/${id}`); }
   // ---------- Web radio (stations: MANAGE_SERVER; a channel's radio: CONTROL_RADIO). The result arrives via the structure event.
+  /** Import of a Discord server template (docs/features/import.md): the plan for a typed link or code, then the import of the chosen entries. */
+  discordImportPreview(code: string) { return this.request<ImportPlan>("POST", "/api/import/discord/preview", { code }); }
+  discordImport(body: DiscordImportRequest) { return this.request<DiscordImportResult>("POST", "/api/import/discord", body); }
   createRadioStation(data: { name: string; url: string }) { return this.request<RadioStation>("POST", "/api/radio/stations", data); }
   updateRadioStation(id: string, patch: { name?: string; url?: string }) { return this.request<RadioStation>("PATCH", `/api/radio/stations/${id}`, patch); }
   deleteRadioStation(id: string) { return this.request("DELETE", `/api/radio/stations/${id}`); }

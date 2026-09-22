@@ -10,6 +10,9 @@ import { askConfirm } from "./dialogs";
 import { Icon } from "./Icon";
 import { LicensesTab } from "./LicensesTab";
 import { GamesTab } from "./GamesTab";
+import { HotkeysTab } from "./HotkeysTab";
+import type { HotkeyAction, HotkeyStatus } from "./platform";
+import { checkHotkey, hotkeyFromKey, type HotkeyCheck } from "./platform/hotkeys";
 import type { GameDetection } from "./gameDetection";
 import { LOCALES, fmtDateTime, localePreference, t, type LocalePreference } from "./i18n";
 import { activity } from "./activity";
@@ -22,13 +25,14 @@ import { VOICE_CUES, type SoundCue, type SoundSettings } from "./voice/sounds";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 
-export type SettingsTab = "profile" | "view" | "voice" | "camera" | "sounds" | "games" | "sessions" | "account" | "app" | "licenses";
+export type SettingsTab = "profile" | "view" | "voice" | "camera" | "sounds" | "hotkeys" | "games" | "sessions" | "account" | "app" | "licenses";
 const TABS: { id: SettingsTab; label: string; icon: string }[] = [
   { id: "profile", label: t("settings.tab.profile"), icon: "user" },
   { id: "view", label: t("settings.tab.view"), icon: "languages" },
   { id: "voice", label: t("settings.tab.voice"), icon: "mic" },
   { id: "camera", label: t("settings.tab.camera"), icon: "video" },
   { id: "sounds", label: t("settings.tab.sounds"), icon: "bell" },
+  { id: "hotkeys", label: t("settings.tab.hotkeys"), icon: "keyboard" },
   { id: "games", label: t("settings.tab.games"), icon: "gamepad-2" },
   { id: "sessions", label: t("settings.tab.sessions"), icon: "monitor-smartphone" },
   { id: "account", label: t("settings.tab.account"), icon: "key-round" },
@@ -56,7 +60,7 @@ const fmt = fmtDateTime;
  * the directory's account page, sign out, discard identity) and licenses (our own and the third-party notices, LicensesTab.tsx). With a directory account everything except the device selection
  * is stored there (store.ts pushes every change); sessions and the name on this server belong to the server shown.
  */
-export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, directoryUrl, directoryAccount, serverDomain, clientVersion, syncError, sealed, client, voice, initialTab, games, onSaveServerName, onSaveGlobalName, onSetAvatar, onSetLocale, localePending, onCapturingKey, onClose, onLogout, onForget }: {
+export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, directoryUrl, directoryAccount, serverDomain, clientVersion, syncError, sealed, client, voice, initialTab, games, hotkeyStatus, onSaveServerName, onSaveGlobalName, onSetAvatar, onSetLocale, localePending, onCapturingKey, onClose, onLogout, onForget }: {
   /** The server on screen and who you are there; null = none is shown (client without a home server): the dialog then has
    *  no profile and no sessions, which belong to a server, and the account page names the directory account and `publicKey`. */
   api: ServerApi | null; me: Me | null; publicKey: string | null;
@@ -73,6 +77,8 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
   client: VoiceClient; voice: VoiceState; initialTab?: SettingsTab;
   /** Game detection of the desktop app; null = not available here, and the category is not shown. */
   games: GameDetection | null;
+  /** What the desktop app's shell made of the global shortcuts (App.tsx); null until it answered, or in a browser (the category is not shown there). */
+  hotkeyStatus: HotkeyStatus | null;
   onSaveServerName: (displayName: string | null) => Promise<void>;
   onSaveGlobalName: (displayName: string | null) => Promise<void>;
   /** Upload (null = remove) the avatar of the directory account, already cropped and encoded; null = no account or a directory without avatars. */
@@ -90,7 +96,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
   settingsRef.current = settings;
   const onServer = !!api && !!me;
   // "App" (version, updates) exists in the desktop app only; profile and sessions belong to a server.
-  const tabs = TABS.filter((entry) => (entry.id !== "app" || platform.app !== null) && (entry.id !== "games" || games !== null) && (onServer || (entry.id !== "profile" && entry.id !== "sessions")));
+  const tabs = TABS.filter((entry) => (entry.id !== "app" || platform.app !== null) && (entry.id !== "games" || games !== null) && (entry.id !== "hotkeys" || platform.hotkeys !== null) && (onServer || (entry.id !== "profile" && entry.id !== "sessions")));
   const appUpdate = useUpdateState();
   const [tab, setTab] = useState<SettingsTab>(() => { const wanted = initialTab ?? "profile"; return tabs.some((entry) => entry.id === wanted) ? wanted : "view"; });
   const [name, setName] = useState(me?.displayName ?? "");
@@ -121,6 +127,9 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
   const [idleDenied, setIdleDenied] = useState(false);
   const [devices, setDevices] = useState<{ inputs: MediaDeviceInfo[]; outputs: MediaDeviceInfo[]; cameras: MediaDeviceInfo[] }>({ inputs: [], outputs: [], cameras: [] });
   const [capturingKey, setCapturingKey] = useState(false);
+  /** Einstellungen > Tastenkürzel: the global shortcut being captured, and why the last captured key was not taken. */
+  const [capturingHotkey, setCapturingHotkey] = useState<HotkeyAction | null>(null);
+  const [refusedHotkey, setRefusedHotkey] = useState<{ action: HotkeyAction; check: Exclude<HotkeyCheck, "ok"> } | null>(null);
   const [testBusy, setTestBusy] = useState(false);
   const dirHost = directoryUrl ? new URL(directoryUrl).host : null;
   const joined = voice.status !== "disconnected";
@@ -129,10 +138,10 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
   const update = (patch: Partial<VoiceSettings>) => saveVoiceSettings({ ...settingsRef.current, ...patch });
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !capturingKey) onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !capturingKey && !capturingHotkey) onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, capturingKey]);
+  }, [onClose, capturingKey, capturingHotkey]);
 
   useEffect(() => {
     let alive = true;
@@ -150,8 +159,31 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
     return () => { window.removeEventListener("keydown", handler); onCapturingKey(false); };
   }, [capturingKey]);
 
-  // The microphone test ends with its tab and with the dialog.
+  // Capturing a global shortcut (docs/features/hotkeys.md): the shell lets its shortcuts go meanwhile (a registered one never
+  // reaches the window) and watches no key; the dock's push-to-talk listener stays quiet like for the push-to-talk key. A
+  // modifier alone waits for the key, Escape cancels; a key that fails the rules is refused with a note, the old one stays.
+  useEffect(() => {
+    if (!capturingHotkey) return;
+    const action = capturingHotkey;
+    onCapturingKey(true);
+    platform.hotkeys?.suspend(true);
+    const handler = (e: KeyboardEvent) => {
+      e.preventDefault(); e.stopPropagation();
+      if (e.code === "Escape") { setCapturingHotkey(null); return; }
+      const binding = hotkeyFromKey(e);
+      if (!binding) return;
+      const check = checkHotkey(binding);
+      if (check === "ok") { setRefusedHotkey(null); update({ hotkeys: { ...settingsRef.current.hotkeys, [action]: binding } }); }
+      else setRefusedHotkey({ action, check });
+      setCapturingHotkey(null);
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => { window.removeEventListener("keydown", handler, true); onCapturingKey(false); platform.hotkeys?.suspend(false); };
+  }, [capturingHotkey]);
+
+  // The microphone test ends with its tab and with the dialog; so does a capture of a global shortcut.
   useEffect(() => { if (tab !== "voice") void client.stopMicTest(); }, [tab, client]);
+  useEffect(() => { if (tab !== "hotkeys") { setCapturingHotkey(null); setRefusedHotkey(null); } }, [tab]);
   useEffect(() => () => { void client.stopMicTest(); }, [client]);
   async function toggleMicTest() {
     setTestBusy(true);
@@ -382,7 +414,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
                 ) : (
                   <div className="stack">
                     <span>{t("settings.key")} <kbd>{settings.pttKey}</kbd> <button className="secondary small" onClick={() => setCapturingKey(true)}>{capturingKey ? t("settings.pressKey") : t("settings.change")}</button></span>
-                    <span className="muted small">{t("settings.pttHint")}</span>
+                    <span className="muted small">{platform.hotkeys?.globalPtt ? t("settings.pttHintGlobal") : t("settings.pttHint")}</span>
                   </div>
                 )}
                 <h3>{t("settings.micBoost")}</h3>
@@ -544,6 +576,9 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
               </>
             )}
             {tab === "games" && games && <GamesTab games={games} hiddenInAccount={inAccount && sealed} />}
+
+            {tab === "hotkeys" && platform.hotkeys && <HotkeysTab settings={settings} bindings={settings.hotkeys} status={hotkeyStatus} capturing={capturingHotkey} refused={refusedHotkey}
+              onCapture={(action) => { setRefusedHotkey(null); setCapturingHotkey(action); }} onRemove={(action) => { setRefusedHotkey(null); update({ hotkeys: { ...settingsRef.current.hotkeys, [action]: null } }); }} />}
 
             {tab === "licenses" && <LicensesTab version={clientVersion} />}
 

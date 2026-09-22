@@ -8,8 +8,10 @@ import { attentionText, badgeFile, readAttentionCount } from "./attention";
 import { readAutostartBackground, startsInBackground } from "./autostart";
 import { autostartEnabled, autostartSupported, setAutostart } from "./autostartSystem";
 import { loadConfig, saveConfig } from "./config";
+import { findControl } from "./controlArgs";
 import { findDeepLink } from "./deepLinkArgs";
 import { handleGames } from "./gameWatch";
+import { handleHotkeys, type Hotkeys } from "./hotkeys";
 import { handleLinkLookup } from "./linkLookup";
 import { handleDeepLinks } from "./deepLinks";
 import { handleDisplayMedia } from "./displayMedia";
@@ -68,6 +70,8 @@ const frameOf = (win: BrowserWindow): WindowFrameState => ({ maximized: win.isMa
 let updateState: () => UpdateState = () => ({ status: "unsupported" });
 
 let mainWindow: BrowserWindow | null = null;
+// Global shortcuts and commands from outside (hotkeys.ts); set up once the app is ready.
+let hotkeys: Hotkeys | null = null;
 // Tray icon; with `closeToTray` the window's close button only hides the window. Quitting then goes through the tray's menu.
 let tray: Tray | null = null;
 let closeToTray = loadConfig(app.getPath("userData")).closeToTray === true;
@@ -101,7 +105,9 @@ const isClientFrame = (event: IpcMainEvent | IpcMainInvokeEvent): boolean => {
 };
 
 function createWindow(splash: Splash | null = null): BrowserWindow {
-  const info: DesktopInfo = { version: app.getVersion(), electron: process.versions.electron ?? "", chrome: process.versions.chrome ?? "", os, directoryUrl, materials, nativeScreenAudio: helperPath() !== null, systemWatch: systemWatchPath() !== null, gameDetection: systemWatchPath() !== null, appearance: look, frame: { maximized: false, focused: true, fullscreen: false }, tray: tray ? { closeToTray } : null, autostart: autostartSupported() ? { enabled: autostartEnabled(), background: autostartBackground } : null, update: updateState() };
+  const info: DesktopInfo = { version: app.getVersion(), electron: process.versions.electron ?? "", chrome: process.versions.chrome ?? "", os, directoryUrl, materials, nativeScreenAudio: helperPath() !== null, systemWatch: systemWatchPath() !== null, gameDetection: systemWatchPath() !== null, appearance: look, frame: { maximized: false, focused: true, fullscreen: false }, tray: tray ? { closeToTray } : null, autostart: autostartSupported() ? { enabled: autostartEnabled(), background: autostartBackground } : null,
+    // Global shortcuts everywhere; the push-to-talk key across the system only where the system watch helper runs (Windows).
+    hotkeys: { globalPtt: systemWatchPath() !== null, executable: app.isPackaged ? process.execPath : null }, update: updateState() };
   // The window reopens where it was closed, as long as that place still lies on a display (windowState.ts).
   const userData = app.getPath("userData");
   const state = restoreWindowState(loadConfig(userData).window, screen.getAllDisplays().map((d) => d.workArea));
@@ -159,6 +165,10 @@ else {
   const links = handleDeepLinks(() => mainWindow, isClientFrame);
   // A second start (the system opening a `squorli://` link while the app runs) hands its arguments over and quits.
   app.on("second-instance", (_event, argv) => {
+    // A command from outside (`squorli://control/<action>`, `--control=<action>`: a Stream Deck, G Hub, a macro) is carried
+    // out without bringing the window to the front; whoever pressed it is in a game or elsewhere (hotkeys.ts).
+    const control = findControl(argv);
+    if (control) { hotkeys?.control(control); return; }
     links.deliver(findDeepLink(argv));
     if (!mainWindow) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -185,7 +195,9 @@ else {
     // Game detection: the launchers' installed games, and the helper says when one of them is in front (gameWatch.ts).
     const games = handleGames(() => mainWindow, isClientFrame, systemWatch);
     handleDisplayMedia(session.defaultSession, isClientFrame, screenAudio, systemWatch, games);
-    app.on("before-quit", () => { quitting = true; screenAudio.stop(); playerAudio.stop(); systemWatch.stop(); });
+    // Global shortcuts, the push-to-talk key across the system, commands from outside (hotkeys.ts).
+    hotkeys = handleHotkeys(() => mainWindow, isClientFrame, systemWatch, app.isPackaged ? undefined : (text) => console.log(text));
+    app.on("before-quit", () => { quitting = true; screenAudio.stop(); playerAudio.stop(); systemWatch.stop(); hotkeys?.stop(); });
     ipcMain.handle(IPC.setAppearance, (event, next: unknown) => {
       if (!isClientFrame(event)) return look;
       appearance = normalizeAppearance(next, materials);

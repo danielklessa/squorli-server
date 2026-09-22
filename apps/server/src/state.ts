@@ -116,7 +116,8 @@ export async function loadState(db: Db, hub: Hub, userId: string): Promise<Serve
   const [settings, cats, chans, rs, mems, stations, actor] = await Promise.all([
     loadSettings(db), loadCategories(db), loadChannels(db), loadRoles(db), loadMembers(db, hub), loadRadioStations(db), actorOf(db, userId),
   ]);
-  return { settings, categories: cats, channels: chans, roles: rs, members: mems, radioStations: stations, myPermissions: actor?.permissions ?? 0 };
+  // importSources: what the import routes (routes/import.ts) can read a structure from; the client shows the admin tab only for these.
+  return { settings, categories: cats, channels: chans, roles: rs, members: mems, radioStations: stations, importSources: ["discord-template"], myPermissions: actor?.permissions ?? 0 };
 }
 
 export type StructurePart = "settings" | "categories" | "channels" | "roles" | "members" | "radioStations";

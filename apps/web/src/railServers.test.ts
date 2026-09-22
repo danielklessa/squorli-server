@@ -4,7 +4,7 @@ import { buildRailServers } from "./railServers";
 
 const srv = (host: string, lastSeenAt: string, displayName: string | null = null): AccountServer =>
   ({ host, name: `Name of ${host}`, displayName, lastSeenAt, verified: true, iconUpdatedAt: null, leaveRequestedAt: null });
-const base = { keyOf: (h: string) => h.toLowerCase(), iconOf: (s: AccountServer) => `icon:${s.host}`, subOf: (n: string) => `as ${n}` };
+const base = { keyOf: (h: string) => h.toLowerCase(), iconOf: (s: AccountServer) => `icon:${s.host}`, subOf: (n: string) => `as ${n}`, order: [] as string[] };
 
 describe("buildRailServers", () => {
   it("puts the home server first and does not repeat it", () => {
@@ -24,5 +24,11 @@ describe("buildRailServers", () => {
   it("appends added servers the account's list lacks, without an icon", () => {
     const list = buildRailServers({ ...base, home: null, accountServers: [srv("a.example", "2026-09-01T00:00:00.000Z")], localHosts: [{ host: "a.example", name: "A" }, { host: "local.example", name: null }, { host: "named.example", name: "Named" }] });
     expect(list.map((s) => [s.key, s.name, s.iconUrl])).toEqual([["a.example", "Name of a.example", "icon:a.example"], ["local.example", "local.example", null], ["named.example", "Named", null]]);
+  });
+
+  it("puts the servers the user arranged first, the home server among them, and the rest in the default order", () => {
+    const home = { key: "localhost:5173", host: "home.example", name: "Home", sub: null, iconUrl: null };
+    const list = buildRailServers({ ...base, home, order: ["old.example", "home.example"], accountServers: [srv("old.example", "2026-09-01T00:00:00.000Z"), srv("new.example", "2026-09-10T00:00:00.000Z")], localHosts: [{ host: "added.example", name: null }] });
+    expect(list.map((s) => s.host)).toEqual(["old.example", "home.example", "new.example", "added.example"]);
   });
 });

@@ -47,8 +47,36 @@ import { GameDetection, syncedHidden } from "./gameDetection";
 import { directoryGameLookup, presenceOf } from "./gamePresence";
 import { GameLibraryContext } from "./GameLine";
 import { t } from "./i18n";
-import { platform, type ScreenPick, type ScreenSource } from "./platform";
+import { platform, type ControlEvent, type HotkeyStatus, type ScreenPick, type ScreenSource } from "./platform";
 import { formatDeepLink } from "./platform/deepLink";
+import { isTypingTarget } from "./usePushToTalk";
+
+/**
+ * A command from outside the window (docs/features/hotkeys.md): a global shortcut, the push-to-talk key watched by the
+ * shell, or a `squorli://control/<action>` link from a Stream Deck or a macro. Mute and deafen follow the buttons' rules
+ * (voice/AGENTS.md); a short tone says what the command left behind, because whoever pressed it may not see the window.
+ * A push-to-talk press while this window has the focus and a text field is being typed in is left to the window's own
+ * listener, which ignores it (usePushToTalk.ts); a release always counts.
+ */
+function applyControl(client: VoiceClient, event: ControlEvent): void {
+  if (event.kind === "ptt") {
+    if (event.down && document.hasFocus() && isTypingTarget(document.activeElement)) return;
+    client.setPttHeld(event.down);
+    return;
+  }
+  const s = client.state;
+  if (s.status === "disconnected" || s.afkRoom) return;
+  const action = event.action;
+  if (action.startsWith("mic-")) {
+    const mute = action === "mic-off" || (action === "mic-toggle" && !s.micMuted);
+    if (mute !== s.micMuted) void client.setMuted(mute);
+    client.playFeedback(!mute);
+  } else {
+    const deafen = action === "deafen-on" || (action === "deafen-toggle" && !s.deafened);
+    if (deafen !== s.deafened) void client.setDeafened(deafen);
+    client.playFeedback(!deafen);
+  }
+}
 
 /**
  * Tells the desktop shell on which output device a kind of embedded player should play, by the device's label (ids differ
@@ -206,6 +234,18 @@ export function App() {
 
   useEffect(() => store.subscribe(setState), [store]);
   useEffect(() => client.subscribe(setVoice), [client]);
+  // Global shortcuts and the push-to-talk key across the system (desktop app, docs/features/hotkeys.md): the shell gets the
+  // bindings of this device and, while in a voice channel with push-to-talk, the key to watch; it answers what it could do.
+  const hotkeys = platform.hotkeys;
+  const [hotkeyStatus, setHotkeyStatus] = useState<HotkeyStatus | null>(null);
+  const watchedPttKey = voice.status !== "disconnected" && !voice.afkRoom && voiceSettings.mode === "ptt" ? voiceSettings.pttKey : null;
+  useEffect(() => {
+    if (!hotkeys) return;
+    let stale = false;
+    void hotkeys.set({ bindings: voiceSettings.hotkeys, pttKey: watchedPttKey }).then((status) => { if (!stale) setHotkeyStatus(status); }).catch(() => {});
+    return () => { stale = true; };
+  }, [hotkeys, voiceSettings.hotkeys, watchedPttKey]);
+  useEffect(() => hotkeys?.onControl((event) => applyControl(client, event)), [hotkeys, client]);
   // Cue settings reach the voice client from here, whether the user changed them or the directory account supplied them.
   useEffect(() => client.setSoundSettings(voiceSettings.sounds), [client, voiceSettings.sounds]);
   useEffect(() => client.setCueOutput(voiceSettings.outputDeviceId), [client, voiceSettings.outputDeviceId]);
@@ -494,6 +534,7 @@ export function App() {
     keyOf: (host) => store.hostFor(host),
     iconOf: (s) => (state.directoryUrl ? directoryServerIconUrl(state.directoryUrl, s.host, s.iconUpdatedAt) : null),
     subOf: (name) => t("app.asName", { name }),
+    order: voiceSettings.serverOrder,
   });
   const showRail = !!state.directoryUrl || homeless || mobile;
   const addServer = async (initial = "") => {
@@ -537,6 +578,7 @@ export function App() {
         onSelect={(key, host) => { setMobileContent(false); setVoicePreview(null); if (key === state.homeHost) { store.openServer(homeDirHost); } else store.openServer(host); setStageOpen(key === voiceHost && stageOpen); }}
         onDiscover={state.directoryUrl ? () => setShowBrowser(true) : null} onLeave={(host, name) => { void leaveServer(host, name); }}
         onMute={(key, muted) => { void store.connection(key)?.setServerMuted(muted).catch(() => {}); }}
+        onReorder={(hosts) => { saveVoiceSettings({ ...loadVoiceSettings(), serverOrder: hosts }); }}
         home={homeAvailable ? { open: homeOpen, badge: homeBadge, onToggle: () => { setMobileContent(false); store.openHome(!homeOpen); } } : null} />}
       {showBrowser && state.directoryUrl && <ServerBrowser directoryUrl={state.directoryUrl} currentHost={homeless ? active?.serverDomain ?? null : home?.serverDomain ?? null} onClose={() => setShowBrowser(false)}
         onOpen={homeless ? (host) => { setShowBrowser(false); setStageOpen(false); void store.addServer(host); } : null} />}
@@ -616,7 +658,7 @@ export function App() {
       )}
       {settingsTab && (homeless || (active?.me && conn)) && (
         <SettingsDialog api={active?.me && conn ? conn.api : null} me={active?.me ?? null} publicKey={state.identity?.publicKey ?? null} displayName={me?.displayName ?? active?.me?.displayName ?? state.directoryAccount?.displayName ?? "…"} avatarUrl={myAvatarUrl} directoryUrl={state.directoryUrl} directoryAccount={state.directoryAccount}
-          serverDomain={active?.serverDomain ?? null} clientVersion={platform.app?.version ?? home?.serverVersion ?? null} syncError={state.settingsSyncError} sealed={state.settingsSealed} client={client} voice={voice} games={games} initialTab={settingsTab}
+          serverDomain={active?.serverDomain ?? null} clientVersion={platform.app?.version ?? home?.serverVersion ?? null} syncError={state.settingsSyncError} sealed={state.settingsSealed} client={client} voice={voice} games={games} hotkeyStatus={hotkeyStatus} initialTab={settingsTab}
           onSaveServerName={(n) => store.setServerDisplayName(n)} onSaveGlobalName={(n) => store.setDirectoryName(null, n)} onSetAvatar={state.directoryAccount && state.directoryAvatars ? (image) => store.setAvatar(image) : null} onSetLocale={(pref) => store.setLocale(pref)} localePending={state.localeReloadPending}
           onCapturingKey={setCapturingPttKey} onClose={() => setSettingsTab(null)}
           onLogout={() => { setSettingsTab(null); void client.leave(); store.logout(); }}

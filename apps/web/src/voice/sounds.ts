@@ -46,6 +46,16 @@ export const CUE_TONES: Record<SoundCue, readonly Tone[]> = {
   ],
 };
 
+/**
+ * Confirmation of a global shortcut or a command from outside the window (docs/features/hotkeys.md): the state it left
+ * behind, `on` rising and `off` falling, shorter and quieter than the cues. Not a cue of the settings: it follows the common
+ * volume only, because whoever pressed the key wants to know what it did, deafened or not.
+ */
+export const FEEDBACK_TONES: { on: readonly Tone[]; off: readonly Tone[] } = {
+  on: [{ freq: A5, start: 0, dur: 0.05, type: "square", gain: 0.1 }, { freq: E6, start: 0.06, dur: 0.09, type: "square", gain: 0.1 }],
+  off: [{ freq: E6, start: 0, dur: 0.05, type: "square", gain: 0.1 }, { freq: A5, start: 0.06, dur: 0.11, type: "square", gain: 0.1 }],
+};
+
 /** On/off per cue plus one common volume; part of the per-device voice settings and, with an account, stored in the directory (protocol schema). */
 export type SoundSettings = Omit<ProtocolSoundSettings, "message"> & { message: boolean };
 
@@ -82,6 +92,11 @@ export function shouldPlayCue(cue: SoundCue, settings: SoundSettings, ctx: { dea
  * The context is shared with the microphone gate, which does not use its destination, so the cues are the only output.
  */
 export function playCue(ctx: AudioContext, cue: SoundCue, volume: number): void {
+  playTones(ctx, CUE_TONES[cue], volume);
+}
+
+/** Play a sequence of tones (a cue, or the feedback of a command) on an existing AudioContext. Never throws. */
+export function playTones(ctx: AudioContext, tones: readonly Tone[], volume: number): void {
   try {
     if (ctx.state === "closed") return;
     if (contextNeedsResume(ctx.state)) void ctx.resume().catch(() => {}); // also iOS's "interrupted" (gate.ts)
@@ -89,7 +104,7 @@ export function playCue(ctx: AudioContext, cue: SoundCue, volume: number): void 
     master.gain.value = Math.min(1, Math.max(0, volume));
     master.connect(ctx.destination);
     const t0 = ctx.currentTime + 0.01;
-    for (const tone of CUE_TONES[cue]) {
+    for (const tone of tones) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = tone.type;
@@ -106,7 +121,7 @@ export function playCue(ctx: AudioContext, cue: SoundCue, volume: number): void 
       osc.onended = () => { try { osc.disconnect(); gain.disconnect(); } catch { /* already gone */ } };
     }
     // Release the master node once the longest tone has finished.
-    const total = Math.max(...CUE_TONES[cue].map((t) => t.start + t.dur)) + 0.1;
+    const total = Math.max(0, ...tones.map((t) => t.start + t.dur)) + 0.1;
     setTimeout(() => { try { master.disconnect(); } catch { /* already gone */ } }, Math.ceil(total * 1000) + 50);
   } catch { /* no Web Audio (test environment, blocked context): stay silent */ }
 }

@@ -139,7 +139,13 @@ docker compose --env-file ../.env --profile bundled up -d --build   # or the ext
 
 ## License
 
-Squorli Server is licensed under the [Apache License, Version 2.0](LICENSE) (Copyright 2026 Daniel Klessa, see [NOTICE](NOTICE)). Contributions are accepted under the same license. The Squorli Directory is a separately operated service and is not part of this repository.## Production (standard: published Docker image, no Git clone)
+Squorli Server is licensed under the [Apache License, Version 2.0](LICENSE) (Copyright 2026 Daniel Klessa, see [NOTICE](NOTICE)). Contributions are accepted under the same license. The Squorli Directory is a separately operated service and is not part of this repository.
+
+## Legal / Impressum
+
+The legal notice (Impressum) and the privacy policy for this repository, its releases, the website and the Squorli Directory are published on the website: [Impressum](https://squorli.com/de/impressum/) / [Legal notice](https://squorli.com/en/impressum/) and [Datenschutzerklärung](https://squorli.com/de/datenschutz/) / [Privacy policy](https://squorli.com/en/datenschutz/). Their source is the Markdown under `legal/` in the website repository; this repository carries no copy.
+
+If you run your own Squorli Server, you are the operator of that instance: publish your own legal notice and privacy policy for it. The privacy policy above describes what the software sends to the Directory and to squorli.com (update checks of the desktop app), which you can reuse for that.## Production (standard: published Docker image, no Git clone)
 
 Requirements: Docker Engine with the Compose plugin, curl and OpenSSL on a Linux host. You do not need Git, Node.js or a local application build. Point your domain to the host and open 80/tcp, 443/tcp, 7881/tcp and 7882/udp. Follow the complete guide in [English](https://squorli.com/en/docs/install/) or [German](https://squorli.com/de/docs/install/).
 

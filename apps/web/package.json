@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     "./platform/bridge": "./src/platform/bridge.ts",
-    "./platform/deepLink": "./src/platform/deepLink.ts"
+    "./platform/deepLink": "./src/platform/deepLink.ts",
+    "./platform/hotkeys": "./src/platform/hotkeys.ts"
   },
   "scripts": {
     "dev": "vite",

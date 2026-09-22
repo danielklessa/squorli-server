@@ -60,6 +60,11 @@ export function desktopPlatform(bridge: DesktopBridge): Platform {
     games: info.gameDetection === true && typeof bridge.scanGames === "function" ? {
       scan: () => bridge.scanGames(), setWatch: (settings) => bridge.setGameWatch(settings), pickProgram: () => bridge.pickGameProgram(), subscribe: (cb) => bridge.onRunningGame(cb),
     } : null,
+    // An app older than this client has no such member: then there are no global shortcuts, as before.
+    hotkeys: info.hotkeys && typeof bridge.setHotkeys === "function" ? {
+      globalPtt: info.hotkeys.globalPtt, executable: info.hotkeys.executable,
+      set: (request) => bridge.setHotkeys(request), suspend: (on) => bridge.suspendHotkeys(on), onControl: (cb) => bridge.onControl(cb),
+    } : null,
     // app:// is a secure scheme; only the development window (Vite over http) may load http resources.
     media: { mobile: false, blocksInsecureMedia: window.location.protocol !== "http:", screenSharePublishOverrides: () => (pickedCodec === "vp8" ? null : { videoCodec: pickedCodec }), takeScreenAudio: () => audio.take(), stopScreenAudio: () => audio.stop(),
       // An app older than this client has no such member.

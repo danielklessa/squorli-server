@@ -156,7 +156,14 @@ h4 { font-size: 0.875rem; font-weight: 600; color: var(--muted); padding: 0 0.5r
 .rail { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 1.25rem 0; background: var(--bg); overflow-y: auto; min-height: 0; }
 .rail-item { position: relative; width: 3rem; height: 3rem; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--bg2); color: var(--text); text-decoration: none; transition: border-radius 0.12s, background 0.12s; flex: none; }
 /* Clip the icon itself, not the entry: the voice/unread/badge markers overhang the circle and must stay visible. */
-.rail-item img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.rail-item img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; -webkit-user-drag: none; }
+/* Sorting the rail by drag and drop (22 September 2026): the dragged entry fades, a brand-colored line marks where it lands. */
+.rail.reordering { cursor: grabbing; user-select: none; }
+.rail.reordering .rail-item { cursor: grabbing; }
+.rail-item.drop-source > img, .rail-item.drop-source > .rail-initials { opacity: 0.35; }
+.rail-item.drop-before::before, .rail-item.drop-after::before { content: ""; position: absolute; left: -0.25rem; right: -0.25rem; height: 3px; border-radius: 2px; background: var(--brand); pointer-events: none; }
+.rail-item.drop-before::before { top: calc(-0.5rem - 1.5px); }
+.rail-item.drop-after::before { bottom: calc(-0.5rem - 1.5px); }
 .rail-item:hover, .rail-item.current { border-radius: 14px; background: var(--bg4); }
 .rail-item.current { outline: 2px solid var(--brand); outline-offset: 2px; }
 .rail-initials { font-weight: 700; font-size: 0.95rem; letter-spacing: 0.02em; }
@@ -729,11 +736,9 @@ button.icon.on { color: var(--brand); }
 .user-avatar--large { width: 5rem; height: 5rem; font-size: 1.5rem; }
 .avatar-presence { position: absolute; right: -1px; bottom: -1px; width: 0.75rem; height: 0.75rem; border: 3px solid var(--bg2); border-radius: 50%; background: var(--muted); }
 .avatar-presence.on { background: var(--ok); }
-/* Absent (AFK): amber crescent, the shape carries the state as well as the color. */
-.avatar-presence.afk { background: var(--warn); width: 1.125rem; height: 1.125rem; border-width: 2px; right: -4px; bottom: -4px; }
-.user-avatar--small .avatar-presence.afk { width: 0.875rem; height: 0.875rem; right: -3px; bottom: -3px; }
+/* Absent (AFK): an amber dot like the green one; the row's moon icon carries the shape. */
+.avatar-presence.afk { background: var(--warn); }
 .member-btn .ic.afk, .friend .ic.afk { color: var(--warn); font-size: 1.125rem; }
-.avatar-presence.afk::after { content: ""; position: absolute; top: -30%; left: -30%; width: 85%; height: 85%; border-radius: 50%; background: var(--bg2); }
 .voice-members .afk { color: var(--warn); }
 .dock-afk { display: flex; flex-direction: column; align-items: flex-start; gap: 0.375rem; }
 .avatar-presence.off::after { content: ""; position: absolute; inset: 2px; border-radius: inherit; background: var(--bg2); }
@@ -1050,3 +1055,23 @@ button.emoji-open[aria-expanded="true"] { color: var(--brand); }
 /* A surface of its own: on a see-through window bare text was hardly readable. It looks like a chat message under the pointer (user's wish, 20 September 2026): the hover surface (--bg2) on top of the main area's (--bg3); both follow the window's opacity. */
 .app-starting-card { display: flex; flex-direction: column; align-items: center; gap: 0.9rem; padding: 2rem 2.75rem; border-radius: var(--r-panel); background: linear-gradient(var(--bg2), var(--bg2)), var(--bg3); color: var(--muted); text-align: center; }
 .app-starting-card img { width: 6rem; height: 6rem; }
+
+/* Einstellungen > Tastenkuerzel (HotkeysTab.tsx, docs/features/hotkeys.md): one row per shortcut, the list of control links with a copy button each. */
+.hotkey-row { margin-top: 0; gap: 0.35rem; }
+.hotkey-row .row { margin-top: 0; }
+.hotkey-label { min-width: 11rem; }
+.hotkey-row .warn, .settings-body .small.warn { color: var(--warn); }
+.hotkey-links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.hotkey-links li { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.hotkey-links code, .hotkey-command { user-select: all; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 0.1rem 0.4rem; word-break: break-all; }
+
+/* Admin > Import (ImportTab.tsx): the plan of a Discord template, one fieldset per category, rows with icon, name and details */
+.import-steps { margin: 0; padding-left: 1.25rem; }
+.import-group { display: flex; flex-direction: column; gap: 0.35rem; }
+.import-group > legend .check { display: inline-flex; }
+.import-item { min-width: 0; }
+.import-item .import-name { flex: none; max-width: 45%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* the name wins over its details */
+.import-item .import-meta { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-role-swatch { width: 0.75rem; height: 0.75rem; border-radius: 50%; flex: none; }
+.import-dropped { margin: 0; padding-left: 1.25rem; }
+.row > input.grow { flex: 1; min-width: 12rem; }

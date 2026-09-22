@@ -202,6 +202,46 @@ check("create category + channels", sc === 200 && st === 200 && sv === 200);
 const [sr, modRole] = await api("POST", "/api/roles", { name: "Smoke-Mod", permissions: P.KICK_MEMBERS | P.MANAGE_MESSAGES, color: "#3498db" }, owner.token);
 check("create role", sr === 200 && modRole.position === 1);
 
+// ---------- Import of a Discord template (routes/import.ts, docs/features/import.md). The preview of a real, public
+// template of Discord's needs the internet; when Discord does not answer (502/429) those checks are skipped, not failed.
+// SMOKE_TEMPLATE = another template link to run them against.
+const [, stImp0] = await api("GET", "/api/state", undefined, owner.token);
+check("import: the state names the source", Array.isArray(stImp0.importSources) && stImp0.importSources.includes("discord-template"));
+const [sImpBad, impBad] = await api("POST", "/api/import/discord/preview", { code: "https://discord.gg/nope" }, owner.token);
+check("import: a link that is no template link -> 400 bad_code", sImpBad === 400 && impBad.error === "bad_code", `${sImpBad} ${impBad.error ?? ""}`);
+const TEMPLATE = process.env.SMOKE_TEMPLATE ?? "https://discord.new/JfppTU3CNvuD";
+const [sImpPrev, plan] = await api("POST", "/api/import/discord/preview", { code: TEMPLATE }, owner.token);
+if (sImpPrev === 502 || sImpPrev === 429) console.log(`skip import: Discord answered ${sImpPrev} (${plan.error ?? ""})`);
+else {
+  const [sUnknown, unknown] = await api("POST", "/api/import/discord/preview", { code: "https://discord.new/nopenopenope" }, owner.token);
+  check("import: an unknown template -> 404 unknown_template", sUnknown === 404 && unknown.error === "unknown_template", `${sUnknown} ${unknown.error ?? ""}`);
+  check("import: preview of a real template", sImpPrev === 200 && plan.categories?.length > 0 && plan.channels?.length > 0 && plan.roles?.length > 0
+    && plan.dropped?.some((d) => d.reason === "default_role"), `${sImpPrev} ${plan.categories?.length} categories ${plan.channels?.length} channels ${plan.roles?.length} roles`);
+  const cat0 = plan.categories[0];
+  const chans0 = plan.channels.filter((c) => c.categoryKey === cat0.key && !c.exists);
+  const roles0 = plan.roles.filter((r) => !r.exists && !r.blocked).slice(0, 2);
+  const pick = { code: TEMPLATE, categories: [cat0.key], channels: chans0.map((c) => c.key), roles: roles0.map((r) => r.key) };
+  const [sImp, imp] = await api("POST", "/api/import/discord", pick, owner.token);
+  const [, stImp] = await api("GET", "/api/state", undefined, owner.token);
+  const impCat = stImp.categories.find((c) => c.name === cat0.name);
+  check("import: creates the chosen category, its channels and roles", sImp === 200 && imp.categories === 1 && imp.channels === chans0.length && imp.roles === roles0.length && !!impCat
+    && chans0.every((c) => stImp.channels.some((x) => x.name === c.name && x.kind === c.kind && x.categoryId === impCat?.id && x.topic === c.topic && x.audioBitrate === c.audioBitrate))
+    && roles0.every((r) => stImp.roles.some((x) => x.name === r.name && x.permissions === r.permissions && x.color === r.color)), `${sImp} ${JSON.stringify(imp)}`);
+  const newPositions = roles0.map((r) => stImp.roles.find((x) => x.name === r.name)?.position);
+  check("import: new roles sit below the existing ones, in the template's order", stImp.roles.find((r) => r.id === modRole.id)?.position === 1 + roles0.length
+    && newPositions.every((p) => p >= 1 && p <= roles0.length) && newPositions[0] > newPositions[1], `mod ${stImp.roles.find((r) => r.id === modRole.id)?.position} new ${newPositions.join(",")}`);
+  const [, plan2] = await api("POST", "/api/import/discord/preview", { code: TEMPLATE }, owner.token);
+  check("import: a second preview marks what exists now", plan2.categories.find((c) => c.key === cat0.key)?.existingId === impCat?.id
+    && chans0.every((c) => plan2.channels.find((x) => x.key === c.key)?.exists === true) && roles0.every((r) => plan2.roles.find((x) => x.key === r.key)?.exists === true));
+  const [sImp2, imp2] = await api("POST", "/api/import/discord", pick, owner.token);
+  check("import: the same import again creates nothing", sImp2 === 200 && imp2.categories === 0 && imp2.channels === 0 && imp2.roles === 0, `${sImp2} ${JSON.stringify(imp2)}`);
+  for (const c of stImp.channels.filter((x) => x.categoryId === impCat?.id)) await api("DELETE", `/api/channels/${c.id}`, undefined, owner.token);
+  if (impCat) await api("DELETE", `/api/categories/${impCat.id}`, undefined, owner.token);
+  for (const r of roles0) { const x = stImp.roles.find((y) => y.name === r.name); if (x) await api("DELETE", `/api/roles/${x.id}`, undefined, owner.token); }
+  const [, stImpClean] = await api("GET", "/api/state", undefined, owner.token);
+  check("import: cleaned up", !stImpClean.categories.some((c) => c.name === cat0.name) && !roles0.some((r) => stImpClean.roles.some((x) => x.name === r.name)));
+}
+
 // ---------- Invites
 const [si, invite] = await api("POST", "/api/invites", { maxUses: 2 }, owner.token);
 check("create invite", si === 200 && /^[A-Za-z0-9_-]{6,32}$/.test(invite.code));
@@ -217,6 +257,8 @@ const B = await login(keyB, invite.code);
 check("join with invite", B.status === 200);
 const B2 = await login(keyB); // Member: no longer needs an invite
 check("member re-login without invite", B2.status === 200);
+const [sImpB] = await api("POST", "/api/import/discord/preview", { code: "https://discord.new/abc" }, B.token);
+check("import: needs the rights to manage channels and roles", sImpB === 403, `${sImpB}`);
 
 // ---------- Account required (admin): without a handle at the directory, 403 account_required; without a directory the option has no effect.
 const [sra] = await api("PATCH", "/api/settings", { requireAccount: true }, owner.token);

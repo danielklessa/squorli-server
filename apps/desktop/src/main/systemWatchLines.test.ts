@@ -36,3 +36,10 @@ describe("SystemWatchLines", () => {
     expect(lines.push("input\n")).toEqual([{ type: "input" }]);
   });
 });
+
+describe("SystemWatchLines key lines", () => {
+  it("reads a watched key's press and release as hex scan codes", () => {
+    const lines = new SystemWatchLines();
+    expect(lines.push("key 39 1\r\nkey 11d 0\r\nkey zz 1\r\nkey 39\r\nkey 39 2\r\n")).toEqual([{ type: "key", scan: 0x39, down: true }, { type: "key", scan: 0x11d, down: false }]);
+  });
+});

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import { BRIDGE_GLOBAL, INFO_ARGUMENT, IPC, type CustomProgram, type DesktopBridge, type DesktopInfo, type DetectedGame, type GameWatchSettings, type RunningGame, type AppearanceState, type ScreenAudioEvent, type ScreenPick, type ScreenPickRequest, type SystemActivityEvent, type UpdateState, type WindowAppearance, type WindowControl, type WindowFrameState, type BridgeLinkLookup } from "@squorli/web/platform/bridge";
+import { BRIDGE_GLOBAL, INFO_ARGUMENT, IPC, type ControlEvent, type CustomProgram, type DesktopBridge, type DesktopInfo, type DetectedGame, type GameWatchSettings, type HotkeyRequest, type HotkeyStatus, type RunningGame, type AppearanceState, type ScreenAudioEvent, type ScreenPick, type ScreenPickRequest, type SystemActivityEvent, type UpdateState, type WindowAppearance, type WindowControl, type WindowFrameState, type BridgeLinkLookup } from "@squorli/web/platform/bridge";
 
 /**
  * Preload script (sandboxed, context-isolated): the only thing the page gets from the shell is this bridge. Plain data in
@@ -38,6 +38,9 @@ const bridge: DesktopBridge = {
   setAutostartBackground: (on: boolean) => ipcRenderer.invoke(IPC.setAutostartBackground, on) as Promise<boolean>,
   clientReady: () => ipcRenderer.send(IPC.clientReady),
   setAttention: (count: number) => ipcRenderer.send(IPC.attention, count),
+  setHotkeys: (request: HotkeyRequest) => ipcRenderer.invoke(IPC.hotkeysSet, request) as Promise<HotkeyStatus>,
+  suspendHotkeys: (on: boolean) => ipcRenderer.send(IPC.hotkeysSuspend, on),
+  onControl: (cb) => subscribe<ControlEvent>(IPC.control, cb),
   onWindowFrame: (cb) => subscribe<WindowFrameState>(IPC.windowFrame, cb),
   onUpdateState: (cb) => subscribe<UpdateState>(IPC.updateState, cb),
   checkForUpdates: () => ipcRenderer.send(IPC.updateCheck),

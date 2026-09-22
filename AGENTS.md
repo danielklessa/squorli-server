@@ -41,6 +41,8 @@ Feature notes (dated entries: wishes, decisions, consequences, what was checked)
 | The web client on a phone's home screen: Squorli icons, the manifest route with "Squorli - <server name>", Apple tags | `docs/features/home-screen.md` |
 | Directory integration: M6 phases, second factor, e-mail, account page | `docs/features/directory.md` |
 | Desktop app (M4): decisions, phases, platform interface (`apps/web/src/platform/`), client without a home server, the Electron shell `apps/desktop/` | `docs/features/desktop.md` |
+| Import of a server structure from a Discord server template (Verwaltung > Import: the template link, a plan of categories, channels and roles, only adding, Discord's public template endpoint without any token) | `docs/features/import.md` |
+| Global hotkeys of the desktop app (mute, deafen; `globalShortcut`), the push-to-talk key across the system (the system watch helper watches that one key with Raw Input, Windows), control from outside for a Stream Deck or G Hub (`squorli://control/<action>`, `--control=<action>`), Einstellungen > Tastenkürzel | `docs/features/hotkeys.md` |
 
 History: `docs/VERIFIED-STATE.md` (what was run and checked per change, newest first; add an entry after every complete test run) and `docs/MILESTONE-LOG.md` (one row per change, newest first). Product plan: `docs/PLAN.md`. Developer guide: `docs/DEVELOPMENT.md`.
 

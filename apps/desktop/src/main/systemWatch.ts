@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { IPC, type SystemActivityEvent } from "@squorli/web/platform/bridge";
 import type { WindowInfo } from "./captureSource";
+import { keysLine } from "./keyCodes";
 import { SystemWatchLines } from "./systemWatchLines";
 import { nativeHelperPath } from "./windowAudio";
 
@@ -19,10 +20,16 @@ const MAX_RESTARTS = 5;
 const WINDOWS_TIMEOUT_MS = 700;
 
 export type SystemWatch = {
+  /** The helper exists on this system (built, Windows); without it nothing below does anything. */
+  available(): boolean;
   /** The helper's watch list (its stdin line, games/match.ts); kept and sent again when the helper had to be restarted. */
   setWatch(line: string): void;
   /** A watched program came to the front (its path), or null = it has ended. */
   onGame(cb: (path: string | null) => void): void;
+  /** The keys the helper watches across the system (scan codes, keyCodes.ts; the push-to-talk key, hotkeys.ts); empty = none. Kept over a restart. */
+  setKeys(scans: readonly number[]): void;
+  /** A watched key was pressed or released; null = the helper is gone (whatever was down is up). */
+  onKey(cb: (event: { scan: number; down: boolean } | null) => void): void;
   /** What the helper says about these windows (decimal handles); a window it does not answer for is missing, without the helper all are. Never rejects. */
   describeWindows(hwnds: readonly string[]): Promise<WindowInfo[]>;
   stop(): void;
@@ -31,7 +38,9 @@ export type SystemWatch = {
 export function startSystemWatch(getWindow: () => BrowserWindow | null, isClientFrame: (event: IpcMainEvent) => boolean): SystemWatch {
   let child: ChildProcess | null = null;
   let watch = "watch";
+  let keys = keysLine([]);
   let gameListener: (path: string | null) => void = () => {};
+  let keyListener: (event: { scan: number; down: boolean } | null) => void = () => {};
   let stopped = false;
   let restarts = 0;
   let display: boolean | null = null;
@@ -50,9 +59,11 @@ export function startSystemWatch(getWindow: () => BrowserWindow | null, isClient
     child = started;
     started.stdin?.on("error", () => {});
     started.stdin?.write(`${watch}\n`);
+    if (keys !== "keys") started.stdin?.write(`${keys}\n`);
     started.stdout?.on("data", (data: Buffer) => {
       for (const event of lines.push(decoder.write(data))) {
         if (event.type === "game") { gameListener(event.path); continue; }
+        if (event.type === "key") { keyListener(event); continue; }
         if (event.type === "window") { asked.get(event.request)?.found.push(event.info); continue; }
         if (event.type === "windows") { const open = asked.get(event.request); open?.done(open.found); continue; }
         if (event.type === "display") display = event.required;
@@ -61,7 +72,7 @@ export function startSystemWatch(getWindow: () => BrowserWindow | null, isClient
     });
     started.on("error", () => {});
     started.on("exit", () => {
-      if (child === started) { child = null; gameListener(null); }
+      if (child === started) { child = null; gameListener(null); keyListener(null); }
       if (stopped || restarts >= MAX_RESTARTS) return;
       restarts++;
       setTimeout(run, RESTART_MS);
@@ -70,8 +81,11 @@ export function startSystemWatch(getWindow: () => BrowserWindow | null, isClient
   run();
 
   return {
+    available: () => systemWatchPath() !== null,
     setWatch: (line) => { watch = line; child?.stdin?.write(`${line}\n`); },
     onGame: (cb) => { gameListener = cb; },
+    setKeys: (scans) => { keys = keysLine(scans); child?.stdin?.write(`${keys}\n`); },
+    onKey: (cb) => { keyListener = cb; },
     describeWindows: (hwnds) => new Promise((resolve) => {
       const stdin = child?.stdin;
       const ids = hwnds.filter((hwnd) => /^\d{1,20}$/.test(hwnd));

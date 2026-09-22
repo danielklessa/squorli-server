@@ -10,7 +10,7 @@ type Props = {
   src?: string | null | undefined;
   size?: "small" | "medium" | "large";
   online?: boolean;
-  /** Online but absent (AFK detection): an amber crescent instead of the green dot. */
+  /** Online but absent (AFK detection): an amber dot instead of the green one. */
   afk?: boolean;
 };
 

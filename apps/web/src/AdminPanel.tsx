@@ -5,10 +5,11 @@ import { askConfirm } from "./dialogs";
 import { roleOrder } from "./roleOrder";
 import { ChannelsTab } from "./ChannelsTab";
 import { RadioTab } from "./RadioTab";
+import { ImportTab } from "./ImportTab";
 import { Icon } from "./Icon";
 import { fmtDateTime, t } from "./i18n";
 
-type Tab = "server" | "channels" | "radio" | "roles" | "invites" | "bans";
+type Tab = "server" | "channels" | "radio" | "roles" | "invites" | "bans" | "import";
 
 /** Admin area: server, categories/channels, radio stations, roles, invites, bans. Changes come back via the structure event. */
 export function AdminPanel({ api, server, myUserId, directoryUrl, onClose }: { api: ServerApi; server: ServerState; myUserId: string; directoryUrl: string | null; onClose: () => void }) {
@@ -22,6 +23,8 @@ export function AdminPanel({ api, server, myUserId, directoryUrl, onClose }: { a
     { id: "roles", label: t("admin.tab.roles"), icon: "shield", ok: hasPermission(p, Permission.MANAGE_ROLES) },
     { id: "invites", label: t("admin.tab.invites"), icon: "link", ok: hasPermission(p, Permission.CREATE_INVITES) },
     { id: "bans", label: t("admin.tab.bans"), icon: "ban", ok: hasPermission(p, Permission.BAN_MEMBERS) },
+    // Import of a Discord template: creates channels and roles, so both rights; only against a server that offers the source.
+    { id: "import", label: t("admin.tab.import"), icon: "import", ok: hasPermission(p, Permission.MANAGE_CHANNELS) && hasPermission(p, Permission.MANAGE_ROLES) && (server.importSources?.includes("discord-template") ?? false) },
   ];
   const tabs = allTabs.filter((t) => t.ok);
   const [tab, setTab] = useState<Tab>(tabs[0]?.id ?? "invites");
@@ -48,6 +51,7 @@ export function AdminPanel({ api, server, myUserId, directoryUrl, onClose }: { a
             {tab === "roles" && <RolesTab api={api} server={server} myUserId={myUserId} run={run} />}
             {tab === "invites" && <InvitesTab api={api} run={run} canManage={hasPermission(p, Permission.MANAGE_SERVER)} />}
             {tab === "bans" && <BansTab api={api} run={run} />}
+            {tab === "import" && <ImportTab api={api} server={server} run={run} />}
           </div>
         </div>
       </div>

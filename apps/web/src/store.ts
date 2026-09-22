@@ -12,6 +12,7 @@ import { DirectoryLink, type LinkStatus } from "./directoryLink";
 import { loadOrCreateIdentity, storeIdentity, type Identity } from "./identity";
 import { ServerConnection, type ServerConnState } from "./serverConnection";
 import { applyAccountSettings, sameAccountSettings, sameHiddenGames, toAccountSettings } from "./accountSettings";
+import { sameServerOrder } from "./serverOrder";
 import { seesIncoming } from "./attention";
 import { accountLocalePreference, detectLocale, locale, localePreference, markAccountLocalePreference, storeLocalePreference, t, type LocalePreference } from "./i18n";
 import { loadVoiceSettings, sameSoundSettings, saveVoiceSettings, subscribeVoiceSettings } from "./voice/settings";
@@ -157,6 +158,8 @@ export class Store {
   /** Hide list of the game display: as the account holds it, and as this device has it (App.tsx; null = this client keeps none, a browser, and passes the account's on). */
   private accountHidden: string[] | null = null;
   private localHidden: string[] | null = null;
+  /** The server rail's order as the account's sealed blob has it (null = it says nothing); like the hide list it never travels in the open. */
+  private accountOrder: string[] | null = null;
   private settingsKey: { publicKey: string; key: Promise<CryptoKey> } | null = null;
   private settingsPushTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -664,7 +667,7 @@ export class Store {
     const id = this.state.identity; const url = this.state.directoryUrl;
     if (!id || !url || !this.state.directoryAccount) {
       this.accountSettings = null;
-      this.accountSealed = false; this.settingsLoaded = false; this.pushWanted = false; this.accountHidden = null;
+      this.accountSealed = false; this.settingsLoaded = false; this.pushWanted = false; this.accountHidden = null; this.accountOrder = null;
       if (this.settingsPushTimer) { clearTimeout(this.settingsPushTimer); this.settingsPushTimer = null; }
       this.set({ accountServers: null, settingsSealed: false, accountHiddenGames: null });
       return;
@@ -697,16 +700,16 @@ export class Store {
   private async adoptAccountSettings(status: AccountStatus): Promise<void> {
     const id = this.state.identity;
     let remote = this.settingsSupported ? status.settings : null;
-    let sealed = false; let hidden: string[] | null = null;
+    let sealed = false; let hidden: string[] | null = null; let order: string[] | null = null;
     const blob = this.sealedSupported ? status.settingsSealed : null;
     if (id && blob) {
       const content = await this.settingsKeyOf(id).then((key) => openSettings(key, id.publicKey, blob), () => null);
       if (this.state.identity !== id) return;
       // A blob this key does not open counts as none: the device's settings make a new one.
-      if (content) { remote = content.settings; hidden = content.hiddenGames ?? null; sealed = true; }
+      if (content) { remote = content.settings; hidden = content.hiddenGames ?? null; order = content.serverOrder ?? null; sealed = true; }
     }
     const first = !this.settingsLoaded;
-    this.accountSealed = sealed; this.accountHidden = hidden; this.settingsLoaded = true;
+    this.accountSealed = sealed; this.accountHidden = hidden; this.accountOrder = order; this.settingsLoaded = true;
     // A change the user just made here is newer than what the status says; the pending push brings the account in step.
     if (this.settingsPushTimer || this.pushWanted) {
       // The hide list too, with one exception: a push that waited for this first status knows nothing of the account's list
@@ -719,7 +722,9 @@ export class Store {
     // The device's list is merged with the account's by the game detection; until App.tsx reports the result, the account's goes out.
     if (hidden && !sameHiddenGames(this.localHidden, hidden)) this.localHidden = null;
     if (sealed !== this.state.settingsSealed || (hidden === null) !== (this.state.accountHiddenGames === null) || !sameHiddenGames(hidden, this.state.accountHiddenGames)) this.set({ settingsSealed: sealed, accountHiddenGames: hidden });
-    const local = loadVoiceSettings();
+    let local = loadVoiceSettings();
+    // The server rail's order from the blob: the account's wins on this device (a device that reordered just now is the pending-push case above).
+    if (order && !sameServerOrder(order, local.serverOrder)) { local = { ...local, serverOrder: order }; saveVoiceSettings(local, "directory"); }
     if (!remote) {
       // Nothing stored yet (or an older directory): cue settings stored by an older client still win, the rest is seeded from this device.
       const sounds = status.soundSettings ? normalizeSoundSettings({ ...status.soundSettings, message: status.soundSettings.message ?? local.sounds.message }) : null;
@@ -730,8 +735,8 @@ export class Store {
     }
     this.accountSettings = remote;
     if (!sameAccountSettings(toAccountSettings(local, remote.locale), remote, true)) saveVoiceSettings(applyAccountSettings(local, remote), "directory");
-    // Settings still in the open, or a hide list the account lacks: the push seals them.
-    if (this.sealedSupported && (!sealed || !sameHiddenGames(this.hiddenForAccount(), hidden))) this.scheduleSettingsPush(0);
+    // Settings still in the open, or a hide list or a server order the account lacks: the push seals them.
+    if (this.sealedSupported && (!sealed || !sameHiddenGames(this.hiddenForAccount(), hidden) || !sameServerOrder(order ?? [], local.serverOrder))) this.scheduleSettingsPush(0);
     // Language: a choice made on this device since it was last in step with the account (login footer) wins and is pushed;
     // otherwise the account's applies, with a reload only when the texts actually change.
     const pref = localePreference(); const synced = accountLocalePreference();
@@ -769,12 +774,12 @@ export class Store {
     const next = this.localAccountSettings(); const known = this.accountSettings;
     try {
       if (this.sealedSupported) {
-        const hidden = this.hiddenForAccount();
-        if (this.accountSealed && known && sameAccountSettings(known, next) && sameHiddenGames(hidden, this.accountHidden)) return;
-        const blob = await sealSettings(await this.settingsKeyOf(id), id.publicKey, { settings: next, ...(hidden ? { hiddenGames: hidden } : {}) });
+        const hidden = this.hiddenForAccount(); const order = loadVoiceSettings().serverOrder;
+        if (this.accountSealed && known && sameAccountSettings(known, next) && sameHiddenGames(hidden, this.accountHidden) && sameServerOrder(order, this.accountOrder ?? [])) return;
+        const blob = await sealSettings(await this.settingsKeyOf(id), id.publicKey, { settings: next, ...(hidden ? { hiddenGames: hidden } : {}), ...(order.length ? { serverOrder: order } : {}) });
         await api.directorySetSealedSettings(url, id, blob);
         markAccountLocalePreference(next.locale);
-        this.accountSealed = true; this.accountHidden = hidden;
+        this.accountSealed = true; this.accountHidden = hidden; this.accountOrder = order;
         this.set({ settingsSealed: true, accountHiddenGames: hidden });
       } else if (this.settingsSupported) {
         if (known && sameAccountSettings(known, next)) return;

@@ -5,7 +5,10 @@
  * push user changes to the directory and apply the account's settings without echoing them back.
  */
 import type { SoundSettings as ProtocolSoundSettings } from "@squorli/protocol";
+import type { HotkeyBindings } from "../platform/bridge";
+import { NO_HOTKEYS, normalizeHotkeys } from "../platform/hotkeys";
 import { detectMobile } from "../platform/mobile";
+import { normalizeServerOrder } from "../serverOrder";
 import { DEFAULT_MIC_BOOST, normalizeMicBoost, type MicBoostSettings } from "./micBoost";
 import { DEFAULT_SOUND_SETTINGS, normalizeSoundSettings, type SoundSettings } from "./sounds";
 
@@ -44,6 +47,14 @@ export type VoiceSettings = {
    * default; `servers` = show it to the members of my chat servers too. Follows the directory account.
    */
   games: GameDisplaySettings;
+  /** The server rail as the user arranged it (serverOrder.ts): directory hosts, first at the top. Follows the account inside the sealed settings only. */
+  serverOrder: string[];
+  /**
+   * Global shortcuts of the desktop app (platform/hotkeys.ts, docs/features/hotkeys.md). Per device like the microphone boost
+   * and NOT part of the directory account: a key combination that is free on this computer may be taken on another, and
+   * a Stream Deck's configuration lives on one computer too.
+   */
+  hotkeys: HotkeyBindings;
   /** The defaults for a phone or tablet were applied once (`withDeviceDefaults`); what the user chooses afterwards stays. */
   mobileDefaults: boolean;
 };
@@ -76,6 +87,8 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   sounds: { ...DEFAULT_SOUND_SETTINGS },
   featureSelfInSpeakerView: true,
   games: { ...DEFAULT_GAME_DISPLAY },
+  serverOrder: [],
+  hotkeys: { ...NO_HOTKEYS },
   mobileDefaults: false,
 };
 
@@ -96,7 +109,7 @@ function readStored(): VoiceSettings {
     if (!raw) return withDeviceDefaults({ ...DEFAULT_VOICE_SETTINGS }, detectMobile());
     const stored = JSON.parse(raw) as Partial<VoiceSettings>;
     // `sounds` is nested, so it needs its own merge: settings stored before the cues existed have no such field.
-    return withDeviceDefaults({ ...DEFAULT_VOICE_SETTINGS, ...stored, sounds: normalizeSoundSettings(stored.sounds), micBoost: normalizeMicBoost(stored.micBoost), games: normalizeGameDisplay(stored.games) }, detectMobile());
+    return withDeviceDefaults({ ...DEFAULT_VOICE_SETTINGS, ...stored, sounds: normalizeSoundSettings(stored.sounds), micBoost: normalizeMicBoost(stored.micBoost), games: normalizeGameDisplay(stored.games), serverOrder: normalizeServerOrder(stored.serverOrder), hotkeys: normalizeHotkeys(stored.hotkeys) }, detectMobile());
   } catch {
     return withDeviceDefaults({ ...DEFAULT_VOICE_SETTINGS }, detectMobile());
   }

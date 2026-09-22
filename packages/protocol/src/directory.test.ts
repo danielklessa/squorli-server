@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DirectoryGame, LibraryGameId, directoryGameIconUrl, directoryGameUrl, splitGameId } from "./directory";
 import {
   ACCOUNT_SETTINGS_MAX_LENGTH, AVATAR_MAX_BYTES, AccountSettings, AccountSettingsUpdateRequest, AvatarUpdateRequest, DirectoryAccount, DirectoryHealth, avatarDigest, directoryAvatarPayload, directoryAvatarUrl, sniffAvatarMime, DirectoryRegisterRequest, Handle, directoryRegisterMessage, parseAccountSettings,
-  HIDDEN_GAMES_MAX, HIDDEN_GAME_ID_MAX, SEALED_SETTINGS_MAX_LENGTH, SealedSettings, SoundSettings, deriveSettingsKey, openSettings, parseSealedSettings, sealSettings,
+  HIDDEN_GAMES_MAX, HIDDEN_GAME_ID_MAX, SERVER_HOST_MAX, SEALED_SETTINGS_MAX_LENGTH, SealedSettings, SoundSettings, deriveSettingsKey, openSettings, parseSealedSettings, sealSettings,
 } from "./directory";
 
 describe("registration", () => {
@@ -72,7 +72,7 @@ describe("account settings", () => {
 
 describe("sealed settings", () => {
   const seed = "11".repeat(32); const publicKey = "a".repeat(64);
-  const content = { settings: AccountSettings.parse({ locale: "de", stage: { featureSelf: false } }), hiddenGames: ["steam:730", "epic:Fortnite"] };
+  const content = { settings: AccountSettings.parse({ locale: "de", stage: { featureSelf: false } }), hiddenGames: ["steam:730", "epic:Fortnite"], serverOrder: ["b.example", "a.example"] };
   it("opens what it sealed, on every device that has the seed", async () => {
     const sealed = await sealSettings(await deriveSettingsKey(seed, publicKey), publicKey, content);
     expect(SealedSettings.safeParse(sealed).success).toBe(true);
@@ -108,6 +108,13 @@ describe("sealed settings", () => {
     expect((await openSettings(key, publicKey, odd))?.hiddenGames).toEqual(["steam:730"]);
     const broken = await sealSettings(key, publicKey, { settings: { ...content.settings, locale: "fr" as "de" } });
     expect(await openSettings(key, publicKey, broken)).toBeNull();
+  });
+  it("cleans the server order and says nothing when the blob has none", async () => {
+    const key = await deriveSettingsKey(seed, publicKey);
+    const odd = await sealSettings(key, publicKey, { settings: content.settings, serverOrder: ["B.example ", "", "b.example", "x".repeat(SERVER_HOST_MAX + 1), "a.example"] });
+    expect((await openSettings(key, publicKey, odd))?.serverOrder).toEqual(["b.example", "a.example"]);
+    const none = await sealSettings(key, publicKey, { settings: content.settings });
+    expect((await openSettings(key, publicKey, none))?.serverOrder).toBeUndefined();
   });
   it("reads the feature and the status field as absent from a directory that predates them", () => {
     const h = DirectoryHealth.parse({ ok: true, service: "directory", host: "id.example.org", features: { backup: true, totp: true, email: true }, time: new Date().toISOString() });

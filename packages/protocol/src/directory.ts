@@ -326,16 +326,21 @@ export function parseAccountSettings(json: string | null | undefined): AccountSe
 // settings any more: the directory deletes `settings` and `soundSettings` with the first sealed write and refuses the two older
 // actions with 409 `settings_sealed` from then on (clients that predate this keep their device's settings). A client that finds
 // plaintext settings only seals them at once. Because nobody else can read it, the content also carries what must not be stored
-// in the open: the games the user never wants shown (launcher ids only, never the path of an added program).
+// in the open: the games the user never wants shown (launcher ids only, never the path of an added program), and the order of
+// the server rail (22 September 2026: user settings are always stored encrypted, so it never goes into `AccountSettings`).
 export const SEALED_SETTINGS_MAX_LENGTH = 100_000;
 export const HIDDEN_GAMES_MAX = 1000;
 export const HIDDEN_GAME_ID_MAX = 64;
+export const SERVER_ORDER_MAX = 100;
+export const SERVER_HOST_MAX = 253;
 export const SealedSettings = z.object({ v: z.literal(1), iv: z.string().regex(/^[0-9a-f]{24}$/), ciphertext: z.string().min(24).regex(/^[A-Za-z0-9+/]+={0,2}$/) });
 export type SealedSettings = z.infer<typeof SealedSettings>;
 export const SealedSettingsContent = z.object({
   settings: AccountSettings,
   /** Games never to show to anybody, by the launcher's id. Left out = the account says nothing (the device's list stays). */
   hiddenGames: z.array(z.string().min(1).max(HIDDEN_GAME_ID_MAX)).max(HIDDEN_GAMES_MAX).optional(),
+  /** The server rail as the user arranged it: directory hosts, first at the top. Left out = the account says nothing (the device's order stays). */
+  serverOrder: z.array(z.string().min(1).max(SERVER_HOST_MAX)).max(SERVER_ORDER_MAX).optional(),
 });
 export type SealedSettingsContent = z.infer<typeof SealedSettingsContent>;
 export const SealedSettingsUpdateRequest = SignedActionRequest.extend({ sealed: z.string().min(2).max(SEALED_SETTINGS_MAX_LENGTH) });
@@ -368,16 +373,18 @@ export async function sealSettings(key: CryptoKey, publicKeyHex: string, content
   for (let i = 0; i < ct.length; i += 0x8000) binary += String.fromCharCode(...ct.subarray(i, i + 0x8000));
   return { v: 1, iv, ciphertext: btoa(binary) };
 }
-/** The content of a blob; null when the key is another one, the blob was changed or the content does not fit. A hidden id that does not fit is dropped alone. */
+/** The content of a blob; null when the key is another one, the blob was changed or the content does not fit. A hidden id or a host that does not fit is dropped alone. */
 export async function openSettings(key: CryptoKey, publicKeyHex: string, sealed: SealedSettings): Promise<SealedSettingsContent | null> {
   try {
     const pt = await globalThis.crypto.subtle.decrypt({ name: "AES-GCM", iv: hexToBytes(sealed.iv), additionalData: sealedAad(publicKeyHex) }, key, base64ToBytes(sealed.ciphertext));
-    const parsed = JSON.parse(new TextDecoder().decode(pt)) as { settings?: unknown; hiddenGames?: unknown };
+    const parsed = JSON.parse(new TextDecoder().decode(pt)) as { settings?: unknown; hiddenGames?: unknown; serverOrder?: unknown };
     const settings = AccountSettings.safeParse(parsed.settings);
     if (!settings.success) return null;
     const hiddenGames = Array.isArray(parsed.hiddenGames)
       ? [...new Set(parsed.hiddenGames.filter((id): id is string => typeof id === "string" && id.length > 0 && id.length <= HIDDEN_GAME_ID_MAX))].slice(0, HIDDEN_GAMES_MAX) : undefined;
-    return { settings: settings.data, ...(hiddenGames ? { hiddenGames } : {}) };
+    const serverOrder = Array.isArray(parsed.serverOrder)
+      ? [...new Set(parsed.serverOrder.filter((h): h is string => typeof h === "string").map((h) => h.trim().toLowerCase()).filter((h) => h.length > 0 && h.length <= SERVER_HOST_MAX))].slice(0, SERVER_ORDER_MAX) : undefined;
+    return { settings: settings.data, ...(hiddenGames ? { hiddenGames } : {}), ...(serverOrder ? { serverOrder } : {}) };
   } catch { return null; }
 }
 /** A chat server that has looked up the key (a sign-in there), with the display name that applies there (account page). `verified` = registered with the directory. */

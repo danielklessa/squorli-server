@@ -20,6 +20,7 @@ import { LivekitAdmin } from "./livekit/admin";
 import { registerLivekitRoutes } from "./livekit/routes";
 import { registerAttachmentRoutes } from "./routes/attachments";
 import { registerChannelRoutes } from "./routes/channels";
+import { registerImportRoutes } from "./routes/import";
 import { registerInviteRoutes } from "./routes/invites";
 import { registerMemberRoutes } from "./routes/members";
 import { loadMessages, registerMessageRoutes } from "./routes/messages";
@@ -187,6 +188,7 @@ async function main() {
   await registerRoleRoutes(app, db, hub, presence, lk);
   await registerMemberRoutes(app, db, hub, presence, lk);
   await registerInviteRoutes(app, db);
+  await registerImportRoutes(app, db, hub);
   // Link previews: looked up after a message is stored; the result goes out as the message itself, once more.
   const previews = new LinkPreviews(db, config, app.log, async (row) => {
     const [message] = await loadMessages(db, [row]);

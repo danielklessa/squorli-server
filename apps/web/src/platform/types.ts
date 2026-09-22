@@ -1,8 +1,8 @@
-import type { AppearanceState, CustomProgram, DetectedGame, GameWatchSettings, PlatformOs, RunningGame, ScreenPick, ScreenSource, SystemActivityEvent, UpdateState, WindowAppearance, WindowControl, WindowFrameState, WindowMaterial, BridgeLinkLookup } from "./bridge";
+import type { AppearanceState, ControlEvent, CustomProgram, DetectedGame, GameWatchSettings, HotkeyRequest, HotkeyStatus, PlatformOs, RunningGame, ScreenPick, ScreenSource, SystemActivityEvent, UpdateState, WindowAppearance, WindowControl, WindowFrameState, WindowMaterial, BridgeLinkLookup } from "./bridge";
 import type { DeepLink } from "./deepLink";
 
 export type { DeepLink } from "./deepLink";
-export type { AppearanceState, CustomProgram, DetectedGame, GameWatchSettings, PlatformOs, RunningGame, ScreenCodec, ScreenPick, ScreenSource, SystemActivityEvent, UpdateState, WindowAppearance, WindowControl, WindowFrameState, WindowMaterial } from "./bridge";
+export type { AppearanceState, ControlAction, ControlEvent, CustomProgram, DetectedGame, GameWatchSettings, HotkeyAction, HotkeyBinding, HotkeyBindings, HotkeyRequest, HotkeyStatus, PlatformOs, RunningGame, ScreenCodec, ScreenPick, ScreenSource, SystemActivityEvent, UpdateState, WindowAppearance, WindowControl, WindowFrameState, WindowMaterial } from "./bridge";
 
 /** The chat server that serves the page: its key in the store and the domain a login there signs. */
 export type PlatformHome = { host: string; signDomain: string };
@@ -77,6 +77,20 @@ export interface Platform {
     /** The system's file dialog for a program to add; null = cancelled. */
     pickProgram(): Promise<CustomProgram | null>;
     subscribe(cb: (game: RunningGame | null) => void): () => void;
+  };
+  /**
+   * Global shortcuts, the push-to-talk key across the system and commands from outside (docs/features/hotkeys.md): the
+   * desktop app's shell registers the bindings system-wide and reports every command; null = a browser or an older app.
+   */
+  readonly hotkeys: null | {
+    /** The shell can watch the push-to-talk key outside the window (Windows with the system watch helper). */
+    readonly globalPtt: boolean;
+    /** The app's program file for a command line that controls it; null = unpackaged. */
+    readonly executable: string | null;
+    set(request: HotkeyRequest): Promise<HotkeyStatus>;
+    /** While the settings capture a new key: nothing is registered or watched meanwhile. */
+    suspend(on: boolean): void;
+    onControl(cb: (event: ControlEvent) => void): () => void;
   };
   readonly media: PlatformMedia;
   readonly links: {

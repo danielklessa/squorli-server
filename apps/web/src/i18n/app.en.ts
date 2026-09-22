@@ -15,7 +15,7 @@ export const appEn: Partial<Record<keyof typeof de, string>> = {
   "dock.unblockMicHint": "The audio context is paused; a click releases the microphone and the speaker indicator",
   "settings.syncDevice": "Saved on this device. With a directory account the settings apply on every server and device.",
   "settings.devicesLocal": "The device selection applies to this device only.",
-  "settings.pttHint": "Only while a Squorli window has focus. A global hotkey is planned.",
+  "settings.pttHint": "On this system only while a Squorli window has the focus. Across the whole system the key works on Windows.",
   "settings.blurHint": "Computed on this device (MediaPipe); costs some CPU. The model is loaded the first time it is turned on.",
   "settings.noBlur": "Background effects are not available on this device.",
   "stage.fullscreenUnavailable": "Fullscreen is not available here.",

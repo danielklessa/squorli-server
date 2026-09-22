@@ -19,7 +19,7 @@ export const appDe: Partial<Record<keyof typeof de, string>> = {
   "dock.unblockMicHint": "Der Audio-Kontext ist angehalten; Klick gibt Mikrofon und Sprecheranzeige frei",
   "settings.syncDevice": "Gespeichert auf diesem Gerät. Mit einem Konto beim Verzeichnis gelten die Einstellungen auf allen Servern und Geräten.",
   "settings.devicesLocal": "Die Geräteauswahl gilt nur für dieses Gerät.",
-  "settings.pttHint": "Nur solange ein Squorli-Fenster den Fokus hat. Ein globales Tastenkürzel ist geplant.",
+  "settings.pttHint": "Auf diesem System nur, solange ein Squorli-Fenster den Fokus hat. Auf dem ganzen System geht die Taste unter Windows.",
   "settings.blurHint": "Rechnet auf diesem Gerät (MediaPipe); kostet etwas CPU. Modell wird beim ersten Einschalten geladen.",
   "settings.noBlur": "Hintergrund-Effekte sind auf diesem Gerät nicht verfügbar.",
   "stage.fullscreenUnavailable": "Vollbild ist hier nicht verfügbar.",

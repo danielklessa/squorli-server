@@ -70,6 +70,31 @@ export type CustomProgram = { path: string; name: string };
 /** What the shell needs from the client's settings: whether to detect at all, and the added programs. */
 export type GameWatchSettings = { enabled: boolean; custom: CustomProgram[] };
 
+/**
+ * Global shortcuts and control from outside the window (docs/features/hotkeys.md, 22 September 2026). A binding is the key
+ * as `KeyboardEvent.code` (the same form as the push-to-talk key) plus the modifiers held with it; the shell turns it into
+ * Electron's accelerator (platform/hotkeys.ts) and registers it system-wide, which keeps the combination from every other
+ * program. Push-to-talk is not a binding: the shell's system watch helper watches the push-to-talk key itself (Windows),
+ * without taking it from anyone, because a shortcut has no key-up.
+ */
+export type HotkeyBinding = { code: string; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean };
+export type HotkeyAction = "micToggle" | "deafenToggle";
+export type HotkeyBindings = Record<HotkeyAction, HotkeyBinding | null>;
+/** Per binding: none set, registered, refused by the system (another program holds it), or not a key the shell can register. */
+export type HotkeyState = "off" | "ok" | "taken" | "invalid";
+/** The push-to-talk key: not asked for (no channel, or not push-to-talk), watched, not a key the helper knows, or this app cannot watch keys (no helper, other system). */
+export type PttWatchState = "off" | "ok" | "invalid" | "unsupported";
+export type HotkeyStatus = Record<HotkeyAction, HotkeyState> & { ptt: PttWatchState };
+/** What the client asks the shell to do: the bindings, and the push-to-talk key to watch (null = none: no channel, or voice activation). */
+export type HotkeyRequest = { bindings: HotkeyBindings; pttKey: string | null };
+/**
+ * A command from outside the window: a global shortcut, or a link `squorli://control/<action>` or the argument
+ * `--control=<action>` of a second start (a Stream Deck's "open" action, G Hub, any macro tool). The running app carries it
+ * out without bringing its window to the front.
+ */
+export type ControlAction = "mic-toggle" | "mic-on" | "mic-off" | "deafen-toggle" | "deafen-on" | "deafen-off";
+export type ControlEvent = { kind: "action"; action: ControlAction; source: "hotkey" | "external" } | { kind: "ptt"; down: boolean };
+
 /** Fixed facts about the running app, handed to the preload script at window creation. */
 export type DesktopInfo = {
   version: string;
@@ -95,6 +120,12 @@ export type DesktopInfo = {
    * way); missing = an app older than the setting.
    */
   autostart?: { enabled: boolean; /** A start by the system stays in the background (tray or minimized) instead of opening the window; missing = an app that always does. */ background?: boolean } | null;
+  /**
+   * Global shortcuts and control from outside (`setHotkeys`, `onControl`); missing = an app older than them. `globalPtt` =
+   * the shell can watch the push-to-talk key across the system (its system watch helper is present, Windows). `executable` =
+   * the app's own program file for a command line that controls it (`"<executable>" --control=<action>`); null unpackaged.
+   */
+  hotkeys?: { globalPtt: boolean; executable: string | null };
   update: UpdateState;
 };
 
@@ -143,6 +174,12 @@ export interface DesktopBridge {
   clientReady(): void;
   /** How many direct messages and mentions wait (0 = none): the mark on the task bar icon and the tray icon. */
   setAttention(count: number): void;
+  /** Register the global shortcuts and watch the push-to-talk key; answers with what the shell could do. Replaces the previous request. */
+  setHotkeys(request: HotkeyRequest): Promise<HotkeyStatus>;
+  /** While the client captures a new key: the shortcuts are let go (a registered one never reaches the window) and no key is watched. */
+  suspendHotkeys(on: boolean): void;
+  /** Commands from outside the window: the shortcuts, the push-to-talk key, links and arguments of a second start. */
+  onControl(cb: (event: ControlEvent) => void): () => void;
   onWindowFrame(cb: (state: WindowFrameState) => void): () => void;
   onUpdateState(cb: (state: UpdateState) => void): () => void;
   checkForUpdates(): void;
@@ -176,6 +213,9 @@ export const IPC = {
   setAutostart: "squorli:set-autostart",
   setAutostartBackground: "squorli:set-autostart-background",
   attention: "squorli:attention",
+  hotkeysSet: "squorli:hotkeys-set",
+  hotkeysSuspend: "squorli:hotkeys-suspend",
+  control: "squorli:control",
   clientReady: "squorli:client-ready",
   updateState: "squorli:update-state",
   updateCheck: "squorli:update-check",

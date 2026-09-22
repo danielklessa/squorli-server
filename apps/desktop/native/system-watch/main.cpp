@@ -12,6 +12,12 @@
 //                them is ever reported. A program counts while it has a visible window of its own (minimized too), so a
 //                game started before the app is found, and a service that merely runs in the background is not.
 //
+//   key <hex> 1|0 a watched key was pressed (1) or released (0): its scan code (set 1 make code, 0x100 added for an E0
+//                prefix), as the app named it. The push-to-talk key across the system (docs/features/hotkeys.md, 22
+//                September 2026): a global shortcut has no key-up and takes the key from every program, this watch has
+//                both and takes it from nobody. Only the named keys are ever reported, and the keyboard is only listened
+//                to (Raw Input, INPUTSINK) while at least one key is named; a held key is reported once.
+//
 //   window<TAB><request><TAB><hwnd><TAB><tool 0|1><TAB><class><TAB><path><TAB><fullscreen 0|1>
 //                the answer to "windows": one line per window asked for that exists (its window class, whether it is a tool
 //                window, which the task bar and Alt+Tab leave out, its program's full path, empty when the process does
@@ -22,8 +28,9 @@
 // stdin:  one line "watch<TAB><path><TAB><path>..." replaces the watch list (UTF-8; a path ending in a backslash is a folder
 //         with everything below it, any other is one executable; "watch" alone = nothing is watched, which is the start).
 //         One line "windows<TAB><request><TAB><hwnd><TAB><hwnd>..." (decimal window handles) asks about those windows.
+//         One line "keys<TAB><hex><TAB><hex>..." replaces the watched keys ("keys" alone = none, which is the start).
 // stdout: the lines above, after one line "ready". The helper ends when stdin closes (the parent is gone) or when it is killed.
-// Windows only. It reads no keyboard, no mouse and no window contents.
+// Windows only. It reads no mouse and no window contents, and of the keyboard only the keys the app names, while it names them.
 #include <windows.h>
 #include <winternl.h>
 #include <xinput.h>
@@ -38,11 +45,16 @@
 #include <atomic>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
 
 namespace {
+
+// The stdin thread tells the main thread with this message that the watched keys changed (Raw Input is registered there).
+constexpr UINT WM_KEYS_CHANGED = WM_APP + 1;
+HWND mainWindow = nullptr;
 
 // Only a real step counts: sticks drift, sensors flicker, some controllers report all the time. The comparison is with the
 // state at the last counted input, so a lever that stays where it was put (a joystick's throttle) is no input either.
@@ -161,12 +173,60 @@ void readReport(HidDevice& device, BYTE* report, ULONG length) {
   reportInput();
 }
 
+// --- the watched keys (push-to-talk across the system) ---------------------------------------------------------------------
+std::mutex keysMutex;
+std::set<unsigned> watchedKeys;      // scan codes with 0x100 for E0, as the app named them
+bool keyboardRegistered = false;
+std::map<unsigned, bool> keyDown;    // what was last reported per watched key: a held key repeats its make code
+
+void reportKey(unsigned scan, bool down) {
+  if (printf("key %x %d\n", scan, down ? 1 : 0) < 0 || fflush(stdout) != 0) ExitProcess(0);
+}
+
+// Runs on the main thread (WM_KEYS_CHANGED): the keyboard is only listened to while a key is named. RIDEV_REMOVE needs a
+// null target window.
+void applyKeys() {
+  bool any = false;
+  { std::lock_guard<std::mutex> lock(keysMutex); any = !watchedKeys.empty(); }
+  if (any == keyboardRegistered) return;
+  RAWINPUTDEVICE keyboard = {};
+  keyboard.usUsagePage = 0x01;
+  keyboard.usUsage = 0x06;
+  keyboard.dwFlags = any ? RIDEV_INPUTSINK : RIDEV_REMOVE;
+  keyboard.hwndTarget = any ? mainWindow : nullptr;
+  if (RegisterRawInputDevices(&keyboard, 1, sizeof(RAWINPUTDEVICE))) keyboardRegistered = any;
+  else fprintf(stderr, "warning: RegisterRawInputDevices keyboard failed (%lu)\n", GetLastError());
+  // Whatever was down when the watch changed is up as far as the app is concerned (it releases push-to-talk itself).
+  keyDown.clear();
+}
+
+void onKeyboard(const RAWKEYBOARD& kb) {
+  USHORT make = kb.MakeCode;
+  bool e0 = (kb.Flags & RI_KEY_E0) != 0;
+  // Input made by a program (SendInput without a scan code: some macro tools) names the virtual key only.
+  if (make == 0 || make == KEYBOARD_OVERRUN_MAKE_CODE) {
+    const UINT sc = MapVirtualKeyW(kb.VKey, MAPVK_VK_TO_VSC_EX);
+    if (sc == 0) return;
+    make = static_cast<USHORT>(sc & 0xFF);
+    e0 = ((sc >> 8) & 0xFF) == 0xE0;
+  }
+  if (kb.Flags & RI_KEY_E1) return;  // Pause: not a key the app names
+  const unsigned scan = static_cast<unsigned>(make & 0xFF) | (e0 ? 0x100u : 0u);
+  { std::lock_guard<std::mutex> lock(keysMutex); if (watchedKeys.find(scan) == watchedKeys.end()) return; }
+  const bool down = (kb.Flags & RI_KEY_BREAK) == 0;
+  auto known = keyDown.find(scan);
+  if (known != keyDown.end() && known->second == down) return;  // a held key repeats
+  keyDown[scan] = down;
+  reportKey(scan, down);
+}
+
 void onRawInput(HRAWINPUT handle) {
   UINT size = 0;
   if (GetRawInputData(handle, RID_INPUT, nullptr, &size, sizeof(RAWINPUTHEADER)) != 0 || size == 0) return;
   std::vector<BYTE> buffer(size);
   if (GetRawInputData(handle, RID_INPUT, buffer.data(), &size, sizeof(RAWINPUTHEADER)) != size) return;
   RAWINPUT* input = reinterpret_cast<RAWINPUT*>(buffer.data());
+  if (input->header.dwType == RIM_TYPEKEYBOARD) { if (keyboardRegistered) onKeyboard(input->data.keyboard); return; }
   if (input->header.dwType != RIM_TYPEHID || input->header.hDevice == nullptr) return;
   HidDevice& device = deviceOf(input->header.hDevice);
   if (!device.usable) return;
@@ -257,8 +317,22 @@ void describeWindows(const std::vector<std::string>& parts) {
   if (fwrite(answer.data(), 1, answer.size(), stdout) != answer.size() || fflush(stdout) != 0) ExitProcess(0);
 }
 
+// Runs on the stdin thread: the set changes here, the registration follows on the main thread.
+void setKeys(const std::vector<std::string>& parts) {
+  std::set<unsigned> keys;
+  for (size_t i = 1; i < parts.size() && i < 65; i++) {
+    const std::string& hex = parts[i];
+    if (hex.empty() || hex.size() > 4 || hex.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) continue;
+    const unsigned scan = static_cast<unsigned>(strtoul(hex.c_str(), nullptr, 16));
+    if ((scan & 0xFF) != 0 && scan <= 0x1FF) keys.insert(scan);
+  }
+  { std::lock_guard<std::mutex> lock(keysMutex); watchedKeys = std::move(keys); }
+  if (mainWindow) PostMessageW(mainWindow, WM_KEYS_CHANGED, 0, 0);
+}
+
 void onCommand(const std::string& line) {
   if (line.rfind("windows\t", 0) == 0) { describeWindows(fields(line)); return; }
+  if (line == "keys" || line.rfind("keys\t", 0) == 0) { setKeys(fields(line)); return; }
   if (line.rfind("watch", 0) != 0 || (line.size() > 5 && line[5] != '\t')) return;
   std::vector<std::wstring> folders, files;
   size_t from = 5;
@@ -339,6 +413,9 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     case WM_INPUT_DEVICE_CHANGE:
       if (wParam == GIDC_REMOVAL) devices.erase(reinterpret_cast<HANDLE>(lParam));
       return 0;
+    case WM_KEYS_CHANGED:
+      applyKeys();
+      return 0;
     case WM_TIMER:
       pollXInput(ticks % PROBE_EVERY == 0);
       if (ticks % DISPLAY_EVERY == 0) pollDisplay();
@@ -359,8 +436,10 @@ int main() {
   if (!RegisterClassW(&windowClass)) { fprintf(stderr, "error: RegisterClass\n"); return 1; }
   HWND window = CreateWindowExW(0, windowClass.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, windowClass.hInstance, nullptr);
   if (!window) { fprintf(stderr, "error: CreateWindow\n"); return 1; }
+  mainWindow = window;
 
   // Generic desktop page: joystick, gamepad, multi-axis controller. INPUTSINK = also while another window has the focus.
+  // The keyboard is registered separately and only while the app names keys (applyKeys).
   RAWINPUTDEVICE wanted[3] = {};
   const USHORT usages[3] = { 0x04, 0x05, 0x08 };
   for (int i = 0; i < 3; i++) { wanted[i].usUsagePage = 0x01; wanted[i].usUsage = usages[i]; wanted[i].dwFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY; wanted[i].hwndTarget = window; }

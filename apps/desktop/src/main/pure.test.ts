@@ -5,7 +5,9 @@ import { appearanceState, normalizeAppearance, supportedMaterials } from "./appe
 import { attentionText, badgeFile, readAttentionCount } from "./attention";
 import { AUTOSTART_ARG, entryStarts, linuxAutostartEntry, linuxAutostartFile, linuxExecutable, readAutostartBackground, startedBySystem, startsInBackground } from "./autostart";
 import { hwndOfHandle, hwndOfSource, isDesktopWidget } from "./captureSource";
+import { findControl } from "./controlArgs";
 import { findDeepLink } from "./deepLinkArgs";
+import { E0_FLAG, keysLine, scanCodeOf } from "./keyCodes";
 import { isAllowedExternal, windowOpenDecision } from "./navigation";
 import { SPLASH_SKIP_URL, mayInstallAtStart, splashHtml, splashScript, splashView } from "./splashPage";
 import { updateMode } from "./updateMode";
@@ -262,5 +264,37 @@ describe("start window", () => {
     expect(mayInstallAtStart(undefined, "0.2.0")).toBe(true);
     expect(mayInstallAtStart("0.1.9", "0.2.0")).toBe(true);
     expect(mayInstallAtStart("0.2.0", "0.2.0")).toBe(false); // offered again although it was installed at the last start: it did not take
+  });
+});
+
+describe("findControl", () => {
+  it("takes the first control link or --control argument and ignores everything else", () => {
+    expect(findControl(["Squorli.exe", "--control=mic-toggle"])).toBe("mic-toggle");
+    expect(findControl(["Squorli.exe", "--allow-file-access", "squorli://control/deafen-on"])).toBe("deafen-on");
+    expect(findControl(["Squorli.exe", "--CONTROL=Mic-Off"])).toBe("mic-off");
+    expect(findControl(["Squorli.exe", "squorli://server/example.org", "--control=quit", "--control=mic-on"])).toBe("mic-on");
+    expect(findControl(["Squorli.exe", "squorli://control/quit"])).toBeNull();
+    expect(findControl(["Squorli.exe"])).toBeNull();
+  });
+});
+
+describe("scanCodeOf", () => {
+  it("knows the keys by their place, E0-prefixed ones marked", () => {
+    expect(scanCodeOf("Space")).toBe(0x39);
+    expect(scanCodeOf("KeyV")).toBe(0x2f);
+    expect(scanCodeOf("F13")).toBe(0x64);
+    expect(scanCodeOf("F24")).toBe(0x76);
+    expect(scanCodeOf("ControlLeft")).toBe(0x1d);
+    expect(scanCodeOf("ControlRight")).toBe(0x1d | E0_FLAG);
+    expect(scanCodeOf("ArrowUp")).toBe(0x48 | E0_FLAG);
+    expect(scanCodeOf("Numpad8")).toBe(0x48);
+    expect(scanCodeOf("MetaLeft")).toBe(0x5b | E0_FLAG);
+    expect(scanCodeOf("Pause")).toBeNull();
+    expect(scanCodeOf("toString")).toBeNull();
+    expect(scanCodeOf("")).toBeNull();
+  });
+  it("writes the helper's keys line", () => {
+    expect(keysLine([])).toBe("keys");
+    expect(keysLine([0x39, 0x1d | E0_FLAG])).toBe("keys	39	11d");
   });
 });

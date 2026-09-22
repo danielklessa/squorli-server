@@ -22,6 +22,7 @@
 .ic-eye::before { content: "\e0ba"; }
 .ic-eye-off::before { content: "\e0bb"; }
 .ic-flag::before { content: "\e0d1"; }
+.ic-folder::before { content: "\e0d7"; }
 .ic-gamepad-2::before { content: "\e0df"; }
 .ic-grip-vertical::before { content: "\e0eb"; }
 .ic-hand::before { content: "\e1d7"; }
@@ -30,7 +31,9 @@
 .ic-headphones::before { content: "\e0f1"; }
 .ic-heart::before { content: "\e0f2"; }
 .ic-image::before { content: "\e0f6"; }
+.ic-import::before { content: "\e22f"; }
 .ic-key-round::before { content: "\e4a7"; }
+.ic-keyboard::before { content: "\e284"; }
 .ic-languages::before { content: "\e0fe"; }
 .ic-leaf::before { content: "\e2de"; }
 .ic-lightbulb::before { content: "\e1c2"; }

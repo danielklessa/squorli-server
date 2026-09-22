@@ -5,6 +5,7 @@
  * Media does NOT flow through here, but directly between client and LiveKit.
  */
 import { z } from "zod";
+import { ImportSource } from "./import";
 
 export * from "./permissions";
 export * from "./directory";
@@ -14,6 +15,7 @@ export * from "./friends";
 export * from "./dm";
 export * from "./mentions";
 export * from "./links";
+export * from "./import";
 export { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { DisplayName } from "./directory";
@@ -444,6 +446,8 @@ export const ServerState = z.object({
   members: z.array(Member),
   /** The server's web radio stations. Missing = a server from before the radio: clients then offer no radio at all. */
   radioStations: z.array(RadioStation).optional(),
+  /** Where this server can import a structure from (import.ts). Missing = a server from before the import: clients show none. */
+  importSources: z.array(ImportSource).optional(),
   /** Effective permissions of the signed-in user. */
   myPermissions: z.number().int(),
 });

@@ -68,8 +68,8 @@ export function DmView({ friend, thread, myKey, store, avatarUrl, myAvatarUrl }:
   return (
     <section className="chat">
       <header className="chat-head">
-        <Avatar name={name} src={avatarUrl} online={friend.online} /><strong>{name}</strong>
-        <span className="muted topic">@{friend.handle}{friend.online ? ` · ${t("dm.online")}` : ""}</span>
+        <Avatar name={name} src={avatarUrl} online={friend.online} afk={friend.afk} /><strong>{name}</strong>
+        <span className="muted topic">@{friend.handle}{friend.online ? ` · ${t(friend.afk ? "dm.afk" : "dm.online")}` : ""}</span>
         <GameLine game={friend.online ? friend.game : null} className="muted" />
         <span className="spacer" />
         <button className="icon" title={t("dm.clearTitle")} onClick={() => { void askConfirm({ title: t("dm.clearConfirmTitle", { name }), text: t("dm.clearConfirmText"), confirmLabel: t("common.delete"), danger: true }).then((ok) => { if (ok) store.clearDm(friend.publicKey); }); }}><Icon name="trash-2" /></button>
