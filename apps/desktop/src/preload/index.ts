@@ -38,6 +38,7 @@ const bridge: DesktopBridge = {
   setAutostartBackground: (on: boolean) => ipcRenderer.invoke(IPC.setAutostartBackground, on) as Promise<boolean>,
   clientReady: () => ipcRenderer.send(IPC.clientReady),
   setAttention: (count: number) => ipcRenderer.send(IPC.attention, count),
+  setLanguage: (language: string) => ipcRenderer.send(IPC.language, language),
   setHotkeys: (request: HotkeyRequest) => ipcRenderer.invoke(IPC.hotkeysSet, request) as Promise<HotkeyStatus>,
   suspendHotkeys: (on: boolean) => ipcRenderer.send(IPC.hotkeysSuspend, on),
   onControl: (cb) => subscribe<ControlEvent>(IPC.control, cb),

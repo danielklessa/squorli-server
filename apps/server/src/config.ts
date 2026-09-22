@@ -60,7 +60,8 @@ const Env = z.object({
   LINK_PREVIEW_TEST_ORIGIN: z.string().url().optional(),
 });
 
-export type Config = z.infer<typeof Env> & { trustedProxies: string[]; livekitPublicUrl: string; directoryProofUrl: string };
+/** `publicOrigin`: where the outside reaches this server (absolute links in the status API): https://PUBLIC_DOMAIN, in dev http://localhost:PORT. */
+export type Config = z.infer<typeof Env> & { trustedProxies: string[]; livekitPublicUrl: string; directoryProofUrl: string; publicOrigin: string };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const cleaned = Object.fromEntries(Object.entries(env).filter(([, v]) => v !== ""));
@@ -70,11 +71,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     throw new Error(`Ungueltige Konfiguration:\n${issues}`);
   }
   const c = parsed.data;
+  const publicOrigin = c.PUBLIC_DOMAIN === "localhost" ? `http://localhost:${c.PORT}` : `https://${c.PUBLIC_DOMAIN}`;
   return {
     ...c,
+    publicOrigin,
     trustedProxies: c.TRUSTED_PROXIES.split(",").map((s) => s.trim()).filter(Boolean),
     livekitPublicUrl: (c.LIVEKIT_PUBLIC_URL ?? `wss://${c.PUBLIC_DOMAIN}`).replace(/\/+$/, ""),
     ...(c.DIRECTORY_URL ? { DIRECTORY_URL: c.DIRECTORY_URL.replace(/\/+$/, "") } : {}),
-    directoryProofUrl: c.DIRECTORY_PROOF_URL ?? (c.PUBLIC_DOMAIN === "localhost" ? `http://localhost:${c.PORT}/api/health` : `https://${c.PUBLIC_DOMAIN}/api/health`),
+    directoryProofUrl: c.DIRECTORY_PROOF_URL ?? `${publicOrigin}/api/health`,
   };
 }

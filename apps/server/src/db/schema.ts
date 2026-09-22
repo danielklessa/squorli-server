@@ -54,6 +54,10 @@ export const serverSettings = pgTable("server_settings", {
   radioAutoStop: boolean("radio_auto_stop").notNull().default(true),
   /** AFK channel (admin area > server): absent members are moved here; no sending, no hearing, no radio in it. A deleted channel clears it. */
   afkChannelId: uuid("afk_channel_id").references((): AnyPgColumn => channels.id, { onDelete: "set null" }),
+  /** Status API (docs/features/status-api.md): who may read GET /api/status; "off" (default), "key", "public". */
+  statusApi: text("status_api", { enum: ["off", "key", "public"] }).notNull().default("off"),
+  /** The key for mode "key" (random, base64url); null until the mode is first switched to "key". Regenerated in the admin area. */
+  statusApiKey: text("status_api_key"),
 });
 
 /** Membership. Anyone missing here sees nothing and can do nothing. */

@@ -1,4 +1,4 @@
-import { displayNameOf, type VoiceMember } from "@squorli/protocol";
+import { displayNameOf, type VoiceMember, type VoiceStatus } from "@squorli/protocol";
 
 /**
  * Who is sitting in which voice channel? Tracked per WebSocket connection so a dropped
@@ -13,6 +13,11 @@ import { displayNameOf, type VoiceMember } from "@squorli/protocol";
  * member back with `restored`. That is a guess about WHICH connection of the user is in voice, so such an entry gives way
  * as soon as any connection of the user says `voice.join` or `voice.leave`, and the handler drops it when LiveKit no
  * longer lists the participant.
+ *
+ * Mute state (23 September 2026): a client says with `voice.join` and `voice.status` whether its microphone is muted,
+ * whether its sound is off and whether its camera or screen share is on, and the entry carries it (`VoiceMember.micMuted`/
+ * `deafened`/`cameraOn`/`screenOn`), so everybody's sidebar and the status API show it without being in the same LiveKit
+ * room. A restored entry starts unmuted with nothing on (nothing known).
  */
 export class VoicePresence<Conn = unknown> {
   private readonly byConn = new Map<Conn, { channelId: string; member: VoiceMember; restored: boolean }>();
@@ -65,10 +70,24 @@ export class VoicePresence<Conn = unknown> {
     const touched = new Set<string>();
     for (const entry of this.byConn.values()) {
       if (entry.member.userId !== userId) continue;
-      entry.member = { userId, displayName: displayNameOf(u) };
+      entry.member = { ...entry.member, displayName: displayNameOf(u) };
       touched.add(entry.channelId);
     }
     for (const channelId of touched) this.emit(channelId);
+  }
+
+  /** The connection's client reports its mute state; nothing happens for a connection in no channel or without a change. */
+  setStatus(conn: Conn, status: VoiceStatus): void {
+    const entry = this.byConn.get(conn);
+    if (!entry || (entry.member.micMuted === status.micMuted && entry.member.deafened === status.deafened && entry.member.cameraOn === status.cameraOn && entry.member.screenOn === status.screenOn)) return;
+    entry.member = { ...entry.member, micMuted: status.micMuted, deafened: status.deafened, cameraOn: status.cameraOn, screenOn: status.screenOn };
+    this.emit(entry.channelId);
+  }
+
+  /** Where a user sits and how, for the status API (first connection, like channelOfUser). */
+  statusOfUser(userId: string): (VoiceStatus & { channelId: string }) | undefined {
+    for (const { channelId, member } of this.byConn.values()) if (member.userId === userId) return { channelId, micMuted: member.micMuted, deafened: member.deafened, cameraOn: member.cameraOn, screenOn: member.screenOn };
+    return undefined;
   }
 
   channelOf(conn: Conn): string | undefined {

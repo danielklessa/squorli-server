@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, ServerEvent, type ClientEvent, type GamePresence, type Me, type Message, type ServerState, type VoiceMember } from "@squorli/protocol";
+import { PROTOCOL_VERSION, ServerEvent, type ClientEvent, type GamePresence, type Me, type Message, type ServerState, type VoiceMember, type VoiceStatus } from "@squorli/protocol";
 import { ServerApi, explainLoginError, type Health } from "./api";
 import type { Identity } from "./identity";
 import { t } from "./i18n";
@@ -104,6 +104,8 @@ export class ServerConnection {
    * vanished from the channel's list and the AFK move never found them (user's report, 18 September 2026).
    */
   private voiceChannelId: string | null = null;
+  /** The mute state last reported (voice.join, voice.status), said again with the join after a reconnect. */
+  private voiceStatus: VoiceStatus = { micMuted: false, deafened: false, cameraOn: false, screenOn: false };
   /** Newest message shown per channel (readState.ts), loaded for the signed-in user at every welcome. */
   private read: ReadState = {};
   /** The server keeps read states (GET /api/read-state answered): marks come from there and hold on every device. */
@@ -288,8 +290,9 @@ export class ServerConnection {
   }
 
   send(e: ClientEvent) {
-    if (e.type === "voice.join") this.voiceChannelId = e.channelId;
+    if (e.type === "voice.join") { this.voiceChannelId = e.channelId; this.voiceStatus = { micMuted: e.micMuted ?? false, deafened: e.deafened ?? false, cameraOn: e.cameraOn ?? false, screenOn: e.screenOn ?? false }; }
     else if (e.type === "voice.leave") this.voiceChannelId = null;
+    else if (e.type === "voice.status") { this.voiceStatus = { micMuted: e.micMuted, deafened: e.deafened, cameraOn: e.cameraOn, screenOn: e.screenOn }; if (this.state.server?.settings.statusApi === undefined) return; } // a server from before it would answer bad_message
     if (this.ws?.readyState !== WebSocket.OPEN) return;
     const text = JSON.stringify(e);
     this.pushLog({ dir: "out", at: Date.now(), text });
@@ -310,7 +313,7 @@ export class ServerConnection {
         this.read = pruneReadState(loadReadState(this.state.host, e.userId), e.state.channels.map((c) => c.id));
         void this.syncReadState();
         if (this.idle || this.game) this.reportIdle();
-        if (this.voiceChannelId) this.send({ type: "voice.join", channelId: this.voiceChannelId });
+        if (this.voiceChannelId) this.send({ type: "voice.join", channelId: this.voiceChannelId, ...this.voiceStatus });
         if (!wasReconnect) this.hooks.onConnected();
         if (this.pingTimer) clearInterval(this.pingTimer);
         this.pingSentAt = 0;

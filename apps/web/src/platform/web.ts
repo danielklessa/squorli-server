@@ -28,6 +28,7 @@ export function webPlatform(): Platform {
     games: null,
     hotkeys: null,
     defaultDirectoryUrl: homeless ? (import.meta.env.VITE_DIRECTORY_URL as string | undefined) ?? "http://localhost:3100" : null,
+    setLanguage: null,
     media: { mobile, blocksInsecureMedia: window.location.protocol === "https:", screenSharePublishOverrides: () => null, takeScreenAudio: async () => null, stopScreenAudio: () => {}, setPlayerOutput: null, setChatPlayerOutput: null },
     links: {
       openExternal: (url) => { window.open(url, "_blank", "noopener"); },

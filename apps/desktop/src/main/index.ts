@@ -8,6 +8,8 @@ import { attentionText, badgeFile, readAttentionCount } from "./attention";
 import { readAutostartBackground, startsInBackground } from "./autostart";
 import { autostartEnabled, autostartSupported, setAutostart } from "./autostartSystem";
 import { loadConfig, saveConfig } from "./config";
+import { handleContextMenu } from "./contextMenu";
+import { languageOfLocale, readShellLanguage, type ShellLanguage } from "./contextMenuItems";
 import { findControl } from "./controlArgs";
 import { findDeepLink } from "./deepLinkArgs";
 import { handleGames } from "./gameWatch";
@@ -20,7 +22,7 @@ import { PlayerAudioOutput } from "./playerAudio";
 import { readPlayerOutputLabel } from "./playerAudioScript";
 import { applyPermissions, letPlayersEmbed, lockDownContents, openExternal } from "./security";
 import { createSplash, type Splash } from "./splash";
-import { createTray, setTrayAttention } from "./tray";
+import { createTray, setTrayAttention, setTrayLanguage } from "./tray";
 import { startSystemWatch, systemWatchPath } from "./systemWatch";
 import { handleUpdates } from "./updates";
 import { desktopUserAgent } from "./userAgent";
@@ -70,6 +72,8 @@ const frameOf = (win: BrowserWindow): WindowFrameState => ({ maximized: win.isMa
 let updateState: () => UpdateState = () => ({ status: "unsupported" });
 
 let mainWindow: BrowserWindow | null = null;
+// The language of what the shell draws itself (the window's context menu, the tray's menu): the system's until the client says its own.
+let language: ShellLanguage = "en";
 // Global shortcuts and commands from outside (hotkeys.ts); set up once the app is ready.
 let hotkeys: Hotkeys | null = null;
 // Tray icon; with `closeToTray` the window's close button only hides the window. Quitting then goes through the tray's menu.
@@ -126,6 +130,8 @@ function createWindow(splash: Splash | null = null): BrowserWindow {
     },
   });
   win.removeMenu();
+  // The ordinary context menu (cut, copy, paste, spelling, a link, a picture), in the client's language (contextMenu.ts).
+  handleContextMenu(win, () => language);
   if (state?.maximized) win.maximize();
   win.once("ready-to-show", () => {
     const background = backgroundStart;
@@ -177,6 +183,8 @@ else {
   });
   lockDownContents(origins);
   void app.whenReady().then(() => {
+    // Windows knows the locale only from here on; the client says its own language once it runs (`IPC.language`).
+    language = languageOfLocale(app.getLocale());
     // Unpackaged: the build of the sibling package; packaged: electron-builder copies it next to the app (extraResources).
     const rendererRoot = app.isPackaged ? join(process.resourcesPath, "renderer") : join(__dirname, "..", "..", "web", "dist");
     serveApp(rendererRoot);
@@ -228,8 +236,9 @@ else {
       return autostartBackground;
     });
     ipcMain.on(IPC.attention, (event, count: unknown) => { if (isClientFrame(event)) { attention = readAttentionCount(count); showAttention(); } });
+    ipcMain.on(IPC.language, (event, value: unknown) => { if (isClientFrame(event)) { language = readShellLanguage(value, language); setTrayLanguage(tray, language); } });
     ipcMain.on(IPC.openExternal, (event, url: unknown) => { if (isClientFrame(event) && typeof url === "string") openExternal(url); });
-    tray = createTray(() => mainWindow, () => { quitting = true; app.quit(); });
+    tray = createTray(() => mainWindow, () => { quitting = true; app.quit(); }, language);
     const updates = handleUpdates(() => mainWindow, isClientFrame, () => { quitting = true; screenAudio.stop(); systemWatch.stop(); });
     updateState = updates.state;
     ipcMain.on(IPC.clientReady, (event) => { if (isClientFrame(event)) reveal?.(); });

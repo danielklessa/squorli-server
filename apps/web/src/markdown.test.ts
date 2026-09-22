@@ -70,6 +70,13 @@ describe("markdown inline", () => {
     expect(parseInline("<https://squorli.com> <mailto:a@b.de>")).toEqual([link("https://squorli.com"), text(" "), link("mailto:a@b.de", "a@b.de")]);
     expect(parseInline("![Bild](https://example.com/a.png)")).toEqual([link("https://example.com/a.png", "Bild")]);
   });
+  it("links squorli:// server and invite links, never a command of that scheme", () => {
+    expect(parseInline("komm auf squorli://server/chat.example.org!")).toEqual([text("komm auf "), link("squorli://server/chat.example.org"), text("!")]);
+    expect(parseInline("<squorli://invite/chat.example.org/abcdef12>")).toEqual([link("squorli://invite/chat.example.org/abcdef12")]);
+    expect(parseInline("[hier](squorli://server/chat.example.org)")).toEqual([link("squorli://server/chat.example.org", "hier")]);
+    expect(parseInline("squorli://control/deafen-on [x](squorli://control/mic-off) <squorli://control/quit> xsquorli://server/a.de")).toEqual([text("squorli://control/deafen-on [x](squorli://control/mic-off) <squorli://control/quit> xsquorli://server/a.de")]);
+    expect(parseInline("squorli://server/ und squorli://invite/chat.example.org")).toEqual([text("squorli://server/ und squorli://invite/chat.example.org")]);
+  });
   it("refuses dangerous and misleading links", () => {
     expect(parseInline("[x](javascript:alert(1))")).toEqual([text("[x](javascript:alert(1))")]);
     expect(parseInline("[x](data:text/html,hi)")).toEqual([text("[x](data:text/html,hi)")]);

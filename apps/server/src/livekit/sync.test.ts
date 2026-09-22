@@ -32,7 +32,7 @@ describe("syncStreamGrants", () => {
 describe("VoicePresence.seated", () => {
   it("lists every user once with the channel of the first connection", () => {
     const p = new VoicePresence<string>();
-    const member = (userId: string) => ({ userId, displayName: userId });
+    const member = (userId: string) => ({ userId, displayName: userId, micMuted: false, deafened: false, cameraOn: false, screenOn: false });
     p.join("a1", "c1", member("u1"));
     p.join("a2", "c2", member("u1"));
     p.join("b1", "c2", member("u2"));

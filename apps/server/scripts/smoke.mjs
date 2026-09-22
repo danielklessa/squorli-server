@@ -294,6 +294,39 @@ if (hra.directoryUrl) {
 }
 const [sldBad] = await api("PATCH", "/api/settings", { description: "x".repeat(201) }, owner.token);
 check("listing: description too long -> 400", sldBad === 400);
+
+// ---------- Status API (docs/features/status-api.md): off by default, with the key, public
+{
+  const [, stSa] = await api("GET", "/api/state", undefined, owner.token);
+  check("status api: settings carry the mode, off by default", stSa.settings.statusApi === "off");
+  const [sOff] = await api("GET", "/api/status");
+  check("status api: off -> 404", sOff === 404);
+  const [sMode0] = await api("PATCH", "/api/settings", { statusApi: "key" }, B.token);
+  check("status api: mode needs MANAGE_SERVER", sMode0 === 403);
+  const [sKeyNone] = await api("GET", "/api/settings/status-api-key", undefined, B.token);
+  check("status api: key needs MANAGE_SERVER", sKeyNone === 403);
+  await api("PATCH", "/api/settings", { statusApi: "key" }, owner.token);
+  const [sKey, keyRes] = await api("GET", "/api/settings/status-api-key", undefined, owner.token);
+  check("status api: switching to key makes a key", sKey === 200 && typeof keyRes.key === "string" && keyRes.key.length >= 40);
+  const [sNoKey] = await api("GET", "/api/status");
+  const [sWrong] = await api("GET", "/api/status?key=nope");
+  const [sHeader, stH] = await api("GET", "/api/status", undefined, undefined, false, { authorization: `Bearer ${keyRes.key}` });
+  const [sQuery] = await api("GET", `/api/status?key=${keyRes.key}`);
+  check("status api: key mode -> 401 without or with a wrong key, 200 by header and by query", sNoKey === 401 && sWrong === 401 && sHeader === 200 && sQuery === 200);
+  check("status api: structure", stH.name === "Rauchtest-Server" && Array.isArray(stH.categories) && stH.channels.some((c) => c.id === voiceCh.id && c.kind === "voice") && typeof stH.time === "string");
+  const meB = stH.members.find((m) => m.userId === B.userId);
+  check("status api: members with name and avatar, no key, no roles", !!meB && typeof meB.displayName === "string" && meB.publicKey === undefined && meB.roleIds === undefined && meB.avatarUrl === null && meB.voice === null && typeof meB.online === "boolean");
+  const [, reKey] = await api("POST", "/api/settings/status-api-key", undefined, owner.token);
+  const [sOld] = await api("GET", `/api/status?key=${keyRes.key}`);
+  const [sNew] = await api("GET", `/api/status?key=${reKey.key}`);
+  check("status api: regenerate replaces the key", reKey.key !== keyRes.key && sOld === 401 && sNew === 200);
+  await api("PATCH", "/api/settings", { statusApi: "public" }, owner.token);
+  const [sPub, stPub] = await api("GET", "/api/status?online=1");
+  check("status api: public -> 200 without a key, ?online=1 lists only signed-in members", sPub === 200 && stPub.members.every((m) => m.online === true));
+  await api("PATCH", "/api/settings", { statusApi: "off" }, owner.token);
+  const [sOffAgain] = await api("GET", `/api/status?key=${reKey.key}`);
+  check("status api: off again -> 404 even with the key", sOffAgain === 404);
+}
 await api("PATCH", "/api/me", { displayName: "Bea" }, B.token);
 
 // ---------- Sessions / devices (M6c): list, label from the user agent, remote sign-out (WS close 4011), others, own
@@ -705,9 +738,19 @@ check("delete own message removes attachment", sd2 === 200 && dlGone.status === 
 wsB.send({ type: "typing", channelId: textCh.id });
 const evTyping = await wsA.waitFor((e) => e.type === "typing" && e.userId === B.userId).catch(() => null);
 check("typing forwarded", !!evTyping);
-wsB.send({ type: "voice.join", channelId: voiceCh.id });
+wsB.send({ type: "voice.join", channelId: voiceCh.id, micMuted: true });
 const evVoice = await wsA.waitFor((e) => e.type === "voice.state" && e.channelId === voiceCh.id && e.members.some((m) => m.userId === B.userId)).catch(() => null);
 check("voice.join broadcast", evVoice?.members[0]?.displayName === "Bea");
+check("voice.join carries the mute state to everybody", evVoice?.members[0]?.micMuted === true && evVoice?.members[0]?.deafened === false);
+// Mute and sound off reach the whole server through voice.status (docs/features/status-api.md), and the status API shows the seat.
+wsB.send({ type: "voice.status", micMuted: true, deafened: true, screenOn: true });
+const evVoiceSt = await wsA.waitFor((e) => e.type === "voice.state" && e.channelId === voiceCh.id && e.members.some((m) => m.userId === B.userId && m.deafened === true)).catch(() => null);
+check("voice.status broadcast (mute, sound, screen)", !!evVoiceSt && evVoiceSt.members.find((m) => m.userId === B.userId)?.screenOn === true);
+await api("PATCH", "/api/settings", { statusApi: "public" }, owner.token);
+const [, stSeat] = await api("GET", "/api/status");
+const seatB = stSeat.members?.find((m) => m.userId === B.userId);
+check("status api: the seat with its mute, camera and screen state", seatB?.voice?.channelId === voiceCh.id && seatB.voice.micMuted === true && seatB.voice.deafened === true && seatB.voice.cameraOn === false && seatB.voice.screenOn === true && seatB.online === true);
+await api("PATCH", "/api/settings", { statusApi: "off" }, owner.token);
 wsB.send({ type: "voice.join", channelId: textCh.id });
 const evVoiceErr = await wsB.waitFor((e) => e.type === "error" && e.code === "unknown_channel").catch(() => null);
 check("voice.join text channel rejected", !!evVoiceErr);

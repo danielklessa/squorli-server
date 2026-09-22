@@ -49,6 +49,7 @@ import { GameLibraryContext } from "./GameLine";
 import { t } from "./i18n";
 import { platform, type ControlEvent, type HotkeyStatus, type ScreenPick, type ScreenSource } from "./platform";
 import { formatDeepLink } from "./platform/deepLink";
+import { setSquorliLinkHandler } from "./squorliLinks";
 import { isTypingTarget } from "./usePushToTalk";
 
 /**
@@ -195,6 +196,8 @@ export function App() {
   }, []);
   // Desktop app: a `squorli://` link from a browser. The store shows the server (or keeps the link until after the login).
   useEffect(() => platform.links.onDeepLink((link) => { setStageOpen(false); setShowBrowser(false); store.openLink(formatDeepLink(link)); }), [store]);
+  // A squorli:// link clicked in a chat message: the same path; a client with a home server leaves it to the browser (squorliLinks.ts).
+  useEffect(() => { setSquorliLinkHandler((href) => { const taken = store.openLink(href); if (taken) { setStageOpen(false); setShowBrowser(false); } return taken; }); return () => setSquorliLinkHandler(null); }, [store]);
   const [voiceHost, setVoiceHost] = useState<string | null>(null);
   const voiceHostRef = useRef<string | null>(null);
   voiceHostRef.current = voiceHost;
@@ -331,8 +334,16 @@ export function App() {
       throw err;
     }
     setVoiceHost(host);
-    conn.send({ type: "voice.join", channelId });
+    // The mute state travels with the join (the AFK channel shows as muted and deafened); changes follow as voice.status below.
+    conn.send({ type: "voice.join", channelId, micMuted: client.state.micMuted, deafened: client.state.deafened, cameraOn: client.state.cameraOn, screenOn: client.state.screenOn });
   }, [client, store, voice.channelId, leaveVoice]);
+
+  // Mute, sound off, camera and screen share reach everybody's sidebar and the status API through the server
+  // (docs/features/status-api.md), not only the people in the same LiveKit room. The connection sends it only to a server that knows the event.
+  useEffect(() => {
+    if (!voiceHost || voice.status !== "connected") return;
+    store.connection(voiceHost)?.send({ type: "voice.status", micMuted: voice.micMuted, deafened: voice.deafened, cameraOn: voice.cameraOn, screenOn: voice.screenOn });
+  }, [store, voiceHost, voice.status, voice.micMuted, voice.deafened, voice.cameraOn, voice.screenOn]);
 
   const voiceServer = voiceHost ? state.servers[voiceHost] ?? null : null;
   const videoWindows = useVideoWindows(voice.tiles.map((tile) => {

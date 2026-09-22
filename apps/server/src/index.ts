@@ -32,6 +32,7 @@ import { RadioIdleStop } from "./radio/idle";
 import { RadioMetadata } from "./radio/metadata";
 import { registerRoleRoutes } from "./routes/roles";
 import { registerSettingsRoutes } from "./routes/settings";
+import { registerStatusRoutes } from "./routes/status";
 import { deleteUserAccount, type DeleteUserResult } from "./users/deleteUser";
 import { registerUserRoutes } from "./users/routes";
 import { DirectoryClient, SYNC_INTERVAL_MS } from "./directory";
@@ -184,6 +185,7 @@ async function main() {
   await registerAuthRoutes(app, db, config, hub, directory);
   await registerUserRoutes(app, db, directory, hub, presence);
   await registerSettingsRoutes(app, db, hub, config, directory, { presence, lk, onRadioChange: syncRadioMeta });
+  await registerStatusRoutes(app, db, hub, presence, config);
   await registerChannelRoutes(app, db, hub, presence);
   await registerRoleRoutes(app, db, hub, presence, lk);
   await registerMemberRoutes(app, db, hub, presence, lk);

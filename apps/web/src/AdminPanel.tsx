@@ -1,9 +1,11 @@
-import { PERMISSION_GROUPS, Permission, hasPermission, type Ban, type Invite, type PermissionName, type ServerState } from "@squorli/protocol";
+import { PERMISSION_GROUPS, Permission, hasPermission, type Ban, type Invite, type PermissionName, type ServerState, type StatusApiMode } from "@squorli/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { ServerApi } from "./api";
 import { askConfirm } from "./dialogs";
 import { roleOrder } from "./roleOrder";
 import { ChannelsTab } from "./ChannelsTab";
+import { CopyButton } from "./CopyButton";
+import { formatDeepLink, parseDeepLink } from "./platform/deepLink";
 import { RadioTab } from "./RadioTab";
 import { ImportTab } from "./ImportTab";
 import { Icon } from "./Icon";
@@ -97,9 +99,52 @@ function ServerTab({ api, server, directoryUrl, run }: { api: ServerApi; server:
         {server.settings.iconUrl && <button className="secondary" onClick={() => run(() => api.deleteServerIcon())}>{t("common.remove")}</button>}
       </div>
       <span className="muted small">{t("admin.iconHint")}</span>
+      {server.settings.statusApi !== undefined && <StatusApiSection api={api} mode={server.settings.statusApi} run={run} />}
       <h3>{t("admin.ownersHeading")}</h3>
       <p className="muted small">{owners.map((o) => o.displayName).join(", ") || "–"}. {t("admin.ownersHint")}</p>
     </div>
+  );
+}
+
+/**
+ * Status API (docs/features/status-api.md): off, with the server's key, or public. The key is fetched only here (never part
+ * of the settings every member gets) and shown with a copy button; "Neu erzeugen" replaces it at once.
+ */
+function StatusApiSection({ api, mode, run }: { api: ServerApi; mode: StatusApiMode; run: RunFn }) {
+  const [key, setKey] = useState<string | null>(null);
+  useEffect(() => { if (mode === "key") void api.getStatusApiKey().then((r) => setKey(r.key)).catch(() => setKey(null)); }, [api, mode]);
+  const url = `${api.base || window.location.origin}/api/status`;
+  const modes: StatusApiMode[] = ["off", "key", "public"];
+  return (
+    <>
+      <h3>{t("admin.statusApiHeading")}</h3>
+      <span className="muted small">{t("admin.statusApiHint")}</span>
+      <div className="stack">
+        {modes.map((m) => (
+          <label key={m} className="check">
+            <input type="radio" name="status-api" checked={mode === m} onChange={() => run(() => api.updateSettings({ statusApi: m }))} />
+            {t(`admin.statusApi.${m}`)}
+          </label>
+        ))}
+      </div>
+      {mode !== "off" && (
+        <div className="row">
+          <code className="status-api-url">{url}</code>
+          <CopyButton text={url} label={t("common.copy")} className="secondary" />
+        </div>
+      )}
+      {mode === "key" && (
+        <>
+          <div className="row">
+            <code className="status-api-key">{key ?? "…"}</code>
+            {key && <CopyButton text={key} label={t("common.copy")} title={t("common.copy")} className="secondary" />}
+            <button className="secondary" onClick={() => run(async () => { const ok = await askConfirm({ title: t("admin.statusApiRegenerateTitle"), text: t("admin.statusApiRegenerateText"), confirmLabel: t("admin.statusApiRegenerate") }); if (ok) setKey((await api.regenerateStatusApiKey()).key); })}>{t("admin.statusApiRegenerate")}</button>
+          </div>
+          <span className="muted small">{t("admin.statusApiKeyHint")}</span>
+        </>
+      )}
+      {mode === "public" && <span className="muted small">{t("admin.statusApiPublicHint")}</span>}
+    </>
   );
 }
 
@@ -212,6 +257,10 @@ function InvitesTab({ api, run, canManage }: { api: ServerApi; run: RunFn; canMa
   useEffect(() => { void reload(); }, []);
   // The invite belongs to the server the panel acts on, which need not be the one serving the page (multi-server client).
   const link = (code: string) => `${api.base || window.location.origin}/invite/${code}`;
+  // The same invitation as a squorli:// link for the desktop app (user's wish, 23 September 2026): the host is where this
+  // server is reached (the foreign server's base, else the address bar, with its port in dev), built through the parser
+  // like the login screen's "open in the app" link, so it is only offered when the app will accept it.
+  const appLink = (code: string) => { const host = api.base ? new URL(api.base).host : window.location.host; const l = parseDeepLink(`squorli://invite/${host}/${code}`); return l ? formatDeepLink(l) : null; };
   return (
     <div className="stack">
       <div className="row">
@@ -220,10 +269,12 @@ function InvitesTab({ api, run, canManage }: { api: ServerApi; run: RunFn; canMa
         <button onClick={() => run(() => api.createInvite({ expiresInHours: hours ? Number(hours) : null, maxUses: uses ? Number(uses) : null }).then(reload))}>{t("admin.createInvite")}</button>
       </div>
       {list.length === 0 && <p className="muted">{canManage ? t("admin.noInvites") : t("admin.noInvitesMine")}</p>}
+      {list.length > 0 && <span className="muted small">{t("admin.appLinkHint")}</span>}
       {list.map((i) => (
         <div key={i.code} className="row invite-row">
           <code>{link(i.code)}</code>
-          <button className="secondary small" onClick={() => navigator.clipboard?.writeText(link(i.code))}>{t("admin.copy")}</button>
+          <CopyButton text={link(i.code)} label={t("admin.copyLink")} />
+          {appLink(i.code) && <CopyButton text={appLink(i.code)!} label={t("admin.copyAppLink")} />}
           <span className="muted small">{i.uses}{i.maxUses ? `/${i.maxUses}` : ""} {t("admin.used")}{i.expiresAt ? ` · ${t("admin.until", { date: fmtDateTime(i.expiresAt) })}` : ""}</span>
           <button className="danger small" onClick={() => run(() => api.revokeInvite(i.code).then(reload))}>{t("admin.revoke")}</button>
         </div>

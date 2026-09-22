@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { VoicePresence } from "./presence";
 
-const a = { userId: "11111111-1111-4111-8111-111111111111", displayName: "A" };
-const b = { userId: "22222222-2222-4222-8222-222222222222", displayName: "B" };
+const a = { userId: "11111111-1111-4111-8111-111111111111", displayName: "A", micMuted: false, deafened: false, cameraOn: false, screenOn: false };
+const b = { userId: "22222222-2222-4222-8222-222222222222", displayName: "B", micMuted: false, deafened: false, cameraOn: false, screenOn: false };
 
 describe("VoicePresence", () => {
   it("lists members per channel and removes them on leave", () => {
@@ -67,8 +67,31 @@ describe("VoicePresence", () => {
 
   it("renames across connections", () => {
     const p = new VoicePresence<string>();
-    p.join("c1", "lobby", a);
+    p.join("c1", "lobby", { ...a, micMuted: true });
     p.rename(a.userId, { displayName: null, publicKey: "abcdef1234" });
-    expect(p.members("lobby")[0]?.displayName).toBe("anon-abcdef");
+    expect(p.members("lobby")[0]).toEqual({ ...a, displayName: "anon-abcdef", micMuted: true });
+  });
+
+  it("carries the mute state a client reports and tells the channel about a change only", () => {
+    const p = new VoicePresence<string>();
+    const fn = vi.fn();
+    p.onChange(fn);
+    const off = { cameraOn: false, screenOn: false };
+    p.setStatus("c1", { micMuted: true, deafened: false, ...off }); // in no channel: nothing
+    p.join("c1", "lobby", { ...a, micMuted: true });
+    p.setStatus("c1", { micMuted: true, deafened: false, ...off }); // no change: no event
+    expect(fn).toHaveBeenCalledTimes(1);
+    p.setStatus("c1", { micMuted: true, deafened: true, ...off });
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(p.members("lobby")).toEqual([{ ...a, micMuted: true, deafened: true }]);
+    expect(p.statusOfUser(a.userId)).toEqual({ channelId: "lobby", micMuted: true, deafened: true, ...off });
+    // Camera and screen share travel the same way.
+    p.setStatus("c1", { micMuted: true, deafened: true, cameraOn: true, screenOn: true });
+    expect(fn).toHaveBeenCalledTimes(3);
+    expect(p.statusOfUser(a.userId)).toEqual({ channelId: "lobby", micMuted: true, deafened: true, cameraOn: true, screenOn: true });
+    expect(p.statusOfUser(b.userId)).toBeUndefined();
+    // A restored entry (LiveKit's guess) says nothing about the mute state and starts unmuted.
+    p.join("c2", "lobby", b, true);
+    expect(p.members("lobby")[1]).toEqual(b);
   });
 });

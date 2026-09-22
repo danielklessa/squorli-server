@@ -85,6 +85,15 @@ export function displayNameOf(u: { displayName: string | null; publicKey: string
 
 // ---------- Server structure ----------
 
+/** Who may read GET /api/status (docs/features/status-api.md): nobody, holders of the server's key, anyone. */
+export const StatusApiMode = z.enum(["off", "key", "public"]);
+/**
+ * What a client shows in its dock (voice.join, voice.status, VoiceMember): microphone muted by hand, sound off (which also
+ * mutes the microphone), and since the same day whether its camera or screen share is on. The last two default to false
+ * (a client or server from before them says nothing).
+ */
+export const VoiceStatus = z.object({ micMuted: z.boolean(), deafened: z.boolean(), cameraOn: z.boolean().default(false), screenOn: z.boolean().default(false) });
+
 export const ServerSettings = z.object({
   name: z.string().min(1).max(64),
   /** true = anyone with a key may join; false = an invite is required. */
@@ -116,8 +125,16 @@ export const ServerSettings = z.object({
    * (one that knows it sends null for "none"); clients then report no activity to it and hide the setting.
    */
   afkChannelId: Uuid.nullable().optional(),
+  /**
+   * Status API (docs/features/status-api.md): GET /api/status shows the structure and who sits where to the outside. "off" =
+   * the route answers 404 (default), "key" = only with the server's key (Verwaltung > Server), "public" = anyone. Optional =
+   * feature flag: a server from before it does not send the field; such a server also does not understand `voice.status`.
+   */
+  statusApi: StatusApiMode.optional(),
 });
-export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true, requireAccount: true, listed: true, description: true, radioAutoStop: true, afkChannelId: true }).partial();
+export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true, requireAccount: true, listed: true, description: true, radioAutoStop: true, afkChannelId: true, statusApi: true }).partial();
+/** The key of the status API in mode "key" (MANAGE_SERVER only); null = none yet (made when the mode is switched to "key"). */
+export const StatusApiKeyResponse = z.object({ key: z.string().nullable() });
 /** How long a voice channel may stay empty before its radio is turned off (ServerSettings.radioAutoStop). */
 export const RADIO_IDLE_STOP_MS = 2 * 60_000;
 
@@ -452,6 +469,31 @@ export const ServerState = z.object({
   myPermissions: z.number().int(),
 });
 
+// ---------- REST: status API (docs/features/status-api.md) ----------
+
+/**
+ * What GET /api/status shows to the outside (a website widget, a bot, a stream overlay): the server, its channels in the
+ * order the client shows them, and the members with where they sit. No permissions, no keys, no messages. `iconUrl` and
+ * `avatarUrl` are absolute (the avatar is the directory account's picture, public there like the handle; user's decision).
+ */
+export const StatusChannel = z.object({
+  id: Uuid, kind: ChannelKind, name: z.string(), topic: z.string().nullable(),
+  /** null = outside every category (shown first). */
+  categoryId: Uuid.nullable(),
+  /** Order inside the category (ascending), as in the client. */
+  position: z.number().int(),
+});
+export const StatusMember = z.object({
+  userId: Uuid, displayName: z.string(), handle: z.string().nullable(), avatarUrl: z.string().url().nullable(),
+  online: z.boolean(), afk: z.boolean(), isOwner: z.boolean(),
+  /** The voice channel the member sits in with their mute state, null = in none. */
+  voice: VoiceStatus.extend({ channelId: Uuid }).nullable(),
+});
+export const ServerStatus = z.object({
+  name: z.string(), iconUrl: z.string().url().nullable(), time: Iso,
+  categories: z.array(Category), channels: z.array(StatusChannel), members: z.array(StatusMember),
+});
+
 // ---------- REST: joining LiveKit ----------
 
 /** The client may only request rooms that exist as a voice channel; the server checks channel and permission. */
@@ -464,13 +506,24 @@ export const RtcTokenResponse = z.object({
 
 // ---------- WebSocket: events ----------
 
-export const VoiceMember = z.object({ userId: Uuid, displayName: z.string() });
+/**
+ * Somebody sitting in a voice channel. `micMuted`/`deafened` (23 September 2026) is what their client reported with
+ * `voice.join` and `voice.status`, so everyone sees it, not only the people in the same LiveKit room; defaults for
+ * servers from before it (clients then fall back to what LiveKit shows them).
+ */
+export const VoiceMember = z.object({ userId: Uuid, displayName: z.string(), micMuted: z.boolean().default(false), deafened: z.boolean().default(false), cameraOn: z.boolean().default(false), screenOn: z.boolean().default(false) });
 
 export const ClientHello = z.object({ type: z.literal("hello"), protocolVersion: z.number().int(), sessionToken: z.string() });
 export const ClientPing = z.object({ type: z.literal("ping"), t: z.number() });
 /** Channel state is intent, not media state: "I want to be listed as a member". */
-export const ClientVoiceJoin = z.object({ type: z.literal("voice.join"), channelId: Uuid });
+/** The mute state travels with the join so nobody shows as unmuted for a moment; a server from before it drops the fields unread. */
+export const ClientVoiceJoin = z.object({ type: z.literal("voice.join"), channelId: Uuid, micMuted: z.boolean().optional(), deafened: z.boolean().optional(), cameraOn: z.boolean().optional(), screenOn: z.boolean().optional() });
 export const ClientVoiceLeave = z.object({ type: z.literal("voice.leave") });
+/**
+ * Mute or deafen changed while in the channel. Sent only to servers whose settings carry `statusApi` (older servers would
+ * answer `bad_message`); the server ignores it from a connection that sits in no voice channel.
+ */
+export const ClientVoiceStatus = VoiceStatus.extend({ type: z.literal("voice.status") });
 export const ClientTyping = z.object({ type: z.literal("typing"), channelId: Uuid });
 /**
  * AFK detection: this connection's user has given no input (and has not spoken) for AFK_AFTER_MS (`idle: true`) or is back.
@@ -483,7 +536,7 @@ export const ClientActivity = z.object({
   game: GamePresence.nullable().optional(),
 });
 
-export const ClientEvent = z.discriminatedUnion("type", [ClientHello, ClientPing, ClientVoiceJoin, ClientVoiceLeave, ClientTyping, ClientActivity]);
+export const ClientEvent = z.discriminatedUnion("type", [ClientHello, ClientPing, ClientVoiceJoin, ClientVoiceLeave, ClientVoiceStatus, ClientTyping, ClientActivity]);
 
 export const ServerWelcome = z.object({
   type: z.literal("welcome"),
@@ -558,6 +611,12 @@ export type VerifyResponse = z.infer<typeof VerifyResponse>;
 export type RtcTokenResponse = z.infer<typeof RtcTokenResponse>;
 export type Me = z.infer<typeof Me>;
 export type ServerSettings = z.infer<typeof ServerSettings>;
+export type StatusApiMode = z.infer<typeof StatusApiMode>;
+export type StatusApiKeyResponse = z.infer<typeof StatusApiKeyResponse>;
+export type VoiceStatus = z.infer<typeof VoiceStatus>;
+export type ServerStatus = z.infer<typeof ServerStatus>;
+export type StatusMember = z.infer<typeof StatusMember>;
+export type StatusChannel = z.infer<typeof StatusChannel>;
 export type Category = z.infer<typeof Category>;
 export type Channel = z.infer<typeof Channel>;
 export type RadioStation = z.infer<typeof RadioStation>;

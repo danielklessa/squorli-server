@@ -2,6 +2,7 @@ import { createContext, memo, useContext, useEffect, useMemo, useState, type Rea
 import { Icon } from "./Icon";
 import { parseMarkdown, type Block, type Inline, type ListBlock, type TableBlock } from "./markdown";
 import { t } from "./i18n";
+import { isSquorliLink, openSquorliLink } from "./squorliLinks";
 
 /**
  * Who a mention `<@userId>` is right now: the channel chat provides the names of its members and the own id (mentions of
@@ -133,7 +134,10 @@ function renderInline(nodes: Inline[]): ReactNode[] {
       case "mark": return <mark key={i}>{renderInline(n.children)}</mark>;
       case "sub": return <sub key={i}>{renderInline(n.children)}</sub>;
       case "sup": return <sup key={i}>{renderInline(n.children)}</sup>;
-      case "link": return <a key={i} href={n.href} title={n.href} target="_blank" rel="noreferrer noopener">{renderInline(n.children)}</a>;
+      // A squorli:// link stays in this tab: the client takes it (desktop app), else the browser hands it to the system.
+      case "link": return isSquorliLink(n.href)
+        ? <a key={i} href={n.href} title={n.href} onClick={(e) => { if (openSquorliLink(n.href)) e.preventDefault(); }}>{renderInline(n.children)}</a>
+        : <a key={i} href={n.href} title={n.href} target="_blank" rel="noreferrer noopener">{renderInline(n.children)}</a>;
     }
   });
 }

@@ -372,9 +372,10 @@ export class Store {
    * A `squorli://` link reached the app (desktop): shown like an address typed in (`addServer`), so a server the key has never
    * been on waits for a click. Before the client's own login it waits and is shown right after it.
    */
-  openLink(input: string) {
-    if (this.homeHost !== null) return;
+  openLink(input: string): boolean {
+    if (this.homeHost !== null) return false; // a client served by a server shows no other server this way (the browser hands the link to the system)
     if (this.entered) void this.addServer(input); else this.startTarget = input;
+    return true;
   }
   /**
    * Sign in with the directory account (handle + password, code with an active authenticator): fetches the key, replaces the

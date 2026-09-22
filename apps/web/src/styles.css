@@ -222,6 +222,8 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 .brand-mark { width: 22px; height: 22px; flex: none; }
 .brand-mark.server-icon, .server-icon-preview { border-radius: 6px; object-fit: cover; background: var(--bg); }
 .server-icon-preview { width: 48px; height: 48px; border-radius: var(--r); }
+/* Status API (Verwaltung > Server): the address and the key as selectable chips that wrap instead of widening the panel. */
+.status-api-url, .status-api-key { display: inline-block; padding: calc(var(--u) * 0.75) var(--u); background: var(--bg); border-radius: var(--r); word-break: break-all; user-select: all; max-width: 100%; }
 .channel-list { padding: 1rem 0.75rem; }
 .channel-list section { margin-bottom: 1.5rem; }
 .channel-list h3 { padding: 0.4rem 0.5rem 0.2rem; }
@@ -457,7 +459,8 @@ button.dock-stage:hover { background: var(--sel); }
 .icon-btn { cursor: pointer; padding: 0.4rem; font-size: 1.1rem; }
 .typing { height: 1.3rem; font-size: 0.8rem; color: var(--muted); padding: 0.2rem 0.4rem; }
 .pending-files { display: flex; gap: 0.4rem; flex-wrap: wrap; padding: 0.3rem 0; }
-.chip { background: var(--bg4); border-radius: 999px; padding: 0.15rem 0.3rem 0.15rem 0.7rem; font-size: 0.875rem; }
+.chip { display: inline-flex; align-items: center; gap: 0.3rem; background: var(--bg4); border-radius: 999px; padding: 0.15rem 0.3rem 0.15rem 0.7rem; font-size: 0.875rem; }
+.chip-thumb { width: 1.6rem; height: 1.6rem; object-fit: cover; border-radius: 999px; margin-left: -0.5rem; flex: none; }   /* a pasted picture shows itself before it is sent */
 
 /* Members */
 .members-col ul { list-style: none; margin: 0 0 0.6rem; padding: 0; }

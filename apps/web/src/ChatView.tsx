@@ -1,7 +1,7 @@
 import { AutoGrowTextarea } from "./AutoGrowTextarea";
 import { Avatar } from "./Avatar";
 import { Permission, hasPermission, type Channel, type Member, type Message } from "@squorli/protocol";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { askConfirm } from "./dialogs";
 import { EmojiButton } from "./EmojiPicker";
 import { Icon } from "./Icon";
@@ -9,6 +9,7 @@ import { LinkPreviews } from "./LinkPreviews";
 import { MentionContext, MessageText } from "./MessageText";
 import { useMentionSuggest } from "./MentionSuggest";
 import { decodeMentions, encodeMentions, mentionsUser } from "./mentions";
+import { pastedFiles } from "./pasteFiles";
 import type { ChannelMessages } from "./store";
 import type { ServerConnection } from "./serverConnection";
 import { fmtDay, fmtTime, t } from "./i18n";
@@ -26,6 +27,23 @@ type Props = {
 const GROUP_MS = 5 * 60_000;
 
 const fmtSize = (n: number) => (n > 1_048_576 ? `${(n / 1_048_576).toFixed(1)} MB` : n > 1024 ? `${Math.round(n / 1024)} kB` : `${n} B`);
+
+/** A file waiting in the composer: its name, a small preview for a picture (so a pasted one can be seen before sending), and the x. */
+function PendingFile({ file, onRemove }: { file: File; onRemove: () => void }) {
+  const [preview, setPreview] = useState<string | null>(null);
+  useEffect(() => {
+    if (!file.type.startsWith("image/")) { setPreview(null); return; }
+    const url = URL.createObjectURL(file);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  return (
+    <span className="chip">
+      {preview && <img className="chip-thumb" src={preview} alt="" />}
+      {file.name} <button className="icon" title={t("common.remove")} onClick={onRemove}><Icon name="x" /></button>
+    </span>
+  );
+}
 
 export function ChatView({ channel, messages, members, myUserId, myPermissions, typing, conn }: Props) {
   const [draft, setDraft] = useState("");
@@ -86,6 +104,20 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
     } finally { setSending(false); inputRef.current?.focus(); }   // keep writing right away, also after a click on "Senden"
   }
 
+  /**
+   * A paste anywhere in the chat (Ctrl+V, or "Einfügen" in the desktop app's context menu) that carries files, such as a
+   * picture from a screenshot tool: they join the composer's files, as if chosen with the paper clip (pasteFiles.ts).
+   * Plain text pastes as ever; a paste into the field that edits a message is left alone (an edit cannot add files).
+   */
+  function onPaste(e: ClipboardEvent<HTMLElement>) {
+    if (!canAttach || !canSend || sending || e.target === editRef.current) return;
+    const pasted = pastedFiles(e.clipboardData);
+    if (pasted.length === 0) return;
+    e.preventDefault();
+    setFiles((cur) => [...cur, ...pasted]);
+    inputRef.current?.focus();
+  }
+
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (mention.onKeyDown(e)) return;   // the suggestion list takes arrows, Enter, Tab and Escape while it is open
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); }
@@ -110,7 +142,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
   const typers = Object.entries(typing).filter(([uid, t]) => uid !== myUserId && Date.now() - t < 4000).map(([uid]) => nameOf.get(uid) ?? t("chat.someone"));
 
   return (
-    <section className="chat">
+    <section className="chat" onPaste={onPaste}>
       <header className="chat-head">
         <span className="channel-icon"><Icon name="hash" /></span><strong>{channel.name}</strong>
         {channel.topic && <span className="muted topic">{channel.topic}</span>}
@@ -180,7 +212,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
         {err && <p className="error">{err}</p>}
         {files.length > 0 && (
           <div className="pending-files">
-            {files.map((f, i) => <span key={i} className="chip">{f.name} <button className="icon" title={t("common.remove")} onClick={() => setFiles(files.filter((_, j) => j !== i))}><Icon name="x" /></button></span>)}
+            {files.map((f, i) => <PendingFile key={i} file={f} onRemove={() => setFiles(files.filter((_, j) => j !== i))} />)}
           </div>
         )}
         {/* Above the input, so that the input stands on the same base line as the dock with the mini profile (user's wish, 21 September 2026). */}

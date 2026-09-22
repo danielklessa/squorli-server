@@ -70,6 +70,7 @@ export function desktopPlatform(bridge: DesktopBridge): Platform {
       // An app older than this client has no such member.
       setPlayerOutput: typeof bridge.setPlayerOutput === "function" ? (label) => bridge.setPlayerOutput(label) : null,
       setChatPlayerOutput: typeof bridge.setChatPlayerOutput === "function" ? (label) => bridge.setChatPlayerOutput(label) : null },
+    setLanguage: typeof bridge.setLanguage === "function" ? (language) => bridge.setLanguage(language) : null,
     links: {
       openExternal: (url) => bridge.openExternal(url),
       onDeepLink: (cb) => bridge.onDeepLink((raw) => { const link = parseDeepLink(raw); if (link) cb(link); }),

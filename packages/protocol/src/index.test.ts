@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ClientEvent, CreateMessageRequest, MarkReadRequest, MuteRequest, ReadStateResponse, DEFAULT_EVERYONE_PERMISSIONS, DEFAULT_MEMBER_PERMISSIONS, PERMISSION_GROUPS, Permission, RtcTokenRequest, ServerEvent,
-  UpdateMeRequest, VerifyRequest, challengeMessage, displayNameOf, hasPermission, mentionedUserIds, permissionNames,
+  ServerSettings, ServerStatus, StatusApiMode, UpdateMeRequest, VerifyRequest, challengeMessage, displayNameOf, hasPermission, mentionedUserIds, permissionNames,
 } from "./index";
 
 const U1 = "6f1c2a4e-1b2c-4d3e-8f90-123456789abc";
@@ -33,6 +33,22 @@ describe("protocol", () => {
   });
   it("rejects unknown event types", () => {
     expect(ClientEvent.safeParse({ type: "nope" }).success).toBe(false);
+  });
+  it("carries the mute state with the join and as voice.status, and fills it in for older servers", () => {
+    expect(ClientEvent.safeParse({ type: "voice.join", channelId: U1, micMuted: true, deafened: false }).success).toBe(true);
+    expect(ClientEvent.safeParse({ type: "voice.status", micMuted: false, deafened: true }).success).toBe(true);
+    expect(ClientEvent.safeParse({ type: "voice.status", micMuted: "ja" }).success).toBe(false);
+    const state = ServerEvent.safeParse({ type: "voice.state", channelId: U1, members: [{ userId: U1, displayName: "A" }] });
+    expect(state.success && state.data.type === "voice.state" && state.data.members[0]).toEqual({ userId: U1, displayName: "A", micMuted: false, deafened: false, cameraOn: false, screenOn: false });
+    const status = ClientEvent.safeParse({ type: "voice.status", micMuted: false, deafened: false, screenOn: true });
+    expect(status.success && status.data.type === "voice.status" && status.data).toEqual({ type: "voice.status", micMuted: false, deafened: false, cameraOn: false, screenOn: true });
+    expect(ServerSettings.shape.statusApi.safeParse(undefined).success).toBe(true);
+    expect(StatusApiMode.options).toEqual(["off", "key", "public"]);
+    const statusApi = ServerStatus.safeParse({
+      name: "S", iconUrl: null, time: "2026-09-23T00:00:00.000Z", categories: [], channels: [{ id: U1, kind: "voice", name: "Lobby", topic: null, categoryId: null, position: 0 }],
+      members: [{ userId: U1, displayName: "A", handle: null, avatarUrl: null, online: true, afk: false, isOwner: false, voice: { channelId: U1, micMuted: true, deafened: false } }],
+    });
+    expect(statusApi.success).toBe(true);
   });
   it("binds the challenge to a domain", () => {
     expect(challengeMessage("a.example", "00")).not.toBe(challengeMessage("b.example", "00"));

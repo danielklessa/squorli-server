@@ -6,9 +6,9 @@ const other = "22222222-2222-4222-8222-222222222222";
 
 describe("voiceElsewhere", () => {
   it("names the channel that lists the account, else null", () => {
-    const voice = { lobby: [{ userId: other, displayName: "B" }], games: [{ userId: me, displayName: "A" }] };
+    const voice = { lobby: [{ userId: other, displayName: "B", micMuted: false, deafened: false, cameraOn: false, screenOn: false }], games: [{ userId: me, displayName: "A", micMuted: false, deafened: false, cameraOn: false, screenOn: false }] };
     expect(voiceElsewhere(voice, me)).toBe("games");
-    expect(voiceElsewhere({ lobby: [{ userId: other, displayName: "B" }] }, me)).toBeNull();
+    expect(voiceElsewhere({ lobby: [{ userId: other, displayName: "B", micMuted: false, deafened: false, cameraOn: false, screenOn: false }] }, me)).toBeNull();
     expect(voiceElsewhere({}, me)).toBeNull();
     expect(voiceElsewhere(voice, null)).toBeNull();
   });

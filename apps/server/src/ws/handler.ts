@@ -96,7 +96,7 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
         if (room && socket.readyState === socket.OPEN && !presence.channelOfUser(userId)) {
           const [channel] = await db.select({ id: channels.id, kind: channels.kind }).from(channels).where(eq(channels.id, room)).limit(1);
           const [user] = await db.select({ publicKey: users.publicKey, displayName: users.displayName, handle: users.handle }).from(users).where(eq(users.id, userId)).limit(1);
-          if (channel?.kind === "voice" && user && socket.readyState === socket.OPEN && !presence.channelOfUser(userId)) presence.join(socket, channel.id, { userId, displayName: displayNameOf(user) }, true);
+          if (channel?.kind === "voice" && user && socket.readyState === socket.OPEN && !presence.channelOfUser(userId)) presence.join(socket, channel.id, { userId, displayName: displayNameOf(user), micMuted: false, deafened: false, cameraOn: false, screenOn: false }, true);
         }
         return;
       }
@@ -124,11 +124,14 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
             for (const room of new Set(others.map((o) => o.channelId))) if (room !== channel.id) void lk.removeParticipant(room, userId);
           }
           presence.dropRestored(userId, socket);
-          return presence.join(socket, channel.id, { userId, displayName: displayNameOf(user) });
+          // The mute state comes with the join (a client from before it says nothing: unmuted) and changes with voice.status.
+          return presence.join(socket, channel.id, { userId, displayName: displayNameOf(user), micMuted: ev.data.micMuted ?? false, deafened: ev.data.deafened ?? false, cameraOn: ev.data.cameraOn ?? false, screenOn: ev.data.screenOn ?? false });
         }
         case "voice.leave":
           presence.dropRestored(userId, socket);
           return presence.leave(socket);
+        case "voice.status":
+          return presence.setStatus(socket, { micMuted: ev.data.micMuted, deafened: ev.data.deafened, cameraOn: ev.data.cameraOn, screenOn: ev.data.screenOn });
         case "activity":
           // AFK detection: the hub turns the connections' reports into the member's state (index.ts broadcasts and moves).
           hub.setIdle(socket, ev.data.idle);

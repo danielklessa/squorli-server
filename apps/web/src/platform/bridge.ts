@@ -174,6 +174,8 @@ export interface DesktopBridge {
   clientReady(): void;
   /** How many direct messages and mentions wait (0 = none): the mark on the task bar icon and the tray icon. */
   setAttention(count: number): void;
+  /** The client's language ("de" or "en") for what the shell draws itself: the window's context menu, the tray's menu. An app from before it has no such member. */
+  setLanguage(language: string): void;
   /** Register the global shortcuts and watch the push-to-talk key; answers with what the shell could do. Replaces the previous request. */
   setHotkeys(request: HotkeyRequest): Promise<HotkeyStatus>;
   /** While the client captures a new key: the shortcuts are let go (a registered one never reaches the window) and no key is watched. */
@@ -213,6 +215,7 @@ export const IPC = {
   setAutostart: "squorli:set-autostart",
   setAutostartBackground: "squorli:set-autostart-background",
   attention: "squorli:attention",
+  language: "squorli:language",
   hotkeysSet: "squorli:hotkeys-set",
   hotkeysSuspend: "squorli:hotkeys-suspend",
   control: "squorli:control",

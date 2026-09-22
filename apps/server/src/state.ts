@@ -20,6 +20,7 @@ export async function loadSettings(db: Db): Promise<ServerSettings> {
     listed: row.listed, description: row.description, radioAutoStop: row.radioAutoStop,
     afkChannelId: row.afkChannelId,
     iconUrl: row.iconMime && row.iconUpdatedAt ? `/api/server-icon?v=${row.iconUpdatedAt.getTime()}` : null,
+    statusApi: row.statusApi,
   };
 }
 

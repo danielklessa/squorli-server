@@ -93,12 +93,15 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, clie
           <ul className="voice-members">
             {members.map((m) => {
               const p = voiceState?.channelId === c.id ? voiceState.participants.find((x) => x.identity === m.userId) : undefined;
+              // Mute, sound off, camera and screen: from LiveKit while in the same room (media state, at once), otherwise what
+              // the member's client told the server (voice.join/voice.status), so the whole server sees it (23 September 2026).
+              const micMuted = p ? p.micMuted : m.micMuted, deafened = p ? p.deafened : m.deafened, cameraOn = p ? p.cameraOn : m.cameraOn, screenOn = p ? p.screenOn : m.screenOn;
               const draggable = canDrag(m.userId);
               return <li key={m.userId} className={`${p?.speaking ? "speaking" : ""} ${draggable ? "draggable" : ""} ${dragging?.userId === m.userId ? "dragging" : ""} ${menu?.userId === m.userId ? "menu-open" : ""}`}
                 draggable={draggable} title={draggable ? t("sidebar.dragHint") : undefined}
                 onContextMenu={(e) => { if (m.userId === myUserId) return; e.preventDefault(); setMenu({ userId: m.userId, trigger: e.currentTarget, x: e.clientX, y: e.clientY }); }}
                 onDragStart={(e) => { if (!draggable) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", m.userId); setDragging({ userId: m.userId, from: c.id }); }}
-                onDragEnd={() => { setDragging(null); setDropTarget(null); }}><Avatar name={m.displayName} src={avatarOf.get(m.userId)} size="small" /><span className="member-name">{m.displayName}</span>{afkOf.has(m.userId) && <Icon name="moon" className="afk" title={t("members.afk")} />}{p?.micMuted && <Icon name="mic-off" className="muted" title={t("voice.micMuted")} />}{p?.deafened && <Icon name="headphone-off" className="muted" title={t("voice.deafened")} />}{p?.cameraOn && <Icon name="video" title={t("voice.cameraOn")} />}{p?.screenOn && <Icon name="screen-share" title={t("voice.sharingScreen")} />}</li>;
+                onDragEnd={() => { setDragging(null); setDropTarget(null); }}><Avatar name={m.displayName} src={avatarOf.get(m.userId)} size="small" /><span className="member-name">{m.displayName}</span>{afkOf.has(m.userId) && <Icon name="moon" className="afk" title={t("members.afk")} />}{micMuted && <Icon name="mic-off" className="muted" title={t("voice.micMuted")} />}{deafened && <Icon name="headphone-off" className="muted" title={t("voice.deafened")} />}{cameraOn && <Icon name="video" title={t("voice.cameraOn")} />}{screenOn && <Icon name="screen-share" title={t("voice.sharingScreen")} />}</li>;
             })}
           </ul>
         )}

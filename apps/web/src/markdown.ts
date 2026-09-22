@@ -9,6 +9,7 @@
  * remote image would reveal the reader's IP address to a foreign host).
  */
 import { readBareUrl } from "@squorli/protocol";
+import { parseDeepLink } from "./platform/deepLink";
 import { EMOTICON_STARTS, emoticonAt, shortcodeAt, splitEmoji } from "./emoji/convert";
 
 export type Inline =
@@ -52,6 +53,16 @@ const listRe = /^([ \t]*)([-*+]|\d{1,9}[.)])[ \t]+(\S.*)$/;
 const fenceRe = /^ {0,3}```/;
 const langRe = /^[\w+#.-]{1,32}$/;
 const safeHrefRe = /^(?:https?:\/\/|mailto:)[^\s]+$/i;
+/** Web and mail addresses, and of the app's own scheme only a server or invite link (`parseDeepLink`), never a command. */
+const isSafeHref = (href: string): boolean => safeHrefRe.test(href) || (/^squorli:/i.test(href) && parseDeepLink(href) !== null);
+/** Bare `squorli://server/...` or `squorli://invite/...` at `at`, trimmed like a bare web address (readBareUrl). */
+function readBareSquorliLink(text: string, at: number): string | null {
+  const m = /^squorli:\/\/[^\s<]+/i.exec(text.slice(at, at + 400));
+  if (!m) return null;
+  let url = m[0];
+  while (/[.,;:!?*_~'"\])]$/.test(url)) url = url.slice(0, -1);
+  return parseDeepLink(url) ? url : null;
+}
 const wordRe = /[\p{L}\p{N}]/u;
 const escapableRe = /[!-/:-@[-`{-~]/;
 const mentionRe = /<@([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})>/y;
@@ -230,8 +241,8 @@ export function parseInline(text: string, inLink = false): Inline[] {
 
     if (!inLink) {
       if (c === "<") {
-        const m = /^<((?:https?:\/\/|mailto:)[^\s<>]+)>/i.exec(text.slice(i, i + 2100));
-        if (m) { flush(); out.push({ type: "link", href: m[1]!, children: [{ type: "text", text: m[1]!.replace(/^mailto:/i, "") }] }); i += m[0].length; continue; }
+        const m = /^<((?:https?:\/\/|mailto:|squorli:\/\/)[^\s<>]+)>/i.exec(text.slice(i, i + 2100));
+        if (m && isSafeHref(m[1]!)) { flush(); out.push({ type: "link", href: m[1]!, children: [{ type: "text", text: m[1]!.replace(/^mailto:/i, "") }] }); i += m[0].length; continue; }
       }
       if (c === "[" || (c === "!" && text[i + 1] === "[")) {
         const link = readLink(text, c === "!" ? i + 1 : i);
@@ -241,8 +252,8 @@ export function parseInline(text: string, inLink = false): Inline[] {
           out.push({ type: "link", href: link.href, children: label }); i = link.next; continue;
         }
       }
-      if ((c === "h" || c === "H") && !(i > 0 && wordRe.test(text[i - 1]!))) {
-        const url = readBareUrl(text, i);
+      if ((c === "h" || c === "H" || c === "s" || c === "S") && !(i > 0 && wordRe.test(text[i - 1]!))) {
+        const url = c === "h" || c === "H" ? readBareUrl(text, i) : readBareSquorliLink(text, i);
         if (url) { flush(); out.push({ type: "link", href: url, children: [{ type: "text", text: url }] }); i += url.length; continue; }
       }
     }
@@ -344,7 +355,7 @@ function readLink(text: string, at: number): { href: string; children: Inline[];
   const dest = /^\s*<?([^\s<>]+)>?(?:\s+(?:"[^"]*"|'[^']*'))?\s*$/.exec(text.slice(end + 2, j));
   if (!dest) return null;
   const href = dest[1]!.replace(/\\([!-/:-@[-`{-~])/g, "$1");
-  if (!safeHrefRe.test(href)) return null;
+  if (!isSafeHref(href)) return null;
   const label = text.slice(at + 1, end);
   if (/^\s*(?:https?:\/\/|www\.)/i.test(label) && label.trim() !== href) return null;
   return { href, children: parseInline(label, true), next: j + 1 };

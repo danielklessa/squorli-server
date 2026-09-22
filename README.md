@@ -94,6 +94,10 @@ All variables are documented in [.env.example](.env.example). The most relevant 
 
 Voice quality (Opus bitrate, stereo) is configured per voice channel in the admin panel.
 
+### Status API
+
+`GET https://PUBLIC_DOMAIN/api/status` returns the server name, its icon address, all categories and channels in the order the client shows them, and all members with whether they are online or away and which voice channel they sit in, including whether their microphone is muted or their sound is off, as JSON, for a widget on your website, a bot or a stream overlay. It is off by default (404). In the admin panel under Server you choose whether it needs the server's key (`Authorization: Bearer <key>` or `?key=<key>`; the panel shows the key and can replace it) or is public. `?online=1` lists only the members who are signed in. Avatars are the directory account pictures (public there anyway); public keys, roles, permissions and messages are never included.
+
 ## Reverse proxy
 
 With `PROXY_MODE=external` an existing reverse proxy terminates TLS and forwards to the app server on port 3000 and LiveKit on port 7880:

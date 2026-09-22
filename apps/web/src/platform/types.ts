@@ -56,6 +56,8 @@ export interface Platform {
   readonly home: PlatformHome | null;
   /** Directory to use when there is no home server to name one. */
   readonly defaultDirectoryUrl: string | null;
+  /** Tell the shell the client's language for what the shell draws itself (the window's context menu, the tray's menu); null = nothing to tell (browser, older app). */
+  readonly setLanguage: ((language: "de" | "en") => void) | null;
   /**
    * AFK detection across the whole system (idleDetection.ts). "permission": a browser grants it only inside a click, so it is
    * a switch in the settings; "always": the desktop shell grants it by itself, it simply runs and there is no switch.

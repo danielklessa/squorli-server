@@ -1,6 +1,7 @@
-import { Permission, UpdateSettingsRequest } from "@squorli/protocol";
+import { Permission, UpdateSettingsRequest, type StatusApiKeyResponse } from "@squorli/protocol";
 import { and, eq, isNotNull } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import { randomBytes } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import { mkdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -17,6 +18,9 @@ import { compact } from "../util";
 import type { DirectoryClient } from "../directory";
 import type { VoicePresence } from "../voice/presence";
 import { RADIO_OFF } from "./radio";
+
+/** 32 random bytes as base64url (43 characters): fits a query string and a header without escaping. */
+function newStatusApiKey(): string { return randomBytes(32).toString("base64url"); }
 
 /** Server icon: raster images only (SVG could contain scripts and would be served same-origin), at most 2 MB. */
 const ICON_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
@@ -64,7 +68,10 @@ export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: 
       const [ch] = await db.select({ kind: channels.kind }).from(channels).where(eq(channels.id, afkChannelId)).limit(1);
       if (ch?.kind !== "voice") return reply.code(400).send({ error: "unknown_channel" });
     }
-    await db.update(serverSettings).set(compact(body.data)).where(eq(serverSettings.id, SETTINGS_ID));
+    // Status API in mode "key" needs a key: made the first time the mode is chosen, kept over later switches (Regenerate = the route below).
+    const [keyRow] = body.data.statusApi === "key" ? await db.select({ key: serverSettings.statusApiKey }).from(serverSettings).where(eq(serverSettings.id, SETTINGS_ID)).limit(1) : [];
+    await db.update(serverSettings).set({ ...compact(body.data), ...(keyRow && !keyRow.key ? { statusApiKey: newStatusApiKey() } : {}) }).where(eq(serverSettings.id, SETTINGS_ID));
+    if (body.data.statusApi !== undefined && body.data.statusApi !== before.statusApi) req.log.info({ by: m.userId, statusApi: body.data.statusApi }, "Status-API umgestellt");
     const afkChanged = afkChannelId !== undefined && afkChannelId !== (before.afkChannelId ?? null);
     // The new AFK channel loses its radio; LiveKit silences whoever sits in it and gives the old one's members their grants
     // back. Current clients rejoin with a fresh token on the settings change anyway; this holds for all the others.
@@ -82,6 +89,28 @@ export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: 
     await broadcastStructure(db, hub, ["settings"]);
     if (body.data.name !== undefined || body.data.listed !== undefined || body.data.description !== undefined || body.data.openJoin !== undefined) reregister();
     return { ok: true };
+  });
+
+  // ---- Status API key (Admin > Server, docs/features/status-api.md): never part of ServerSettings, which every member gets.
+  app.get("/api/settings/status-api-key", async (req, reply) => {
+    const m = await requireMember(db, req, reply);
+    if (!m) return;
+    if (!can(m.actor, Permission.MANAGE_SERVER)) return reply.code(403).send({ error: "forbidden" });
+    const [row] = await db.select({ key: serverSettings.statusApiKey }).from(serverSettings).where(eq(serverSettings.id, SETTINGS_ID)).limit(1);
+    const res: StatusApiKeyResponse = { key: row?.key ?? null };
+    return res;
+  });
+
+  /** A new key; the old one stops working at once (a leaked key, a widget that should lose access). */
+  app.post("/api/settings/status-api-key", async (req, reply) => {
+    const m = await requireMember(db, req, reply);
+    if (!m) return;
+    if (!can(m.actor, Permission.MANAGE_SERVER)) return reply.code(403).send({ error: "forbidden" });
+    const key = newStatusApiKey();
+    await db.update(serverSettings).set({ statusApiKey: key }).where(eq(serverSettings.id, SETTINGS_ID));
+    req.log.info({ by: m.userId }, "Status-API-Schlüssel neu erzeugt");
+    const res: StatusApiKeyResponse = { key };
+    return res;
   });
 
   // ---- Server icon (Admin > Server): file under DATA_DIR/server-icon, type + timestamp in server_settings.
