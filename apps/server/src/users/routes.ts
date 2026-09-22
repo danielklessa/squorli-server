@@ -4,7 +4,7 @@ import type { FastifyInstance } from "fastify";
 import { requireSession } from "../auth/session";
 import type { Db } from "../db";
 import { directoryStale, type DirectoryClient } from "../directory";
-import { sessions, users } from "../db/schema";
+import { members, sessions, users } from "../db/schema";
 import type { Hub } from "../hub";
 import { broadcastStructure } from "../state";
 import type { VoicePresence } from "../voice/presence";
@@ -17,7 +17,9 @@ export async function registerUserRoutes(app: FastifyInstance, db: Db, directory
     let { displayName, handle, avatarUrl } = s;
     // Adopt the display name from the directory (global or for this server) without a new sign-in: the client calls /api/me on open.
     if (directory.enabled && directoryStale(s.handleCheckedAt)) {
-      const fresh = await directory.refresh({ id: s.userId, publicKey: s.publicKey, displayName: s.displayName });
+      // A session without a membership (kicked): the lookup must not count as a sign-in on this server at the directory.
+      const [member] = await db.select({ userId: members.userId }).from(members).where(eq(members.userId, s.userId)).limit(1);
+      const fresh = await directory.refresh({ id: s.userId, publicKey: s.publicKey, displayName: s.displayName }, !!member);
       if (fresh && (fresh.displayName !== s.displayName || fresh.handle !== s.handle || fresh.avatarUrl !== s.avatarUrl)) {
         ({ displayName, handle, avatarUrl } = fresh);
         presence.rename(s.userId, { displayName, publicKey: s.publicKey, handle });

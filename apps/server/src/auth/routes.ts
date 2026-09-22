@@ -47,10 +47,10 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: C
     const [ban] = await db.select().from(bans).where(eq(bans.userId, user.id)).limit(1);
     if (ban) return reply.code(403).send({ error: "banned", reason: ban.reason });
 
-    // Look up the verified handle and display name from the directory (M6); an outage of the service is not a sign-in error.
-    const profile = await directory.refresh({ id: user.id, publicKey, displayName: user.displayName });
-
     const [member] = await db.select().from(members).where(eq(members.userId, user.id)).limit(1);
+    // Look up the verified handle and display name from the directory (M6); an outage of the service is not a sign-in error.
+    // Only a member's lookup counts as a sign-in there: a refused sign-in must not put this server on the account's list.
+    const profile = await directory.refresh({ id: user.id, publicKey, displayName: user.displayName }, !!member);
     const settings = await loadSettings(db);
     const firstEver = settings.ownerId === null && (config.OWNER_PUBLIC_KEY === undefined || config.OWNER_PUBLIC_KEY === publicKey);
     // Account required (admin): the key needs a handle at the directory. Owners and the first sign-in are
@@ -69,6 +69,8 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: C
       }
       await db.insert(members).values({ userId: user.id }).onConflictDoNothing();
       req.log.info({ userId: user.id, via: invite ? "invite" : firstEver ? "owner" : "open" }, "neues Mitglied");
+      // Now a member: the directory may list this server for the account (the lookup above said "no member").
+      void directory.refresh({ id: user.id, publicKey, displayName: user.displayName }, true);
     }
 
     // Determine the owner: the first matching sign-in while none exists.

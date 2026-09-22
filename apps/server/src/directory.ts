@@ -97,16 +97,21 @@ export class DirectoryClient {
    * server, otherwise the global one; if none is set (or there is no token), the local name stays unchanged. The avatar is public
    * at the directory; cached is only its address (with the cache version), the clients load the image from there.
    */
-  async refresh(user: { id: string; publicKey: string; displayName: string | null }): Promise<DirectoryProfile | null> {
+  /**
+   * `member`: whether the key has a membership here. The directory records a lookup with our token as a sign-in on this server
+   * (the server list on the account page and in the client's rail); with `member = false` it records nothing and drops an entry
+   * it has (22 September 2026: a sign-in refused for want of an invite had listed the server for that account).
+   */
+  async refresh(user: { id: string; publicKey: string; displayName: string | null }, member = true): Promise<DirectoryProfile | null> {
     const url = this.config.DIRECTORY_URL;
     if (!url) return null;
     try {
       if (!this.token) await this.register();
-      let res = await this.lookup(url, user.publicKey);
+      let res = await this.lookup(url, user.publicKey, member);
       if (res.status === 401 && this.token) {
         // Token expired (24 h) or directory reinstalled: re-register once.
         this.token = null;
-        if (await this.register()) res = await this.lookup(url, user.publicKey);
+        if (await this.register()) res = await this.lookup(url, user.publicKey, member);
       }
       if (res.status === 401 || res.status === 403) {
         // Without a valid token, at least the handle (which is public).
@@ -234,9 +239,9 @@ export class DirectoryClient {
       body: JSON.stringify({ publicKeys }), signal: AbortSignal.timeout(8000),
     });
   }
-  private lookup(url: string, publicKey: string): Promise<Response> {
+  private lookup(url: string, publicKey: string, member: boolean): Promise<Response> {
     const headers: Record<string, string> = this.token ? { authorization: `Bearer ${this.token}` } : {};
-    const q = this.token ? `?server=${encodeURIComponent(this.host)}` : "";
+    const q = this.token ? `?server=${encodeURIComponent(this.host)}${member ? "" : "&member=0"}` : "";
     return fetch(`${url}/api/keys/${publicKey}${q}`, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
   }
 }
