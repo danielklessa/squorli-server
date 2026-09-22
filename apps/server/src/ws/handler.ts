@@ -7,7 +7,7 @@ import { can } from "../authz";
 import type { Db } from "../db";
 import { channels, users } from "../db/schema";
 import type { Hub } from "../hub";
-import { actorOf, loadChannels, loadState } from "../state";
+import { actorOf, loadChannels, loadSettings, loadState } from "../state";
 import type { VoicePresence } from "../voice/presence";
 import type { RadioMetadata } from "../radio/metadata";
 import type { LivekitAdmin } from "../livekit/admin";
@@ -113,6 +113,16 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
           if (!channel || channel.kind !== "voice") return send({ type: "error", code: "unknown_channel", message: `no such voice channel: ${ev.data.channelId}` });
           const [user] = await db.select({ publicKey: users.publicKey, displayName: users.displayName, handle: users.handle }).from(users).where(eq(users.id, userId)).limit(1);
           if (!user) return socket.close(4003, "unauthorized");
+          // The same account joins from another device or tab (user's wish, 22 September 2026): its voice elsewhere on this
+          // server ends. That client gets voice.moved with reason "elsewhere" and hangs up; when it sits in another room,
+          // LiveKit drops its participant too (a client from before does not know the reason). In the same room LiveKit
+          // has already replaced it (duplicate identity), nothing is removed there: it would hit the one that just joined.
+          const others = presence.othersOfUser(userId, socket);
+          if (others.length) {
+            const by = await loadSettings(db).then((st) => st.name).catch(() => "");
+            for (const o of others) { hub.send(o.conn, { type: "voice.moved", channelId: null, by, reason: "elsewhere" }); presence.leave(o.conn); }
+            for (const room of new Set(others.map((o) => o.channelId))) if (room !== channel.id) void lk.removeParticipant(room, userId);
+          }
           presence.dropRestored(userId, socket);
           return presence.join(socket, channel.id, { userId, displayName: displayNameOf(user) });
         }

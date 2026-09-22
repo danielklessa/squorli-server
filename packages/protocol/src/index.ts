@@ -530,7 +530,9 @@ export const ServerRadioPlayback = z.object({ type: z.literal("radio.playback"),
  * `reason: "afk"` = moved by the server into the AFK channel for inactivity (`by` is then the server's name; older clients
  * ignore the field and show the usual notice).
  */
-export const ServerVoiceMoved = z.object({ type: z.literal("voice.moved"), channelId: Uuid.nullable(), by: z.string(), reason: z.enum(["afk"]).optional() });
+export const ServerVoiceMoved = z.object({ type: z.literal("voice.moved"), channelId: Uuid.nullable(), by: z.string(), reason: z.enum(["afk", "elsewhere"]).optional() });
+// reason "elsewhere" (22 September 2026): the same account joined a voice channel of this server from another device or tab,
+// this connection ends (channelId null). A client from before drops the event; LiveKit ends its media anyway (ws/handler.ts).
 /** A moderator stops your camera and/or screen share (LiveKit has already muted the tracks). */
 export const ServerVoiceStop = z.object({ type: z.literal("voice.stop"), camera: z.boolean(), screen: z.boolean(), by: z.string() });
 /** The server removed you (kick/ban); it closes the connection afterwards. */

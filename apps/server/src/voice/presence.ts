@@ -76,6 +76,10 @@ export class VoicePresence<Conn = unknown> {
   }
 
   /** A user's voice channel (first connection), for moderation. */
+  /** The user's other connections that sit in a voice channel: a join from another client ends them (ws/handler.ts). */
+  othersOfUser(userId: string, except: Conn): { conn: Conn; channelId: string }[] {
+    return [...this.byConn].filter(([conn, e]) => conn !== except && e.member.userId === userId).map(([conn, e]) => ({ conn, channelId: e.channelId }));
+  }
   channelOfUser(userId: string): string | undefined {
     for (const entry of this.byConn.values()) if (entry.member.userId === userId) return entry.channelId;
     return undefined;

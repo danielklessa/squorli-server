@@ -76,4 +76,13 @@ export class LivekitAdmin {
       this.log.debug({ err, room, identity }, "livekit silence: Teilnehmer nicht im Raum oder LiveKit nicht erreichbar");
     }
   }
+
+  /** Drop a participant from a room: the same account joined voice from another client (ws/handler.ts, 22 September 2026). */
+  async removeParticipant(room: string, identity: string): Promise<void> {
+    try {
+      await this.svc.removeParticipant(room, identity);
+    } catch (err) {
+      this.log.debug({ err, room, identity }, "livekit removeParticipant: Teilnehmer nicht im Raum oder LiveKit nicht erreichbar");
+    }
+  }
 }

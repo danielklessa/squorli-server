@@ -16,6 +16,16 @@ describe("VoicePresence", () => {
     expect(p.channelOf("c2")).toBe("lobby");
   });
 
+  it("names the user's other connections in voice, never the one that asks", () => {
+    const p = new VoicePresence<string>();
+    p.join("phone", "lobby", a);
+    p.join("tabB", "lobby", b);
+    p.join("guess", "other", a, true);
+    expect(p.othersOfUser(a.userId, "desktop")).toEqual([{ conn: "phone", channelId: "lobby" }, { conn: "guess", channelId: "other" }]);
+    expect(p.othersOfUser(a.userId, "phone")).toEqual([{ conn: "guess", channelId: "other" }]);
+    expect(p.othersOfUser(b.userId, "tabB")).toEqual([]);
+  });
+
   it("an entry restored from LiveKit gives way once the user's client speaks for itself", () => {
     const p = new VoicePresence<string>();
     p.join("tab1", "lobby", a, true);
