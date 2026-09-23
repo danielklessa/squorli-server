@@ -24,13 +24,20 @@ DEFAULT_TRUSTED="172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,127.0.0.1"
 DEPLOY_FILES=(deploy/compose.yml deploy/caddy/Caddyfile deploy/livekit/livekit.yaml deploy/proxies/nginx.ports.yml
   deploy/proxies/remote-proxy.ports.yml deploy/proxies/nginx.conf deploy/proxies/README.md)
 
-if [ -t 1 ]; then B=$'\e[1m'; D=$'\e[2m'; RED=$'\e[31m'; GRN=$'\e[32m'; YEL=$'\e[33m'; R=$'\e[0m'; else B=; D=; RED=; GRN=; YEL=; R=; fi
+if [ -t 1 ]; then
+  B=$'\e[1m'; D=$'\e[2m'; RED=$'\e[31m'; GRN=$'\e[32m'; YEL=$'\e[33m'; R=$'\e[0m'
+  # Squorli blue (#6397FF) where the terminal takes 24-bit colors, else the palette's bright blue
+  case "${COLORTERM:-}" in truecolor|24bit) BLU=$'\e[38;2;99;151;255m' ;; *) BLU=$'\e[94m' ;; esac
+else B=; D=; RED=; GRN=; YEL=; R=; BLU=; fi
+# Block characters and lines only where the terminal speaks UTF-8
+case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) UTF=1 ;; *) UTF=0 ;; esac
 L=en
 # t "German" "English"
 t() { if [ "$L" = de ]; then printf '%s' "$1"; else printf '%s' "$2"; fi; }
-step() { printf '\n%s==> %s%s\n' "$B" "$1" "$R"; }
+step() { local line='────'; [ "$UTF" = 1 ] || line='===='; printf '\n\n%s%s%s %s%s%s\n' "$BLU" "$line" "$R" "$B" "$1" "$R"; }
 ok() { printf '%s  ok%s %s\n' "$GRN" "$R" "$1"; }
 warn() { printf '%s  !  %s%s\n' "$YEL" "$1" "$R"; }
+note() { printf '%s     %s%s\n' "$D" "$1" "$R"; }
 die() { printf '\n%sx %s%s\n' "$RED" "$1" "$R" >&2; exit 1; }
 trap 'printf "\n%sx %s (line %s): %s%s\n" "$RED" "$(t "Abgebrochen" "Aborted")" "$LINENO" "$BASH_COMMAND" "$R" >&2' ERR
 
@@ -42,10 +49,14 @@ setup_input() {
   else IN=0; fi
 }
 trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; printf '%s' "${s%"${s##*[![:space:]]}"}"; }
-# ask VAR "question" ["default"]
+# ask VAR "question" ["default"]. Every question gets a blank line before it (ASK_GAP) and a blue mark (ASK_MARK);
+# choose() sets both locally for its "Choice" line.
+ASK_GAP=1; ASK_MARK='?'
 ask() {
   local __ask_in __ask_def="${3-}"
-  if [ -n "$__ask_def" ]; then printf '%s%s%s %s[%s]%s: ' "$B" "$2" "$R" "$D" "$__ask_def" "$R"; else printf '%s%s%s: ' "$B" "$2" "$R"; fi
+  [ "$ASK_GAP" = 1 ] && printf '\n'
+  printf '%s%s%s %s%s%s' "$BLU" "$ASK_MARK" "$R" "$B" "$2" "$R"
+  if [ -n "$__ask_def" ]; then printf ' %s[%s]%s: ' "$D" "$__ask_def" "$R"; else printf ': '; fi
   IFS= read -r -u "$IN" __ask_in || die "$(t "Keine Eingabe mehr (stdin geschlossen)" "No more input (stdin closed)")"
   __ask_in="$(trim "$__ask_in")"
   printf -v "$1" '%s' "${__ask_in:-$__ask_def}"
@@ -62,9 +73,10 @@ confirm() {
 }
 # choose VAR "question" default "option 1" "option 2" ...  -> VAR = number of the option
 choose() {
-  local __var="$1" __q="$2" __def="$3" __i=1 __a; shift 3
-  printf '%s%s%s\n' "$B" "$__q" "$R"
-  for o in "$@"; do printf '  %s) %s\n' "$__i" "$o"; __i=$((__i + 1)); done
+  local __var="$1" __q="$2" __def="$3" __i=1 __a ASK_GAP=0 ASK_MARK='  >'; shift 3
+  [ "$UTF" = 1 ] && ASK_MARK='  ›'
+  printf '\n%s?%s %s%s%s\n' "$BLU" "$R" "$B" "$__q" "$R"
+  for o in "$@"; do printf '  %s%s)%s %s\n' "$BLU" "$__i" "$R" "$o"; __i=$((__i + 1)); done
   while :; do
     ask __a "$(t "Auswahl" "Choice")" "$__def"
     if [[ "$__a" =~ ^[0-9]+$ ]] && [ "$__a" -ge 1 ] && [ "$__a" -le $# ]; then printf -v "$__var" '%s' "$__a"; return; fi
@@ -110,6 +122,55 @@ port_busy() { # port_busy tcp|udp PORT
 }
 
 # ---- Steps
+banner() {
+  local art
+  if [ "$UTF" = 1 ]; then
+    art=$(cat <<'EOF'
+          █▄▄▄▄▄▄███████▄▄
+          █████████████████
+         ▄██████████████████▄▄
+        ████████████████████▀███▄
+       ▄█████▀▀▀▀▀█████████  █████
+       ███▀▀         ▀▀▀▀    ██████
+       ██ ▄▄▄                ███████▄▄
+       ▄███████▄            ▄████████▀
+      ██████████         ▄▄█████████
+      ██████████       ▄███████████▀
+      ██████████▄     ▄████████████
+       ██████████▄    ▀███████████
+        ▀██████████▄▄  ▀████████▀
+          ▀█████████████▄█▀▀▀▀▀
+            ███████████▀▀
+            ▀█▀
+EOF
+)
+  else
+    art=$(cat <<'EOF'
+          .##:.::##########:
+          .##################:
+          ####################::.
+         #####################:###:
+        ###################### :####:
+       :#####.      .:######.  .######
+       :##:                    .#######:.
+       .#######:               ###########
+      .##########.           .##########.
+      ###########:        .:###########.
+      ############       #############:
+      .###########.     :#############
+       .###########.    :############
+         ############:.. :#########:
+          .#################:###:.
+            .#############:.
+             ###:......
+EOF
+)
+  fi
+  printf '\n%s%s%s\n\n' "$BLU" "$art" "$R"
+  local dot='·'; [ "$UTF" = 1 ] || dot='-'
+  printf '      %sSquorli Server%s   %sInstaller %s Linux%s\n' "$B" "$R" "$D" "$dot" "$R"
+}
+
 choose_language() {
   case "${SQUORLI_LANG:-}" in de|en) L="$SQUORLI_LANG"; return ;; esac
   local def=en a
@@ -222,23 +283,37 @@ configure() {
   local d_setup=1
   case "$OLD_SETUP" in local) d_setup=2 ;; remote) d_setup=3 ;; esac
   [ "$DOMAIN" = localhost ] && [ -z "$OLD_SETUP" ] && d_setup=2
-  choose c "$(t "Wer kümmert sich um HTTPS?" "Who takes care of HTTPS?")" "$d_setup" \
-    "$(t "Squorli selbst: mitgelieferter Caddy mit Let's-Encrypt-Zertifikat (belegt Port 80 und 443)" "Squorli itself: bundled Caddy with a Let's Encrypt certificate (uses ports 80 and 443)")" \
-    "$(t "Ein Reverse Proxy auf diesem Rechner (nginx, Apache, Plesk ...): 3000 und 7880 nur auf 127.0.0.1" "A reverse proxy on this machine (nginx, Apache, Plesk ...): 3000 and 7880 on 127.0.0.1 only")" \
-    "$(t "Ein Reverse Proxy auf einem anderen Rechner (z. B. Nginx Proxy Manager): 3000 und 7880 im LAN/VPN" "A reverse proxy on another machine (e.g. Nginx Proxy Manager): 3000 and 7880 in the LAN/VPN")"
-  case "$c" in 1) SETUP=bundled ;; 2) SETUP=local ;; 3) SETUP=remote ;; esac
-  if [ "$SETUP" = bundled ] && [ "$DOMAIN" = localhost ]; then
-    die "$(t "Für localhost gibt es kein Let's-Encrypt-Zertifikat; bitte einen Reverse Proxy wählen." "Let's Encrypt issues no certificate for localhost; please choose a reverse proxy.")"
-  fi
+  local insist=0
+  while :; do
+    choose c "$(t "Wer kümmert sich um HTTPS?" "Who takes care of HTTPS?")" "$d_setup" \
+      "$(t "Squorli selbst: mitgelieferter Caddy mit Let's-Encrypt-Zertifikat (braucht Port 80 und 443)" "Squorli itself: bundled Caddy with a Let's Encrypt certificate (needs ports 80 and 443)")" \
+      "$(t "Ein Reverse Proxy auf diesem Rechner (nginx, Apache, Plesk ...): App und LiveKit nur auf 127.0.0.1" "A reverse proxy on this machine (nginx, Apache, Plesk ...): app and LiveKit on 127.0.0.1 only")" \
+      "$(t "Ein Reverse Proxy auf einem anderen Rechner (z. B. Nginx Proxy Manager): App und LiveKit im LAN/VPN" "A reverse proxy on another machine (e.g. Nginx Proxy Manager): app and LiveKit in the LAN/VPN")"
+    case "$c" in 1) SETUP=bundled ;; 2) SETUP=local ;; 3) SETUP=remote ;; esac
+    [ "$SETUP" = bundled ] || break
+    if [ "$DOMAIN" = localhost ]; then
+      warn "$(t "Für localhost gibt es kein Let's-Encrypt-Zertifikat; bitte einen Reverse Proxy wählen." "Let's Encrypt issues no certificate for localhost; please choose a reverse proxy.")"
+      d_setup=2; continue
+    fi
+    # Let's Encrypt checks the domain on 80 and serves on 443, so the bundled Caddy cannot move to other ports
+    if [ "$OLD_SETUP" != bundled ] && [ "$insist" = 0 ] && { port_busy tcp 80 || port_busy tcp 443; }; then
+      warn "$(t "Port 80 oder 443 ist schon belegt, vermutlich von einem Webserver. Caddy braucht beide für das Let's-Encrypt-Zertifikat." \
+        "Port 80 or 443 is already in use, probably by a web server. Caddy needs both for the Let's Encrypt certificate.")"
+      note "$(t "Wähle 2: Dein Webserver leitet dann an Squorli weiter (Vorlagen in deploy/proxies/). Nochmal 1 = trotzdem Caddy." \
+        "Choose 2: your web server then forwards to Squorli (templates in deploy/proxies/). 1 again = Caddy anyway.")"
+      d_setup=2; insist=1; continue
+    fi
+    break
+  done
 
   BIND_IP=""; PROXY_IP=""
   if [ "$SETUP" = remote ]; then
     local d_bind; d_bind="$(env_get "$envf" PROXY_BIND_IP)"
     [ -z "$d_bind" ] && d_bind="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|100\.)' | head -n1 || true)"
-    warn "$(t "Docker umgeht ufw/firewalld für veröffentlichte Ports. Binde 3000 und 7880 deshalb an eine LAN- oder VPN-Adresse, nicht an 0.0.0.0." \
-      "Docker bypasses ufw/firewalld for published ports. Bind 3000 and 7880 to a LAN or VPN address, not to 0.0.0.0.")"
+    warn "$(t "Docker umgeht ufw/firewalld für veröffentlichte Ports. Binde die Ports für den Proxy deshalb an eine LAN- oder VPN-Adresse, nicht an 0.0.0.0." \
+      "Docker bypasses ufw/firewalld for published ports. Bind the ports for the proxy to a LAN or VPN address, not to 0.0.0.0.")"
     while :; do
-      ask BIND_IP "$(t "Adresse dieses Rechners, auf der 3000 und 7880 lauschen" "Address of this machine on which 3000 and 7880 listen")" "$d_bind"
+      ask BIND_IP "$(t "Adresse dieses Rechners, auf der App und LiveKit für den Proxy lauschen" "Address of this machine on which the app and LiveKit listen for the proxy")" "$d_bind"
       is_ipv4 "$BIND_IP" && break
       warn "$(t "Bitte eine IPv4-Adresse angeben." "Please give an IPv4 address.")"
     done
@@ -248,6 +323,8 @@ configure() {
       warn "$(t "Bitte eine IPv4-Adresse angeben." "Please give an IPv4 address.")"
     done
   fi
+
+  choose_ports
 
   local dd=1
   if [ "$MODE" = reconfigure ]; then
@@ -300,8 +377,10 @@ configure() {
 }
 
 say_owner_hint() {
-  printf '%s%s%s\n' "$D" "$(t "Wer sich als Erster anmeldet, wird Besitzer. Den eigenen Schlüssel zeigt der Client unter Einstellungen > Konto; ohne ihn bitte direkt nach dem Start selbst als Erster anmelden." \
-    "Whoever signs in first becomes the owner. The client shows your own key under Settings > Account; without it, sign in yourself first right after the start.")" "$R"
+  printf '\n'
+  note "$(t "Wer sich als Erster anmeldet, wird Besitzer. Den eigenen Schlüssel zeigt der Client unter Einstellungen > Konto;" \
+    "Whoever signs in first becomes the owner. The client shows your own key under Settings > Account;")"
+  note "$(t "ohne ihn bitte direkt nach dem Start selbst als Erster anmelden." "without it, sign in yourself first right after the start.")"
 }
 
 check_dns() {
@@ -315,20 +394,85 @@ check_dns() {
   fi
 }
 
-check_ports() {
-  # Only ports the previous setup of this installation did not already hold itself
-  local busy=()
-  if [ "$SETUP" = bundled ] && [ "$OLD_SETUP" != bundled ]; then
-    port_busy tcp 80 && busy+=("80/tcp"); port_busy tcp 443 && busy+=("443/tcp")
-  fi
-  if [ "$SETUP" != bundled ] && [ "$OLD_SETUP" != local ] && [ "$OLD_SETUP" != remote ]; then
-    port_busy tcp 3000 && busy+=("3000/tcp"); port_busy tcp 7880 && busy+=("7880/tcp")
-  fi
-  if [ -z "$OLD_SETUP" ]; then port_busy tcp 7881 && busy+=("7881/tcp"); port_busy udp 7882 && busy+=("7882/udp"); fi
-  if [ "${#busy[@]}" -gt 0 ]; then
-    warn "$(t "Diese Ports sind schon belegt: ${busy[*]}. Der Start wird daran scheitern." "These ports are already in use: ${busy[*]}. The start will fail on them.")"
-    confirm "$(t "Trotzdem fortfahren?" "Continue anyway?")" n || exit 1
-  fi
+# ---- Host ports: APP_PORT and LK_HTTP_PORT (what a reverse proxy forwards to), LK_TCP_PORT and LK_UDP_PORT (media, open to
+# everyone; LiveKit announces them to the clients, so host and container use the same number). The bundled Caddy keeps 80/443.
+load_ports() {
+  local envf="$DIR/.env"
+  APP_PORT="$(env_get "$envf" APP_PORT)"; APP_PORT="${APP_PORT:-3000}"
+  LK_HTTP_PORT="$(env_get "$envf" LIVEKIT_HTTP_PORT)"; LK_HTTP_PORT="${LK_HTTP_PORT:-7880}"
+  LK_TCP_PORT="$(env_get "$envf" LIVEKIT_TCP_PORT)"; LK_TCP_PORT="${LK_TCP_PORT:-7881}"
+  LK_UDP_PORT="$(env_get "$envf" LIVEKIT_UDP_PORT)"; LK_UDP_PORT="${LK_UDP_PORT:-7882}"
+}
+# port_owner VAR -> the port this installation already holds for VAR (empty when it holds none), so a rerun does not
+# count its own containers as "in use"
+port_owner() {
+  case "$1" in
+    APP_PORT|LK_HTTP_PORT) [ "$OLD_SETUP" = local ] || [ "$OLD_SETUP" = remote ] || return 0 ;;
+    *) [ -n "$OLD_SETUP" ] || return 0 ;;
+  esac
+  case "$1" in APP_PORT) printf '%s' "$OLD_APP_PORT" ;; LK_HTTP_PORT) printf '%s' "$OLD_LK_HTTP_PORT" ;;
+    LK_TCP_PORT) printf '%s' "$OLD_LK_TCP_PORT" ;; LK_UDP_PORT) printf '%s' "$OLD_LK_UDP_PORT" ;; esac
+}
+# port_problem VAR PROTO PORT -> prints why PORT cannot be used for VAR (nothing when it can)
+port_problem() {
+  local var="$1" proto="$2" port="$3" other
+  if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then t "keine Portnummer (1-65535)" "not a port number (1-65535)"; return; fi
+  if [ "$proto" = tcp ] && [ "$SETUP" = bundled ] && { [ "$port" = 80 ] || [ "$port" = 443 ]; }; then t "gehört dem mitgelieferten Caddy" "belongs to the bundled Caddy"; return; fi
+  for other in "${PORT_VARS[@]}"; do
+    [ "$other" = "$var" ] && continue
+    [ "$(port_proto "$other")" = "$proto" ] && [ "${!other}" = "$port" ] && { t "schon für $(port_label "$other") gewählt" "already chosen for $(port_label "$other")"; return; }
+  done
+  [ "$port" = "$(port_owner "$var")" ] && return
+  port_busy "$proto" "$port" && t "belegt" "in use"
+  return 0
+}
+port_proto() { if [ "$1" = LK_UDP_PORT ]; then printf udp; else printf tcp; fi; }
+port_label() {
+  case "$1" in
+    APP_PORT) t "App-Server (Ziel des Proxys)" "app server (proxy target)" ;;
+    LK_HTTP_PORT) t "LiveKit-Signalisierung (Ziel des Proxys für /rtc)" "LiveKit signaling (proxy target for /rtc)" ;;
+    LK_TCP_PORT) t "Sprache und Video über TCP (offen für alle)" "voice and video over TCP (open to everyone)" ;;
+    LK_UDP_PORT) t "Sprache und Video über UDP (offen für alle)" "voice and video over UDP (open to everyone)" ;;
+  esac
+}
+# free_port VAR PROTO START -> the first usable port from START on
+free_port() {
+  local p="$3"
+  while [ "$p" -le 65535 ] && [ -n "$(port_problem "$1" "$2" "$p")" ]; do p=$((p + 1)); done
+  printf '%s' "$p"
+}
+choose_ports() {
+  load_ports
+  OLD_APP_PORT="$APP_PORT"; OLD_LK_HTTP_PORT="$LK_HTTP_PORT"; OLD_LK_TCP_PORT="$LK_TCP_PORT"; OLD_LK_UDP_PORT="$LK_UDP_PORT"
+  PORT_VARS=(LK_TCP_PORT LK_UDP_PORT)
+  [ "$SETUP" = bundled ] || PORT_VARS=(APP_PORT LK_HTTP_PORT "${PORT_VARS[@]}")
+  step "Ports"
+  [ "$SETUP" = bundled ] && note "$(t "80/tcp und 443/tcp für Caddy sind fest: Let's Encrypt prüft die Domain über diese Ports." "80/tcp and 443/tcp for Caddy are fixed: Let's Encrypt checks the domain over these ports.")"
+  # Replace ports another service holds by the next free one from default + 10000 on
+  local var proto why changed=0
+  for var in "${PORT_VARS[@]}"; do
+    proto="$(port_proto "$var")"
+    why="$(port_problem "$var" "$proto" "${!var}")"
+    if [ -n "$why" ]; then
+      warn "${!var}/$proto $(t "ist" "is") $why"
+      printf -v "$var" '%s' "$(free_port "$var" "$proto" $(( ${!var} + 10000 )))"; changed=1
+    fi
+  done
+  for var in "${PORT_VARS[@]}"; do printf '  %s%6s/%s%s  %s
+' "$B" "${!var}" "$(port_proto "$var")" "$R" "$(port_label "$var")"; done
+  [ "$changed" = 1 ] && note "$(t "Belegte Ports sind durch freie ersetzt." "Ports in use were replaced by free ones.")"
+  confirm "$(t "Diese Ports verwenden?" "Use these ports?")" y && return
+  local v
+  for var in "${PORT_VARS[@]}"; do
+    proto="$(port_proto "$var")"
+    while :; do
+      ask v "$(port_label "$var"), $proto" "${!var}"
+      why="$(port_problem "$var" "$proto" "$v")"
+      [ -z "$why" ] && break
+      warn "$v/$proto: $why"
+    done
+    printf -v "$var" '%s' "$v"
+  done
 }
 
 summary() {
@@ -336,19 +480,18 @@ summary() {
   local how
   case "$SETUP" in
     bundled) how="$(t "mitgelieferter Caddy (Let's Encrypt)" "bundled Caddy (Let's Encrypt)")" ;;
-    local) how="$(t "eigener Proxy auf diesem Rechner -> 127.0.0.1:3000 und 127.0.0.1:7880" "own proxy on this machine -> 127.0.0.1:3000 and 127.0.0.1:7880")" ;;
-    remote) how="$(t "Proxy $PROXY_IP -> $BIND_IP:3000 und $BIND_IP:7880" "proxy $PROXY_IP -> $BIND_IP:3000 and $BIND_IP:7880")" ;;
+    local) how="$(t "eigener Proxy auf diesem Rechner -> 127.0.0.1:$APP_PORT und 127.0.0.1:$LK_HTTP_PORT" "own proxy on this machine -> 127.0.0.1:$APP_PORT and 127.0.0.1:$LK_HTTP_PORT")" ;;
+    remote) how="$(t "Proxy $PROXY_IP -> $BIND_IP:$APP_PORT und $BIND_IP:$LK_HTTP_PORT" "proxy $PROXY_IP -> $BIND_IP:$APP_PORT and $BIND_IP:$LK_HTTP_PORT")" ;;
   esac
   printf '  %-18s %s\n' "$(t "Verzeichnis" "Folder")" "$DIR" "Domain" "$DOMAIN" "$(t "Servername" "Server name")" "$SERVER_NAME" \
     "HTTPS" "$how" "Directory" "${DIRECTORY:-$(t "keins" "none")}" "$(t "Besitzer" "Owner")" "${OWNER:-$(t "wer sich zuerst anmeldet" "whoever signs in first")}" \
     "LiveKit IP" "${NODE_IP:-$(t "automatisch" "automatic")}" "Image" "$IMAGE"
-  printf '  %-18s %s\n' "$(t "Offene Ports" "Open ports")" "$([ "$SETUP" = bundled ] && printf '80/tcp 443/tcp ')7881/tcp 7882/udp"
-  echo
+  printf '  %-18s %s\n' "$(t "Offene Ports" "Open ports")" "$([ "$SETUP" = bundled ] && printf '80/tcp 443/tcp ')$LK_TCP_PORT/tcp $LK_UDP_PORT/udp"
   confirm "$(t "So installieren?" "Install like this?")" y || exit 0
 }
 
 firewall() {
-  local ports=(7881/tcp 7882/udp)
+  local ports=("$LK_TCP_PORT/tcp" "$LK_UDP_PORT/udp")
   [ "$SETUP" = bundled ] && ports=(80/tcp 443/tcp "${ports[@]}")
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
     if confirm "$(t "ufw ist aktiv. ${ports[*]} freigeben?" "ufw is active. Open ${ports[*]}?")" y; then
@@ -360,8 +503,9 @@ firewall() {
       firewall-cmd --reload >/dev/null; ok "firewalld: ${ports[*]}"
     fi
   fi
-  printf '%s%s%s\n' "$D" "$(t "Eine Firewall beim Hoster oder ein Router davor muss dieselben Ports durchlassen (bzw. weiterleiten)." \
-    "A firewall at the hosting provider or a router in front has to let the same ports through (or forward them).")" "$R"
+  printf '\n'
+  note "$(t "Eine Firewall beim Hoster oder ein Router davor muss dieselben Ports durchlassen (bzw. weiterleiten)." \
+    "A firewall at the hosting provider or a router in front has to let the same ports through (or forward them).")"
 }
 
 download_files() {
@@ -396,6 +540,9 @@ write_env() {
   env_set "$envf" DIRECTORY_URL "$DIRECTORY"
   env_set "$envf" OWNER_PUBLIC_KEY "$OWNER"
   env_set "$envf" LIVEKIT_NODE_IP "$NODE_IP"
+  env_set "$envf" LIVEKIT_TCP_PORT "$LK_TCP_PORT"
+  env_set "$envf" LIVEKIT_UDP_PORT "$LK_UDP_PORT"
+  if [ "$SETUP" != bundled ]; then env_set "$envf" APP_PORT "$APP_PORT"; env_set "$envf" LIVEKIT_HTTP_PORT "$LK_HTTP_PORT"; fi
 
   # Secrets: kept when present, generated when missing or still the template's placeholder
   local v
@@ -501,8 +648,8 @@ verify() {
       fi ;;
     local|remote)
       local host=127.0.0.1; [ "$SETUP" = remote ] && host="$BIND_IP"
-      if probe "http://$host:3000/api/health" 200; then ok "http://$host:3000/api/health"; else warn "http://$host:3000 $(t "nicht erreichbar" "not reachable")"; fi
-      if probe "http://$host:7880/rtc/validate" 401; then ok "http://$host:7880/rtc/validate -> 401"; else warn "http://$host:7880 $(t "nicht erreichbar" "not reachable")"; fi ;;
+      if probe "http://$host:$APP_PORT/api/health" 200; then ok "http://$host:$APP_PORT/api/health"; else warn "http://$host:$APP_PORT $(t "nicht erreichbar" "not reachable")"; fi
+      if probe "http://$host:$LK_HTTP_PORT/rtc/validate" 401; then ok "http://$host:$LK_HTTP_PORT/rtc/validate -> 401"; else warn "http://$host:$LK_HTTP_PORT $(t "nicht erreichbar" "not reachable")"; fi ;;
   esac
 }
 
@@ -512,11 +659,15 @@ finish() {
     local|remote)
       local host=127.0.0.1; [ "$SETUP" = remote ] && host="$BIND_IP"
       printf '%s\n' "$(t "Jetzt den Reverse Proxy einrichten (TLS für $DOMAIN, WebSockets an):" "Now set up the reverse proxy (TLS for $DOMAIN, WebSockets on):")" \
-        "  https://$DOMAIN/      -> http://$host:3000" "  https://$DOMAIN/rtc*  -> http://$host:7880" \
+        "  https://$DOMAIN/      -> http://$host:$APP_PORT" "  https://$DOMAIN/rtc*  -> http://$host:$LK_HTTP_PORT" \
         "$(t "Vorlagen und Anleitung: $DIR/deploy/proxies/ (README.md, nginx.conf)" "Templates and guide: $DIR/deploy/proxies/ (README.md, nginx.conf)")"
-      [ "$SETUP" = remote ] && [ -n "$PROXY_IP" ] && printf '%s\n' "$(t "Ports 3000 und 7880 nur für $PROXY_IP öffnen." "Open ports 3000 and 7880 to $PROXY_IP only.")"
+      [ "$SETUP" = remote ] && [ -n "$PROXY_IP" ] && printf '%s\n' "$(t "Ports $APP_PORT und $LK_HTTP_PORT nur für $PROXY_IP öffnen." "Open ports $APP_PORT and $LK_HTTP_PORT to $PROXY_IP only.")"
       echo ;;
   esac
+  if [ "$LK_TCP_PORT" != 7881 ] || [ "$LK_UDP_PORT" != 7882 ]; then
+    printf '%s\n\n' "$(t "Sprache und Video laufen über $LK_TCP_PORT/tcp und $LK_UDP_PORT/udp: diese Nummern in Firewall und Router freigeben bzw. weiterleiten (auf dieselbe Nummer)." \
+      "Voice and video use $LK_TCP_PORT/tcp and $LK_UDP_PORT/udp: open or forward these numbers in firewall and router (to the same number).")"
+  fi
   [ "$DOMAIN" = localhost ] || printf '%s %shttps://%s%s\n' "$(t "Adresse:" "Address:")" "$B" "$DOMAIN" "$R"
   if [ -z "$OWNER" ] && [ "$MODE" = fresh ]; then
     printf '%s%s%s\n' "$YEL" "$(t "Wer sich als Erster anmeldet, wird Besitzer: jetzt gleich selbst anmelden." "Whoever signs in first becomes the owner: sign in yourself right now.")" "$R"
@@ -532,8 +683,8 @@ finish() {
 
 main() {
   setup_input
+  banner
   choose_language
-  printf '\n%sSquorli Server%s – %s\n' "$B" "$R" "$(t "Installation für Linux" "installation for Linux")"
   preflight
   ensure_docker
   choose_dir
@@ -543,6 +694,7 @@ main() {
     local envf="$DIR/.env"
     SETUP="$OLD_SETUP"; DOMAIN="$(env_get "$envf" PUBLIC_DOMAIN)"; OWNER="$(env_get "$envf" OWNER_PUBLIC_KEY)"
     BIND_IP="$(env_get "$envf" PROXY_BIND_IP)"; PROXY_IP=""
+    load_ports
     compose_args
     printf '%s%s%s\n' "$D" "$(t "Vorher sichern: $HELPER backup" "Back up first: $HELPER backup")" "$R"
     confirm "$(t "Jetzt aktualisieren?" "Update now?")" y || exit 0
@@ -555,7 +707,6 @@ main() {
   fi
 
   configure
-  check_ports
   summary
   firewall
   compose_args

@@ -41,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/danielklessa/squorli-server/main/de
 sudo bash install.sh
 ```
 
-It asks for the domain, the server name, who terminates HTTPS (the bundled Caddy, a reverse proxy on the same host, or one on another host), the directory, the owner's public key and the public IP for media; installs Docker through get.docker.com if it is missing (after asking); downloads the deploy files into `/opt/squorli` (`SQUORLI_DIR` changes that); writes `.env` with fresh secrets (readable by root only); offers to open the ports in an active ufw or firewalld; pulls, starts and checks the stack. It also writes `/opt/squorli/squorli` (linked as `squorli` into `/usr/local/bin`), which runs Docker Compose with the right profile and overlays: `squorli update`, `squorli status`, `squorli logs app`, `squorli backup` (database dump, attachments and `.env` into `/opt/squorli/backups`), and any other Compose command.
+It asks for the domain, the server name, who terminates HTTPS (the bundled Caddy, a reverse proxy on the same host, or one on another host), the ports (it finds ports another service already uses and suggests free ones; the bundled Caddy always needs 80 and 443), the directory, the owner's public key and the public IP for media; installs Docker through get.docker.com if it is missing (after asking); downloads the deploy files into `/opt/squorli` (`SQUORLI_DIR` changes that); writes `.env` with fresh secrets (readable by root only); offers to open the ports in an active ufw or firewalld; pulls, starts and checks the stack. It also writes `/opt/squorli/squorli` (linked as `squorli` into `/usr/local/bin`), which runs Docker Compose with the right profile and overlays: `squorli update`, `squorli status`, `squorli logs app`, `squorli backup` (database dump, attachments and `.env` into `/opt/squorli/backups`), and any other Compose command.
 
 Running the installer again on an existing installation updates it (new image and deploy files; changed files are kept as `.bak`) or changes its settings; the secrets, the database and the files stay. The published image exists for x86_64 only; on ARM build from source.
 
@@ -104,6 +104,8 @@ All variables are documented in [.env.example](.env.example). The most relevant 
 | `REQUIRE_ACCOUNT` | `true` forces login with a directory handle (owners exempt), `false` forces it off, empty = admin panel decides |
 | `TRUSTED_PROXIES` | External mode: IPs/CIDRs whose `X-Forwarded-*` headers are trusted (default: private ranges) |
 | `PROXY_BIND_IP` | External mode with the proxy on another host: address on which 3000 and 7880 listen |
+| `LIVEKIT_TCP_PORT` / `LIVEKIT_UDP_PORT` | Media ports on the host (default 7881 / 7882), when another service already uses them; LiveKit announces them to the clients, so forward the same numbers |
+| `APP_PORT` / `LIVEKIT_HTTP_PORT` | External mode with a port overlay: host ports the proxy forwards to (default 3000 / 7880) |
 
 Voice quality (Opus bitrate, stereo) is configured per voice channel in the admin panel.
 
@@ -131,7 +133,7 @@ TURN for clients in networks that block UDP and direct TCP is prepared but off b
 `deploy/portainer.yml` is a self-contained stack for Portainer (web editor or git repository, path `deploy/portainer.yml`): external mode with a reverse proxy on another host, no `env_file`, no build, no bind mounts. The LiveKit config is inlined via `LIVEKIT_CONFIG` (keep it in step with `deploy/livekit/livekit.yaml`).
 
 1. Stacks > Add stack > paste `deploy/portainer.yml`.
-2. Enter the environment variables: `PUBLIC_DOMAIN`, `POSTGRES_PASSWORD`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` (required); `APP_IMAGE=ghcr.io/danielklessa/squorli-server:latest` (set explicitly, pin a tag or digest for production); optionally `LIVEKIT_NODE_IP`, `DIRECTORY_URL`, `TRUSTED_PROXIES`, `PROXY_BIND_IP` (default `0.0.0.0`, then restrict via firewall), `REQUIRE_ACCOUNT`, `SERVER_NAME`, `OWNER_PUBLIC_KEY`, `MAX_UPLOAD_MB`, `LIVEKIT_PUBLIC_URL`, `DIRECTORY_PROOF_URL`. Meaning as in [Configuration](#configuration).
+2. Enter the environment variables: `PUBLIC_DOMAIN`, `POSTGRES_PASSWORD`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` (required); `APP_IMAGE=ghcr.io/danielklessa/squorli-server:latest` (set explicitly, pin a tag or digest for production); optionally `LIVEKIT_NODE_IP`, `DIRECTORY_URL`, `TRUSTED_PROXIES`, `PROXY_BIND_IP` (default `0.0.0.0`, then restrict via firewall), `REQUIRE_ACCOUNT`, `SERVER_NAME`, `OWNER_PUBLIC_KEY`, `MAX_UPLOAD_MB`, `LIVEKIT_PUBLIC_URL`, `DIRECTORY_PROOF_URL`, `APP_PORT`, `LIVEKIT_HTTP_PORT`, `LIVEKIT_TCP_PORT`, `LIVEKIT_UDP_PORT`. Meaning as in [Configuration](#configuration).
 3. Set up the proxy and firewall as in [Reverse proxy](#reverse-proxy).
 4. Check `https://PUBLIC_DOMAIN/api/health` and `https://PUBLIC_DOMAIN/rtc/validate` (401).
 

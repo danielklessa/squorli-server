@@ -7,6 +7,8 @@ Your proxy must:
 3. set `X-Forwarded-For` and `X-Forwarded-Proto` and pass the WebSocket upgrade through
 
 In addition, the following must be reachable **directly** (not via the proxy): `7882/udp` and `7881/tcp` on the host.
+
+All four numbers are defaults. When another service on the host already uses one, set `APP_PORT` and `LIVEKIT_HTTP_PORT` (host ports the overlays publish for the proxy) or `LIVEKIT_TCP_PORT` and `LIVEKIT_UDP_PORT` (media, same number inside and outside) in `.env`; the interactive installer `deploy/install.sh` does that for you. Wherever this guide says 3000, 7880, 7881 or 7882, use your numbers.
 Once TURN is active (see `../livekit/livekit.yaml`), also `5349/tcp`.
 
 Only subdomains are supported, no sub-path like `example.org/chat`.

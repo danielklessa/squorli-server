@@ -2,7 +2,8 @@
 #   PROXY_MODE=bundled  -> docker compose --env-file ../.env --profile bundled up -d    (Caddy handles TLS on 443)
 #   PROXY_MODE=external -> docker compose --env-file ../.env --profile external up -d   (your proxy, see proxies/README.md)
 # --env-file ../.env is mandatory: otherwise the ${...} placeholders here are only filled from deploy/.env (empty).
-# Media ports (UDP 7882, TCP 7881) go directly to LiveKit in BOTH modes, never through an HTTP proxy.
+# Media ports (UDP 7882, TCP 7881; LIVEKIT_UDP_PORT/LIVEKIT_TCP_PORT in .env) go directly to LiveKit in BOTH modes, never
+# through an HTTP proxy. LiveKit announces them to the clients itself, so host and container use the same number.
 # Image: build locally, or set APP_IMAGE=ghcr.io/danielklessa/squorli-server:latest (GitHub Container Registry).
 # For the published image, pull with the selected profile, then up -d --no-build. See README.md.
 
@@ -47,15 +48,15 @@ services:
   livekit:
     image: livekit/livekit-server:latest
     restart: unless-stopped
-    command: --config /etc/livekit.yaml
+    command: --config /etc/livekit.yaml --rtc.tcp_port ${LIVEKIT_TCP_PORT:-7881} --udp-port ${LIVEKIT_UDP_PORT:-7882}
     environment:
       # Keys via env so they are not in the YAML (format "key: secret").
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
       LIVEKIT_NODE_IP: ${LIVEKIT_NODE_IP:-}
     volumes: [./livekit/livekit.yaml:/etc/livekit.yaml:ro]
     ports:
-      - "7881:7881/tcp"   # media fallback via TCP
-      - "7882:7882/udp"   # media via UDP (single-port mux)
+      - "${LIVEKIT_TCP_PORT:-7881}:${LIVEKIT_TCP_PORT:-7881}/tcp"   # media fallback via TCP
+      - "${LIVEKIT_UDP_PORT:-7882}:${LIVEKIT_UDP_PORT:-7882}/udp"   # media via UDP (single-port mux)
     networks: [internal]
     profiles: [bundled, external]
 

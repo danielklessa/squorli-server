@@ -1,12 +1,13 @@
 # Overlay for a reverse proxy on ANOTHER host (e.g. Nginx Proxy Manager on a second machine).
 # Publishes the app server (3000) and LiveKit signaling (7880) on a network address of this host.
+# Host ports: APP_PORT (default 3000) and LIVEKIT_HTTP_PORT (default 7880) in .env.
 #   Set PROXY_BIND_IP in .env (LAN/VPN IP of this host); if unset: 0.0.0.0 = all interfaces,
 #   then ABSOLUTELY restrict via firewall to the IP of the proxy host. Both ports speak HTTP only.
 #   docker compose --env-file ../.env -f compose.yml -f proxies/remote-proxy.ports.yml --profile external up -d
 services:
   app:
     ports:
-      - "${PROXY_BIND_IP:-0.0.0.0}:3000:3000"
+      - "${PROXY_BIND_IP:-0.0.0.0}:${APP_PORT:-3000}:3000"
   livekit:
     ports:
-      - "${PROXY_BIND_IP:-0.0.0.0}:7880:7880"
+      - "${PROXY_BIND_IP:-0.0.0.0}:${LIVEKIT_HTTP_PORT:-7880}:7880"

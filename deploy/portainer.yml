@@ -33,7 +33,7 @@ services:
       REQUIRE_ACCOUNT: ${REQUIRE_ACCOUNT:-}
     volumes: [appdata:/app/data]   # attachments, server icon
     ports:
-      - "${PROXY_BIND_IP:-0.0.0.0}:3000:3000"   # proxy: https://PUBLIC_DOMAIN -> http://<host>:3000 (with WebSocket)
+      - "${PROXY_BIND_IP:-0.0.0.0}:${APP_PORT:-3000}:3000"   # proxy: https://PUBLIC_DOMAIN -> http://<host>:3000 (with WebSocket)
     depends_on:
       postgres: { condition: service_healthy }
     networks: [internal]
@@ -56,6 +56,8 @@ services:
   livekit:
     image: livekit/livekit-server:latest
     restart: unless-stopped
+    # Media ports from the stack variables; the flags override tcp_port/udp_port of LIVEKIT_CONFIG below.
+    command: --rtc.tcp_port ${LIVEKIT_TCP_PORT:-7881} --udp-port ${LIVEKIT_UDP_PORT:-7882}
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
       LIVEKIT_NODE_IP: ${LIVEKIT_NODE_IP:-}
@@ -74,9 +76,9 @@ services:
         logging:
           level: info
     ports:
-      - "${PROXY_BIND_IP:-0.0.0.0}:7880:7880"   # signaling: proxy https://PUBLIC_DOMAIN/rtc* -> http://<host>:7880 (WebSocket)
-      - "7881:7881/tcp"                          # media fallback via TCP
-      - "7882:7882/udp"                          # media via UDP
+      - "${PROXY_BIND_IP:-0.0.0.0}:${LIVEKIT_HTTP_PORT:-7880}:7880"   # signaling: proxy https://PUBLIC_DOMAIN/rtc* -> http://<host>:7880 (WebSocket)
+      - "${LIVEKIT_TCP_PORT:-7881}:${LIVEKIT_TCP_PORT:-7881}/tcp"   # media fallback via TCP
+      - "${LIVEKIT_UDP_PORT:-7882}:${LIVEKIT_UDP_PORT:-7882}/udp"   # media via UDP
     networks: [internal]
 
 volumes:
