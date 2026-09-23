@@ -10,6 +10,7 @@ import { can } from "../authz";
 import type { Config } from "../config";
 import type { Db } from "../db";
 import { attachments } from "../db/schema";
+import { visibility } from "../visibility";
 import { attachmentUrl } from "./messages";
 
 /**
@@ -26,7 +27,10 @@ export async function registerAttachmentRoutes(app: FastifyInstance, db: Db, con
   app.post("/api/attachments", async (req, reply) => {
     const m = await requireMember(db, req, reply);
     if (!m) return;
-    if (!can(m.actor, Permission.ATTACH_FILES)) return reply.code(403).send({ error: "forbidden" });
+    // Server-wide, or in any channel the member may see (an overwrite may be the only place they have it); the real gate
+    // is the message that attaches the file (routes/messages.ts, in that channel).
+    await visibility.refresh(db);
+    if (!can(m.actor, Permission.ATTACH_FILES) && ![...visibility.masksOf(m.userId).values()].some((p) => can({ ...m.actor, permissions: p }, Permission.ATTACH_FILES))) return reply.code(403).send({ error: "forbidden" });
     const part = await req.file();
     if (!part) return reply.code(400).send({ error: "no_file" });
     const name = (part.filename || "datei").replace(/[\\/\0]/g, "_").slice(0, 200);

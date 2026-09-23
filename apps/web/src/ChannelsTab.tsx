@@ -1,4 +1,5 @@
-import { AUDIO_BITRATES, Permission, hasPermission, type ServerState } from "@squorli/protocol";
+import { Permission, hasPermission, type ServerState } from "@squorli/protocol";
+import type { ChannelDialogTarget } from "./ChannelDialog";
 import { useRef, useState, type DragEvent } from "react";
 import type { ServerApi } from "./api";
 import { reorderItems } from "./channelOrder";
@@ -9,7 +10,8 @@ import { t } from "./i18n";
 type SortKind = "channel" | "category";
 type RunFn = (fn: () => Promise<unknown>) => Promise<void>;
 
-export function ChannelsTab({ api, server, run }: { api: ServerApi; server: ServerState; run: RunFn }) {
+/** Verwaltung > Kanäle: create, sort, delete and the AFK channel. Name, topic and every setting are the channel dialog's (the pencil, or a right-click in the sidebar; docs/features/channel-permissions.md). */
+export function ChannelsTab({ api, server, run, onEdit }: { api: ServerApi; server: ServerState; run: RunFn; onEdit: (target: ChannelDialogTarget) => void }) {
   const [catName, setCatName] = useState("");
   const [chName, setChName] = useState("");
   const [chKind, setChKind] = useState<"text" | "voice">("text");
@@ -94,14 +96,15 @@ export function ChannelsTab({ api, server, run }: { api: ServerApi; server: Serv
 
   return (
     <div className="channel-manager" aria-busy={saving}>
-      <p className="muted small channel-help">{t("admin.sortHint")}</p>
+      <p className="muted small channel-help">{t("admin.sortHint")} {t("admin.channelFieldsHint")}</p>
       <p className="small channel-save-status" role="status">{saving ? t("admin.orderSaving") : notice}</p>
       <h3>{t("admin.categories")} <span className="channel-count">{categories.length}</span></h3>
       {categories.map((k) => (
         <div key={k.id} className={rowClass("category-editor", k.id)} {...dropProps("category", k.id)}>
           {dragHandle("category", k.id, k.name)}
-          <input aria-label={t("admin.categoryName")} maxLength={64} defaultValue={k.name} onBlur={(e) => { if (e.target.value.trim() && e.target.value.trim() !== k.name) void run(() => api.updateCategory(k.id, { name: e.target.value.trim() })); }} />
+          <span className="channel-title">{k.name}</span>
           <div className="channel-actions">
+            <button className="icon" disabled={saving} title={t("admin.edit")} aria-label={`${k.name}: ${t("admin.edit")}`} onClick={() => onEdit({ kind: "category", id: k.id })}><Icon name="pencil" /></button>
             {sortButtons("category", k.id, k.name)}
             <button className="icon danger" disabled={saving} title={t("common.delete")} aria-label={`${k.name}: ${t("common.delete")}`} onClick={() => run(async () => { if (await askConfirm({ title: t("admin.deleteCategoryTitle", { name: k.name }), text: t("admin.deleteCategoryText"), confirmLabel: t("common.delete"), danger: true })) await api.deleteCategory(k.id); })}><Icon name="trash-2" /></button>
           </div>
@@ -119,22 +122,12 @@ export function ChannelsTab({ api, server, run }: { api: ServerApi; server: Serv
           <div className="channel-editor-head">
             {dragHandle("channel", c.id, c.name)}
             <span className="channel-icon" title={t(c.kind === "text" ? "admin.kindText" : "admin.kindVoice")}><Icon name={c.kind === "text" ? "hash" : c.id === server.settings.afkChannelId ? "moon" : "volume-2"} /></span>
-            <input aria-label={t("admin.channelName")} maxLength={64} defaultValue={c.name} onBlur={(e) => { if (e.target.value.trim() && e.target.value.trim() !== c.name) void run(() => api.updateChannel(c.id, { name: e.target.value.trim() })); }} />
+            <span className="channel-title">{c.name}{c.private && <Icon name="lock" title={t("sidebar.private")} />}{c.sticky && <Icon name="pin" title={t("sidebar.sticky")} />}</span>
             <div className="channel-actions">
+              <button className="icon" disabled={saving} title={t("admin.edit")} aria-label={`${c.name}: ${t("admin.edit")}`} onClick={() => onEdit({ kind: "channel", id: c.id })}><Icon name="pencil" /></button>
               {sortButtons("channel", c.id, c.name)}
               <button className="icon danger" disabled={saving} title={t("common.delete")} aria-label={`${c.name}: ${t("common.delete")}`} onClick={() => run(async () => { if (await askConfirm({ title: t("admin.deleteChannelTitle", { name: c.name }), text: c.kind === "text" ? t("admin.deleteTextChannelText") : t("admin.deleteVoiceChannelText"), confirmLabel: t("common.delete"), danger: true })) await api.deleteChannel(c.id); })}><Icon name="trash-2" /></button>
             </div>
-          </div>
-          <div className="channel-editor-fields">
-            <label>{t("admin.categories")}<select value={c.categoryId ?? ""} onChange={(e) => run(() => api.updateChannel(c.id, { categoryId: e.target.value || null }))}>{categoryOptions}</select></label>
-            {c.kind === "text" ? <label>{t("admin.topic")}<input maxLength={256} defaultValue={c.topic ?? ""} placeholder={t("admin.topic")} onBlur={(e) => { if ((e.target.value.trim() || null) !== c.topic) void run(() => api.updateChannel(c.id, { topic: e.target.value.trim() || null })); }} /></label> : (
-              <div className="channel-audio-fields">
-                <label>{t("admin.audioQuality")}<select value={c.audioBitrate} title={t("admin.bitrateHint")} onChange={(e) => run(() => api.updateChannel(c.id, { audioBitrate: Number(e.target.value) }))}>
-                  {AUDIO_BITRATES.map((b) => <option key={b} value={b}>{b} kbit/s</option>)}
-                </select></label>
-                <label className="check" title={t("admin.stereoHint")}><input type="checkbox" checked={c.audioStereo} onChange={(e) => run(() => api.updateChannel(c.id, { audioStereo: e.target.checked }))} />{t("admin.stereo")}</label>
-              </div>
-            )}
           </div>
         </div>
       ))}

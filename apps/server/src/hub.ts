@@ -31,6 +31,10 @@ export class Hub {
   /** Users whose active connection just closed: not AFK before this time (ms), with the timer that looks again then. */
   private readonly grace = new Map<string, { until: number; timer: NodeJS.Timeout }>();
   private readonly listeners = new Set<(userId: string, online: boolean) => void>();
+  /** May this user receive events of this channel? index.ts installs the visibility snapshot's answer; until then everybody may. */
+  private visible: (userId: string, channelId: string) => boolean = () => true;
+
+  setVisibility(fn: (userId: string, channelId: string) => boolean): void { this.visible = fn; }
 
   onPresence(fn: (userId: string, online: boolean) => void): () => void {
     this.listeners.add(fn);
@@ -150,6 +154,18 @@ export class Hub {
   broadcast(e: ServerEvent, except?: WebSocket) {
     const text = JSON.stringify(e);
     for (const ws of this.userOf.keys()) if (ws !== except && ws.readyState === ws.OPEN) ws.send(text);
+  }
+
+  /** Like broadcast(), but only to users who may see the channel (docs/features/channel-permissions.md). Asked once per user. */
+  broadcastToChannel(channelId: string, e: ServerEvent, except?: WebSocket) {
+    const text = JSON.stringify(e);
+    const decided = new Map<string, boolean>();
+    for (const [ws, userId] of this.userOf) {
+      if (ws === except || ws.readyState !== ws.OPEN) continue;
+      let ok = decided.get(userId);
+      if (ok === undefined) { ok = this.visible(userId, channelId); decided.set(userId, ok); }
+      if (ok) ws.send(text);
+    }
   }
 
   /** Throw a user out: send the event, then close all of their connections. */

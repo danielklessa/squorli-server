@@ -12,6 +12,12 @@ import type { VoicePresence } from "../voice/presence";
 import type { RadioMetadata } from "../radio/metadata";
 import type { LivekitAdmin } from "../livekit/admin";
 import { Liveness, PING_EVERY_MS } from "./liveness";
+import { canIn, resolveChannel } from "../channelGuard";
+import { visibility } from "../visibility";
+import { moveGrants } from "../voice/confine";
+import { holdOnJoin, refreshUserView, releaseOnLeave, stickyVerdict } from "../voice/sticky";
+import { voiceStateEvent } from "../voice/voiceState";
+import { voteKicks, voteOnWire } from "../voice/votekick";
 
 /** Game display: how often one connection may change what its member plays (each change is a broadcast to everybody). */
 const GAME_CHANGE_MS = 5000;
@@ -21,8 +27,9 @@ const GAME_CHANGE_MS = 5000;
  * State reconciliation by sequence number after a reconnect: the client reloads /api/state and the history (M2).
  */
 export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presence: VoicePresence<WebSocket>, radioMeta: RadioMetadata, lk: LivekitAdmin) {
+  // Who sits in a voice channel goes only to those who may see the channel (docs/features/channel-permissions.md).
   const unsubscribe = presence.onChange((channelId, members) => {
-    hub.broadcast({ type: "voice.state", channelId, members });
+    hub.broadcastToChannel(channelId, voiceStateEvent(channelId, members));
   });
   app.addHook("onClose", async () => unsubscribe());
 
@@ -83,8 +90,10 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
         liveness.add(socket);
         req.log.info({ userId }, "ws connected");
         send({ type: "welcome", userId, serverTime: new Date().toISOString(), protocolVersion: PROTOCOL_VERSION, state: await loadState(db, hub, userId) });
+        const visible = new Set(visibility.visibleIds(userId));
         for (const ch of await loadChannels(db)) {
-          if (ch.kind === "voice") send({ type: "voice.state", channelId: ch.id, members: presence.members(ch.id) });
+          if (!visible.has(ch.id)) continue;
+          if (ch.kind === "voice") send(voiceStateEvent(ch.id, presence.members(ch.id)));
           const title = radioMeta.titleOf(ch.id);
           if (title) send({ type: "radio.meta", channelId: ch.id, title });
         }
@@ -94,9 +103,12 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
         const rooms = await lk.roomsByIdentity();
         const room = rooms?.get(userId);
         if (room && socket.readyState === socket.OPEN && !presence.channelOfUser(userId)) {
-          const [channel] = await db.select({ id: channels.id, kind: channels.kind }).from(channels).where(eq(channels.id, room)).limit(1);
+          // Only where the member may still be: whoever lost the channel while away is dropped from the room instead
+          // (a moderator's placement does not survive a restart; the moderator moves again).
+          const r = await resolveChannel(db, userId, room, "voice");
           const [user] = await db.select({ publicKey: users.publicKey, displayName: users.displayName, handle: users.handle }).from(users).where(eq(users.id, userId)).limit(1);
-          if (channel?.kind === "voice" && user && socket.readyState === socket.OPEN && !presence.channelOfUser(userId)) presence.join(socket, channel.id, { userId, displayName: displayNameOf(user), micMuted: false, deafened: false, cameraOn: false, screenOn: false }, true);
+          if (!r || !canIn(visibility.resolvedMask(userId, room), Permission.CONNECT_VOICE) || !canIn(visibility.resolvedMask(userId, room), Permission.VIEW_CHANNELS)) void lk.removeParticipant(room, userId);
+          else if (user && socket.readyState === socket.OPEN && !presence.channelOfUser(userId)) { presence.join(socket, r.channel.id, { userId, displayName: displayNameOf(user), micMuted: false, deafened: false, cameraOn: false, screenOn: false }, true); await holdOnJoin(db, hub, userId, r.channel); }
         }
         return;
       }
@@ -107,10 +119,19 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
         case "ping":
           return send({ type: "pong", t: ev.data.t });
         case "voice.join": {
+          // The same checks as POST /api/rtc-token (livekit/routes.ts): the channel must be visible and enterable for this
+          // member, a sticky channel elsewhere must not hold them, and a full channel takes nobody (a moderator's move excepted).
           const actor = await actorOf(db, userId);
-          if (!actor || !can(actor, Permission.CONNECT_VOICE) || !can(actor, Permission.VIEW_CHANNELS)) return send({ type: "error", code: "forbidden", message: "no voice permission" });
-          const [channel] = await db.select().from(channels).where(eq(channels.id, ev.data.channelId)).limit(1);
-          if (!channel || channel.kind !== "voice") return send({ type: "error", code: "unknown_channel", message: `no such voice channel: ${ev.data.channelId}` });
+          if (!actor) return send({ type: "error", code: "forbidden", message: "no voice permission" });
+          const r = await resolveChannel(db, userId, ev.data.channelId, "voice");
+          if (!r) return send({ type: "error", code: "unknown_channel", message: `no such voice channel: ${ev.data.channelId}` });
+          const channel = r.channel;
+          if (!canIn(r.perms, Permission.CONNECT_VOICE)) return send({ type: "error", code: "forbidden", message: "no voice permission" });
+          if ((await stickyVerdict(db, userId, actor, channel.id)) === "confined") return send({ type: "error", code: "forbidden", message: "confined" });
+          const granted = moveGrants.grantOf(userId) === channel.id;
+          // Voted out of this channel (docs/features/votekick.md): no way back until the block is over.
+          if (!granted && voteKicks.blockedUntil(channel.id, userId)) return send({ type: "error", code: "forbidden", message: "votekicked" });
+          if (channel.userLimit !== null && !granted && presence.channelOfUser(userId) !== channel.id && presence.members(channel.id).length >= channel.userLimit) return send({ type: "error", code: "forbidden", message: "channel_full" });
           const [user] = await db.select({ publicKey: users.publicKey, displayName: users.displayName, handle: users.handle }).from(users).where(eq(users.id, userId)).limit(1);
           if (!user) return socket.close(4003, "unauthorized");
           // The same account joins from another device or tab (user's wish, 22 September 2026): its voice elsewhere on this
@@ -124,12 +145,20 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
             for (const room of new Set(others.map((o) => o.channelId))) if (room !== channel.id) void lk.removeParticipant(room, userId);
           }
           presence.dropRestored(userId, socket);
+          // A vote kick running in this channel (docs/features/votekick.md): the joining client shows it right away.
+          const vote = voteKicks.running(channel.id);
+          if (vote) { const mine = vote.votes.get(userId); send({ type: "votekick", channelId: channel.id, vote: voteOnWire(vote), myVote: mine === undefined ? null : mine ? "yes" : "no", canVote: vote.electorate.has(userId) && !vote.votes.has(userId) }); }
           // The mute state comes with the join (a client from before it says nothing: unmuted) and changes with voice.status.
-          return presence.join(socket, channel.id, { userId, displayName: displayNameOf(user), micMuted: ev.data.micMuted ?? false, deafened: ev.data.deafened ?? false, cameraOn: ev.data.cameraOn ?? false, screenOn: ev.data.screenOn ?? false });
+          presence.join(socket, channel.id, { userId, displayName: displayNameOf(user), micMuted: ev.data.micMuted ?? false, deafened: ev.data.deafened ?? false, cameraOn: ev.data.cameraOn ?? false, screenOn: ev.data.screenOn ?? false }, false, granted);
+          moveGrants.consume(userId, channel.id);
+          await holdOnJoin(db, hub, userId, channel);
+          return refreshUserView(db, hub, userId);
         }
-        case "voice.leave":
+        case "voice.leave": {
           presence.dropRestored(userId, socket);
-          return presence.leave(socket);
+          presence.leave(socket);
+          return releaseOnLeave(db, hub, presence, userId);
+        }
         case "voice.status":
           return presence.setStatus(socket, { micMuted: ev.data.micMuted, deafened: ev.data.deafened, cameraOn: ev.data.cameraOn, screenOn: ev.data.screenOn });
         case "activity":
@@ -142,7 +171,8 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
           const now = Date.now();
           if (now - lastTyping < 2000) return; // Throttling: at most every 2 s
           lastTyping = now;
-          return hub.broadcast({ type: "typing", channelId: ev.data.channelId, userId }, socket);
+          if (!visibility.canSee(userId, ev.data.channelId)) return; // typing into a channel one may not see: nothing
+          return hub.broadcastToChannel(ev.data.channelId, { type: "typing", channelId: ev.data.channelId, userId }, socket);
         }
       }
     });
@@ -152,7 +182,9 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
       if (gameTimer) clearTimeout(gameTimer);
       liveness.remove(socket);
       hub.remove(socket);
+      const seated = presence.channelOf(socket) !== undefined;
       presence.leave(socket);
+      if (userId && seated) void releaseOnLeave(db, hub, presence, userId).catch((err) => req.log.warn({ err }, "release on close"));
       if (userId) req.log.info({ userId }, "ws closed");
     });
   });

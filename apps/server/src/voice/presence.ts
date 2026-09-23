@@ -20,7 +20,7 @@ import { displayNameOf, type VoiceMember, type VoiceStatus } from "@squorli/prot
  * room. A restored entry starts unmuted with nothing on (nothing known).
  */
 export class VoicePresence<Conn = unknown> {
-  private readonly byConn = new Map<Conn, { channelId: string; member: VoiceMember; restored: boolean }>();
+  private readonly byConn = new Map<Conn, { channelId: string; member: VoiceMember; restored: boolean; placed: boolean }>();
   private readonly listeners = new Set<(channelId: string, members: VoiceMember[]) => void>();
 
   onChange(fn: (channelId: string, members: VoiceMember[]) => void): () => void {
@@ -28,10 +28,13 @@ export class VoicePresence<Conn = unknown> {
     return () => this.listeners.delete(fn);
   }
 
-  /** Puts the connection into the channel; a previous channel is left. */
-  join(conn: Conn, channelId: string, member: VoiceMember, restored = false): void {
+  /**
+   * Puts the connection into the channel; a previous channel is left. `placed` = a moderator moved the member there
+   * (voice/confine.ts): they never needed the permission to enter, so a permission change does not throw them out (livekit/sync.ts).
+   */
+  join(conn: Conn, channelId: string, member: VoiceMember, restored = false, placed = false): void {
     const prev = this.byConn.get(conn);
-    this.byConn.set(conn, { channelId, member, restored });
+    this.byConn.set(conn, { channelId, member, restored, placed });
     if (prev && prev.channelId !== channelId) this.emit(prev.channelId);
     this.emit(channelId);
   }
@@ -102,6 +105,12 @@ export class VoicePresence<Conn = unknown> {
   channelOfUser(userId: string): string | undefined {
     for (const entry of this.byConn.values()) if (entry.member.userId === userId) return entry.channelId;
     return undefined;
+  }
+
+  /** Did a moderator put the user into this channel (any of their connections there says so)? */
+  isPlaced(userId: string, channelId: string): boolean {
+    for (const entry of this.byConn.values()) if (entry.member.userId === userId && entry.channelId === channelId && entry.placed) return true;
+    return false;
   }
 
   /** Everyone sitting in a voice channel, once per user (first connection, like channelOfUser). */

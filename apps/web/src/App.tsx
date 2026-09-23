@@ -9,6 +9,8 @@ import { HomeMain, HomeSidebar } from "./Home";
 import { DesktopLogin } from "./DesktopLogin";
 import { LoginScreen } from "./LoginScreen";
 import { MemberList } from "./MemberList";
+import { VoteKickModal, VoteKickPanel } from "./VoteKickPanel";
+import { blockMinutes, voteKickChannel, voteKickPerson } from "./voteKick";
 import { Sidebar } from "./Sidebar";
 import { MobileVoicePreview } from "./MobileVoicePreview";
 import { voiceElsewhere } from "./voice/elsewhere";
@@ -33,7 +35,9 @@ import { quickSharePick } from "./screenPick";
 import { TitleBar } from "./TitleBar";
 import { loadVoiceSettings, saveVoiceSettings } from "./voice/settings";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
-import { Permission, directoryAvatarUrl, directoryServerIconUrl, directoryServerUrl, displayNameOf, hasPermission, type Member } from "@squorli/protocol";
+import { Permission, directoryAvatarUrl, directoryServerIconUrl, directoryServerUrl, displayNameOf, hasPermission, type Member, type ServerState } from "@squorli/protocol";
+import { joinErrorText, voteKickErrorText } from "./apiErrorText";
+import { ChannelDialog, type ChannelDialogTarget } from "./ChannelDialog";
 import { Store, activeState, homeState, type ServerConnState, type State } from "./store";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 import { RadioPlayer, type RadioState } from "./voice/radioPlayer";
@@ -108,6 +112,10 @@ export function App() {
   const [state, setState] = useState<State>(store.state);
   const [voice, setVoice] = useState<VoiceState>(client.state);
   const [showAdmin, setShowAdmin] = useState(false);
+  /** The channel dialog (docs/features/channel-permissions.md): a channel or category of the active server, or none. */
+  const [channelEdit, setChannelEdit] = useState<ChannelDialogTarget | null>(null);
+  /** Vote kick (docs/features/votekick.md): the vote whose question has been answered or waved away; the box keeps offering it. */
+  const [voteAsked, setVoteAsked] = useState<string | null>(null);
   const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 700px)").matches);
   const [mobileContent, setMobileContent] = useState(false);
   const [voicePreview, setVoicePreview] = useState<string | null>(null);
@@ -201,6 +209,8 @@ export function App() {
   const [voiceHost, setVoiceHost] = useState<string | null>(null);
   const voiceHostRef = useRef<string | null>(null);
   voiceHostRef.current = voiceHost;
+  /** The join under way, if any (joinVoice): the same host and channel asked again waits for it instead of starting over. */
+  const joinInFlight = useRef<{ host: string; channelId: string; promise: Promise<void> } | null>(null);
   /** Moved to the AFK channel for inactivity: the voice channel the dock offers the way back to (user's decision: never automatically). */
   const [afkReturn, setAfkReturn] = useState<{ host: string; channelId: string } | null>(null);
 
@@ -304,6 +314,11 @@ export function App() {
    * `force` joins again although already there (a fresh token with the grants that fit the channel now).
    */
   const joinVoice = useCallback(async (host: string, channelId: string, opts: { auto?: boolean; force?: boolean } = {}) => {
+    // The same join is already under way (between the token request and the connection nothing of it shows in `voice`
+    // yet): a second client.join() would disconnect the room that is still connecting, and its connect() fails with
+    // "Client initiated disconnect" (seen on a reload into a sticky channel, user's report of 23 September 2026).
+    const flying = joinInFlight.current;
+    if (flying && flying.host === host && flying.channelId === channelId && !opts.force) { if (!opts.auto) setStageOpen(true); return flying.promise; }
     const conn = store.connection(host);
     const srv = conn?.state.server;
     const ch = srv?.channels.find((c) => c.id === channelId);
@@ -319,23 +334,27 @@ export function App() {
     if (!conn) return;
     if (!opts.auto) { setStageOpen(true); setAfkReturn(null); }
     if (!joinsNow) return;
-    try {
-      if (voiceHostRef.current && voiceHostRef.current !== host) await leaveVoice();
-      const { url, token } = await conn.api.rtcToken(channelId);
-      const ice = new URLSearchParams(window.location.search).get("ice");
-      await client.join(channelId, url, token, settings, {
-        ...(ice === "relay" ? { iceTransportPolicy: "relay" as const } : {}),
-        audio: { bitrate: ch?.audioBitrate ?? 64, stereo: ch?.audioStereo ?? false },
-        ...(srv ? { video: { access: videoAccessOf(srv), mayView: hasPermission(srv.myPermissions, Permission.VIEW_VIDEO) }, peerKeys: peerKeysOf(srv.members) } : {}),
-        afk,
-      });
-    } catch (err) {
-      client.releasePreparedMic(); // the token or the connection failed before the capture was taken over
-      throw err;
-    }
-    setVoiceHost(host);
-    // The mute state travels with the join (the AFK channel shows as muted and deafened); changes follow as voice.status below.
-    conn.send({ type: "voice.join", channelId, micMuted: client.state.micMuted, deafened: client.state.deafened, cameraOn: client.state.cameraOn, screenOn: client.state.screenOn });
+    const promise = (async () => {
+      try {
+        if (voiceHostRef.current && voiceHostRef.current !== host) await leaveVoice();
+        const { url, token } = await conn.api.rtcToken(channelId);
+        const ice = new URLSearchParams(window.location.search).get("ice");
+        await client.join(channelId, url, token, settings, {
+          ...(ice === "relay" ? { iceTransportPolicy: "relay" as const } : {}),
+          audio: { bitrate: ch?.audioBitrate ?? 64, stereo: ch?.audioStereo ?? false },
+          ...(srv ? { video: { access: videoAccessOf(srv), mayView: hasPermission(srv.myPermissions, Permission.VIEW_VIDEO) }, peerKeys: peerKeysOf(srv.members) } : {}),
+          afk,
+        });
+      } catch (err) {
+        client.releasePreparedMic(); // the token or the connection failed before the capture was taken over
+        throw err;
+      }
+      setVoiceHost(host);
+      // The mute state travels with the join (the AFK channel shows as muted and deafened); changes follow as voice.status below.
+      conn.send({ type: "voice.join", channelId, micMuted: client.state.micMuted, deafened: client.state.deafened, cameraOn: client.state.cameraOn, screenOn: client.state.screenOn });
+    })();
+    joinInFlight.current = { host, channelId, promise };
+    try { await promise; } finally { if (joinInFlight.current?.promise === promise) joinInFlight.current = null; }
   }, [client, store, voice.channelId, leaveVoice]);
 
   // Mute, sound off, camera and screen share reach everybody's sidebar and the status API through the server
@@ -446,6 +465,11 @@ export function App() {
         // The same account joined a voice channel of this server from another device or tab: that one takes over.
         client.setNotice(t("app.voiceElsewhereNotice"));
         void leaveVoice();
+      } else if (reason === "votekick") {
+        // Voted out (docs/features/votekick.md): the result came just before this event and carries how long the channel stays closed.
+        const res = store.connection(host)?.state.voteKickResult ?? null;
+        client.setNotice(t("votekick.kickedNotice", { minutes: blockMinutes(res?.blockedUntil ?? null, Date.now()) }));
+        void leaveVoice();
       } else {
         client.setNotice(t("app.removedNotice", { by }));
         void leaveVoice();
@@ -458,8 +482,35 @@ export function App() {
       if (what.screen) void client.setScreenShareEnabled(false);
       if (parts.length) client.setNotice(t("app.stoppedNotice", { by, what: parts.join(t("app.and")) }));
     };
-    return () => { store.onVoiceMoved = null; store.onVoiceStop = null; };
+    // The channel one sits in is no longer visible (the access went away; the server dropped the room too).
+    store.onVoiceGone = (host) => {
+      if (host !== voiceHostRef.current) return;
+      client.setNotice(t("voice.channelGone"));
+      void leaveVoice();
+    };
+    return () => { store.onVoiceMoved = null; store.onVoiceStop = null; store.onVoiceGone = null; };
   }, [store, client, joinVoice, leaveVoice, voice.cameraOn, voice.screenOn]);
+
+  // A sticky channel that holds the user beyond a reload (docs/features/channel-permissions.md): the server says so with
+  // the welcome (`myVoiceLock`), the client goes back in and says why. Without a gesture the microphone may have to be
+  // asked for later; the join itself loses nothing (see joinVoice).
+  const lockOf = (s: { server: ServerState | null } | null | undefined) => s?.server?.myVoiceLock ?? null;
+  // One attempt per lock: the effect runs on every server state change (presence, structure), and a second joinVoice()
+  // while the first still connects, or after the server refused, must not start over. A new lock (other channel, or the
+  // lock gone and back) is tried again; the user can always click the channel.
+  const stickyTried = useRef<string | null>(null);
+  useEffect(() => {
+    const host = state.activeHost;
+    const conn = host ? store.connection(host) : null;
+    const lock = lockOf(conn?.state);
+    if (!lock) { stickyTried.current = null; return; }
+    const key = `${host}\n${lock.channelId}`;
+    if (!host || !conn || voice.status !== "disconnected" || voiceHostRef.current || stickyTried.current === key) return;
+    stickyTried.current = key;
+    const name = conn.state.server?.channels.find((c) => c.id === lock.channelId)?.name ?? t("app.otherChannel");
+    client.setNotice(t("voice.stickyReturn", { name }));
+    void joinVoice(host, lock.channelId, { auto: true }).catch(() => {});
+  }, [state.activeHost, store, client, joinVoice, voice.status, state.servers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const home = homeState(state);
   const active = activeState(state);
@@ -500,7 +551,15 @@ export function App() {
   // Hanging up on a phone's stage goes back to the channel list (user's wish, 22 September 2026), not to the text channel
   // that would otherwise appear under the vanished stage. The list slides in first, so the leave's wait is never seen.
   // A plain function, not a hook: this point is below the early returns (login screen), where no hook may sit.
-  const hangUp = async () => { if (mobile) { setMobileContent(false); setStageOpen(false); } await leaveVoice(); };
+  /** A sticky channel holds the user: hanging up is refused with the reason (the server would refuse every other channel anyway). */
+  const voiceLock = lockOf(voiceServer);
+  const hangUp = async () => {
+    if (voiceLock) { void showNotice({ title: t("voice.noticeTitle"), text: t("voice.stickyNotice") }); return; }
+    if (mobile) { setMobileContent(false); setStageOpen(false); }
+    await leaveVoice();
+  };
+  /** My permissions in a channel of a server: the channel-resolved mask, or on a server from before the server-wide one. */
+  const permsIn = (s: ServerState, channelId: string | null) => (channelId ? s.myChannelPermissions?.[channelId] : undefined) ?? s.myPermissions;
   // The account already sits in a voice channel of that server from another device or tab: joining from here ends that
   // connection (the server does it at voice.join), so the user confirms first (user's wish, 22 September 2026). A seat of
   // this client is not "elsewhere". Without anything to confirm the join starts synchronously in the click, as the
@@ -513,14 +572,35 @@ export function App() {
   };
   const confirmElsewhere = (name: string) => askConfirm({ title: t("voice.elsewhereTitle"), text: t("voice.elsewhereText", { channel: name }), confirmLabel: t("voice.elsewhereJoin") });
   const joinVoiceAsked = (host: string, channelId: string): Promise<void> => {
+    const lock = lockOf(store.connection(host)?.state);
+    if (lock && lock.channelId !== channelId) { void showNotice({ title: t("voice.noticeTitle"), text: t("voice.stickyBlocked") }); return Promise.resolve(); }
     const name = elsewhereName(host);
     return name ? confirmElsewhere(name).then((ok) => (ok ? joinVoice(host, channelId) : undefined)) : joinVoice(host, channelId);
   };
   // A join that failed before the voice client had a say (the token, the server) has no text in the client's state, which
   // the modal above would show: it gets the same modal with the bare error.
-  const reportJoinError = (err: unknown) => { if (!client.state.error) void showNotice({ title: t("voice.errorTitle"), text: err instanceof Error ? err.message : String(err) }); };
+  // Vote kick (docs/features/votekick.md): the box belongs to the voice connection's channel, whatever server is on screen.
+  const voteKick = voiceServer?.voteKick && voiceServer.voteKick.vote.channelId === voice.channelId ? voiceServer.voteKick : null;
+  const voteKickResult = voiceServer?.voteKickResult && voiceServer.voteKickResult.channelId === voice.channelId ? voiceServer.voteKickResult : null;
+  // The member the vote is about, drawn like members are drawn everywhere else (user's wish, 23 September 2026).
+  const votePerson = (() => {
+    const s = voiceServer?.server, about = voteKick?.vote ?? voteKickResult;
+    return s && about ? voteKickPerson({ userId: about.targetId, fallbackName: about.targetName, members: s.members, roles: s.roles }) : null;
+  })();
+  const voteKickFailed = (err: unknown) => { void showNotice({ title: t("votekick.title"), text: voteKickErrorText(err) }); };
+  const castVote = (yes: boolean) => {
+    if (!voteKick || !voiceApi) return;
+    setVoteAsked(voteKick.vote.id);
+    voiceApi.castVoteKick(voteKick.vote.channelId, yes).catch(voteKickFailed);
+  };
+  /** The menu entry of the member list, the sidebar and the stage; the server checks all the rules again. */
+  const startVoteKick = (host: string, channelId: string, userId: string) => {
+    store.connection(host)?.api.startVoteKick(channelId, userId).catch(voteKickFailed);
+  };
+  const reportJoinError = (err: unknown) => { if (!client.state.error) void showNotice({ title: t("voice.errorTitle"), text: joinErrorText(err) }); };
   const stage = (detached: boolean) => voiceChannel && voiceServer?.server && voiceApi ? (
-    <VoiceStage client={client} voice={voice} channel={voiceChannel} members={voiceServer.server.members} myPermissions={voiceServer.server.myPermissions}
+    <VoiceStage client={client} voice={voice} channel={voiceChannel} members={voiceServer.server.members} myPermissions={permsIn(voiceServer.server, voiceChannel.id)} locked={!!voiceLock}
+      voteKick={voiceHost && voiceServer.voteKickAllowed[voiceChannel.id] ? { onStart: (userId: string) => startVoteKick(voiceHost, voiceChannel.id, userId) } : null}
       api={voiceApi} radio={radio} radioStations={voiceServer.server.radioStations} radioTitle={voiceServer.radioTitles[voiceChannel.id] ?? null} playerTile={embedKeyOf(embedSource)} playerOff={playerOff} onDismissPlayerOff={() => setPlayerOffDismissed(videoKey)} playerPopped={playerWindow.win !== null} onRestorePlayer={playerWindow.restore}
       onToggleCamera={toggleCamera} onToggleBlur={toggleBlur} onLeave={hangUp} onPopout={videoWindows.open} poppedIds={videoWindows.poppedIds} onRestore={videoWindows.restore}
       detached={detached} onToggleWindow={detached ? stageWindow.close : stageWindow.open} />
@@ -597,15 +677,16 @@ export function App() {
         {homeOpen ? <HomeSidebar state={state} store={store} members={server?.members ?? []} onOpenChat={() => setMobileContent(true)} /> : view ? <Sidebar
           server={view.server} api={view.conn.api} currentChannelId={showStage && voiceChannel ? voiceChannel.id : view.active.currentChannelId} voice={view.active.voice}
           voiceState={voiceHost === activeHost ? voice : null} client={client} radioTitles={view.active.radioTitles} unread={view.active.unread} mentions={view.active.mentions} muted={view.active.muted} canMute={view.active.readSync}
-          onMuteChannel={(id, muted) => { void view.conn.setChannelMuted(id, muted).catch(() => {}); }}
+          onMuteChannel={(id, muted) => { void view.conn.setChannelMuted(id, muted).catch(() => {}); }} onOpenChannelDialog={setChannelEdit}
           connection={view.active.connection} onSelect={(id) => { view.conn.selectChannel(id); setStageOpen(false); setMobileContent(true); }}
           onJoinVoice={(id) => { if (mobile) setVoicePreview(id); else void joinVoiceAsked(view.active.host, id).catch(reportJoinError); }} onOpenAdmin={() => setShowAdmin(true)} myUserId={view.active.userId ?? ""}
+          voteKickAllowed={view.active.voteKickAllowed} onVoteKick={(userId, channelId) => startVoteKick(view.active.host, channelId, userId)}
           onOpenMembers={mobile ? () => setMobileMembers(true) : null}
         /> : <nav className="sidebar"><header className="server-head"><img className="brand-mark" src="/brand/squorli-icon-small.svg" alt="" width="22" height="22" /><strong>{active?.serverName ?? active?.host ?? "Squorli"}</strong></header></nav>}
         <VoiceDock client={client} voice={voice} channel={voiceChannel} serverName={voiceHost && voiceHost !== activeHost ? voiceServer?.server?.settings.name ?? voiceHost : null}
           displayName={me?.displayName ?? active?.me?.displayName ?? home?.me?.displayName ?? state.directoryAccount?.displayName ?? (state.directoryAccount ? `@${state.directoryAccount.handle}` : "…")} avatarUrl={myAvatarUrl} onLeave={leaveVoice} onOpenProfile={setMiniProfile} onOpenSettings={() => setSettingsTab("profile")} pttSuspended={capturingPttKey}
           onOpenStage={stageWindow.popped ? stageWindow.focus : voiceChannel && !showStage && voiceHost ? () => { store.openServer(voiceHost === state.homeHost ? homeDirHost : voiceHost); setStageOpen(true); setMobileContent(true); } : null}
-          canStream={!!voiceServer?.server && hasPermission(voiceServer.server.myPermissions, Permission.STREAM_VIDEO)} onToggleCamera={toggleCamera}
+          canStream={!!voiceServer?.server && hasPermission(permsIn(voiceServer.server, voice.channelId), Permission.STREAM_VIDEO) && (voiceChannel?.allowVideo ?? true)} locked={!!voiceLock} onToggleCamera={toggleCamera}
           quickShare={runningGame && voice.status === "connected" && !voice.screenOn ? { name: runningGame.name, onShare: () => { quickShare.current = runningGame.id; void client.setScreenShareEnabled(true).finally(() => { quickShare.current = null; }); } } : null}
           afkReturn={afkReturn && voice.afkRoom ? { name: afkReturnChannel?.name ?? null, onReturn: () => { void joinVoice(afkReturn.host, afkReturn.channelId).catch(() => {}); } } : null} />
       </div>
@@ -625,7 +706,7 @@ export function App() {
         ) : current ? (
           <ChatView
             channel={current} messages={view.active.messages[current.id] ?? { list: [], hasMore: true, loaded: false, loading: false }}
-            members={view.server.members} myUserId={view.active.userId!} myPermissions={view.server.myPermissions}
+            members={view.server.members} myUserId={view.active.userId!} myPermissions={permsIn(view.server, current.id)}
             typing={view.active.typing[current.id] ?? {}} conn={view.conn}
           />
         ) : (
@@ -655,10 +736,14 @@ export function App() {
           try { await joinVoice(host, channelId); } catch (err) { setVoicePreview(null); reportJoinError(err); return; }
           setStageOpen(true); setMobileContent(true); setVoicePreview(null);
         }} />}
+      {voteKick && votePerson && voteKick.canVote && voteAsked !== voteKick.vote.id && <VoteKickModal state={voteKick} person={votePerson} onVote={castVote} onClose={() => setVoteAsked(voteKick.vote.id)} />}
       {!homeOpen && view && <MemberList api={view.conn.api} members={view.server.members} roles={view.server.roles} myUserId={view.active.userId!} myPermissions={view.server.myPermissions} ownerId={view.server.settings.ownerId}
-        voice={view.active.voice} channels={view.server.channels} friends={friendsMenu} client={client} onClose={mobile ? () => setMobileMembers(false) : null} />}
+        voice={view.active.voice} channels={view.server.channels} friends={friendsMenu} client={client} onClose={mobile ? () => setMobileMembers(false) : null}
+        voteKickAllowed={view.active.voteKickAllowed} onVoteKick={(userId, channelId) => startVoteKick(view.active.host, channelId, userId)}
+        voteKickBox={voiceHost === activeHost ? <VoteKickPanel state={voteKick} result={voteKickResult} person={votePerson} onVote={castVote} /> : null} />}
 
-      {showAdmin && view && <AdminPanel api={view.conn.api} server={view.server} myUserId={view.active.userId!} directoryUrl={view.active.directoryUrl} onClose={() => setShowAdmin(false)} />}
+      {showAdmin && view && <AdminPanel api={view.conn.api} server={view.server} myUserId={view.active.userId!} directoryUrl={view.active.directoryUrl} onClose={() => setShowAdmin(false)} onEditChannel={setChannelEdit} />}
+      {channelEdit && view && <ChannelDialog api={view.conn.api} server={view.server} target={channelEdit} myUserId={view.active.userId!} onClose={() => setChannelEdit(null)} />}
       {screenPick && inPickWindow(<ScreenPicker sources={screenPick.sources} h265={VoiceClient.supportsH265()} win={pickWindow ?? window}
         onPick={(pick) => { screenPick.resolve(pick); setScreenPick(null); }} onCancel={() => { screenPick.resolve(null); setScreenPick(null); }} />)}
       {cameraPick && inPickWindow(<CameraPicker cameras={cameraPick} initial={voiceSettings.cameraDeviceId} initialBlur={voiceSettings.cameraBlur} win={pickWindow ?? window} onPick={(id, b) => { void pickCamera(id, b); }} onCancel={() => setCameraPick(null)} />)}

@@ -16,10 +16,14 @@ export * from "./dm";
 export * from "./mentions";
 export * from "./links";
 export * from "./import";
+export * from "./channels";
+export * from "./votekick";
 export { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { DisplayName } from "./directory";
 import { GamePresence } from "./friends";
+import { ChannelNotification, SlowmodeSeconds, UserLimit, VoiceLock } from "./channels";
+import { VoteKick, VoteKickResult } from "./votekick";
 
 /** Increment on incompatible changes. The server rejects older clients. */
 export const PROTOCOL_VERSION = 4; // v4: voice.moved/voice.stop, Member.streamBlocked, MODERATE_VOICE
@@ -131,8 +135,15 @@ export const ServerSettings = z.object({
    * feature flag: a server from before it does not send the field; such a server also does not understand `voice.status`.
    */
   statusApi: StatusApiMode.optional(),
+  /**
+   * Whose view the status API answers with (docs/features/status-api.md, user's wish of 23 September 2026): the id of a role,
+   * null = the default role ("Gast"), i.e. what a plain visitor would see. The outside then gets exactly the channels and the
+   * seats a member with that role may see; a role carrying ADMINISTRATOR therefore exposes everything. A deleted role falls
+   * back to null. Optional = feature flag, like `statusApi` itself.
+   */
+  statusApiRoleId: Uuid.nullable().optional(),
 });
-export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true, requireAccount: true, listed: true, description: true, radioAutoStop: true, afkChannelId: true, statusApi: true }).partial();
+export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true, requireAccount: true, listed: true, description: true, radioAutoStop: true, afkChannelId: true, statusApi: true, statusApiRoleId: true }).partial();
 /** The key of the status API in mode "key" (MANAGE_SERVER only); null = none yet (made when the mode is switched to "key"). */
 export const StatusApiKeyResponse = z.object({ key: z.string().nullable() });
 /** How long a voice channel may stay empty before its radio is turned off (ServerSettings.radioAutoStop). */
@@ -290,9 +301,45 @@ export const Channel = z.object({
   audioStereo: z.boolean(),
   /** Web radio playing in this voice channel, null = none. Default for servers from before the radio. */
   radio: ChannelRadio.nullable().default(null),
+  // ---- Channel settings (docs/features/channel-permissions.md, 23 September 2026). All with defaults: servers from before
+  // send none, clients from before ignore them. No PROTOCOL_VERSION bump.
+  /** Voice: whoever sits here cannot enter another voice channel until somebody with MOVE_MEMBERS moves them (BYPASS_STICKY exempt). */
+  sticky: z.boolean().default(false),
+  /** Voice, with sticky: the hold outlives the member's voice connection, reload and restart; false = it ends with their presence. */
+  stickyPersist: z.boolean().default(false),
+  /** Voice, with sticky: while held, the member's channel list carries no other voice channel (text channels stay). */
+  stickyHideVoice: z.boolean().default(true),
+  /** Voice: how many may sit here; null = no limit. */
+  userLimit: UserLimit.default(null),
+  /** Text: seconds between two messages of one member; 0 = off. MANAGE_MESSAGES in the channel is exempt. */
+  slowmodeSeconds: SlowmodeSeconds.default(0),
+  /** The channel's notification suggestion for members who set nothing themselves. */
+  defaultNotify: ChannelNotification.default("all"),
+  /** Voice: false = no web radio in this channel at all, whatever the permissions say. */
+  allowRadio: z.boolean().default(true),
+  /** Voice: false = nobody shares camera or screen here, whatever the permissions say. */
+  allowVideo: z.boolean().default(true),
+  /** Voice: false = no vote kick in this channel (docs/features/votekick.md); default on, a server from before it sends nothing. */
+  allowVoteKick: z.boolean().default(true),
+  /**
+   * Derived, display only: the default role cannot see this channel (it or its category denies VIEW_CHANNELS to "Gast").
+   * Never a source of truth: the server filters what every member gets; this only draws the lock.
+   */
+  private: z.boolean().default(false),
 });
 export const CreateCategoryRequest = z.object({ name: Category.shape.name });
 export const UpdateCategoryRequest = z.object({ name: Category.shape.name.optional(), position: z.number().int().optional() });
+const ChannelSettingsFields = {
+  sticky: z.boolean().optional(),
+  stickyPersist: z.boolean().optional(),
+  stickyHideVoice: z.boolean().optional(),
+  userLimit: UserLimit.optional(),
+  slowmodeSeconds: SlowmodeSeconds.optional(),
+  defaultNotify: ChannelNotification.optional(),
+  allowRadio: z.boolean().optional(),
+  allowVideo: z.boolean().optional(),
+  allowVoteKick: z.boolean().optional(),
+};
 export const CreateChannelRequest = z.object({
   kind: ChannelKind,
   name: Channel.shape.name,
@@ -300,6 +347,7 @@ export const CreateChannelRequest = z.object({
   categoryId: Uuid.nullable().optional(),
   audioBitrate: AudioBitrate.optional(),
   audioStereo: z.boolean().optional(),
+  ...ChannelSettingsFields,
 });
 export const UpdateChannelRequest = z.object({
   name: Channel.shape.name.optional(),
@@ -308,6 +356,7 @@ export const UpdateChannelRequest = z.object({
   position: z.number().int().optional(),
   audioBitrate: AudioBitrate.optional(),
   audioStereo: z.boolean().optional(),
+  ...ChannelSettingsFields,
 });
 
 export const Role = z.object({
@@ -467,6 +516,14 @@ export const ServerState = z.object({
   importSources: z.array(ImportSource).optional(),
   /** Effective permissions of the signed-in user. */
   myPermissions: z.number().int(),
+  /**
+   * The user's permissions in every channel and category they can see, resolved through the overwrites (channels.ts).
+   * Present = this server does channel permissions (the feature flag: the client offers the channel dialog and the context
+   * menu entries only then); missing = a server from before, the client falls back to myPermissions everywhere.
+   */
+  myChannelPermissions: z.record(Uuid, z.number().int()).optional(),
+  /** Where a sticky voice channel holds the user right now; null = nowhere (missing = a server from before). */
+  myVoiceLock: VoiceLock.nullable().optional(),
 });
 
 // ---------- REST: status API (docs/features/status-api.md) ----------
@@ -548,7 +605,15 @@ export const ServerWelcome = z.object({
 });
 export const ServerPong = z.object({ type: z.literal("pong"), t: z.number() });
 /** Complete member state of a voice channel. Not a delta: simple, and correct after a reconnect. */
-export const ServerVoiceState = z.object({ type: z.literal("voice.state"), channelId: Uuid, members: z.array(VoiceMember) });
+export const ServerVoiceState = z.object({
+  type: z.literal("voice.state"), channelId: Uuid, members: z.array(VoiceMember),
+  /**
+   * A vote kick could be started here right now (docs/features/votekick.md): the channel allows it, at least
+   * VOTEKICK_MIN_MEMBERS sit in it, nobody present may throw anybody out, and no vote is running. Default false, so a
+   * server from before it offers nothing; the server checks again when a vote is started.
+   */
+  voteKick: z.boolean().default(false),
+});
 /** Structure changes arrive as the complete state of the respective part. Small enough, and never inconsistent. */
 export const ServerStructure = z.object({
   type: z.literal("structure"),
@@ -559,8 +624,11 @@ export const ServerStructure = z.object({
   members: z.array(Member).optional(),
   radioStations: z.array(RadioStation).optional(),
 });
-/** Your own permissions changed (role assigned/revoked, role edited). */
-export const ServerMe = z.object({ type: z.literal("me"), myPermissions: z.number().int() });
+/** Your own permissions changed (role assigned/revoked, role edited, an overwrite, a hold in a sticky channel). */
+export const ServerMe = z.object({
+  type: z.literal("me"), myPermissions: z.number().int(),
+  myChannelPermissions: ServerState.shape.myChannelPermissions, myVoiceLock: ServerState.shape.myVoiceLock,
+});
 export const ServerMessageCreate = z.object({ type: z.literal("message.create"), message: Message });
 export const ServerMessageUpdate = z.object({ type: z.literal("message.update"), message: Message });
 export const ServerMessageDelete = z.object({ type: z.literal("message.delete"), channelId: Uuid, id: Uuid });
@@ -593,6 +661,19 @@ export const ServerVoiceMoved = z.object({ type: z.literal("voice.moved"), chann
 // this connection ends (channelId null). A client from before drops the event; LiveKit ends its media anyway (ws/handler.ts).
 /** A moderator stops your camera and/or screen share (LiveKit has already muted the tracks). */
 export const ServerVoiceStop = z.object({ type: z.literal("voice.stop"), camera: z.boolean(), screen: z.boolean(), by: z.string() });
+/**
+ * A vote kick in the voice channel: the running vote (null = none any more) with what this recipient did about it.
+ * Sent to everybody sitting in the channel. Added without a PROTOCOL_VERSION bump: a client from before drops the event.
+ */
+export const ServerVoteKick = z.object({
+  type: z.literal("votekick"), channelId: Uuid, vote: VoteKick.nullable(),
+  /** What this recipient voted, null = not yet or not allowed to. */
+  myVote: z.enum(["yes", "no"]).nullable().default(null),
+  /** This recipient is one of the voters fixed at the start and has not voted yet. */
+  canVote: z.boolean().default(false),
+});
+/** How a vote ended; everybody in the channel shows it for VOTEKICK_RESULT_MS, the member it was about included. */
+export const ServerVoteKickResult = z.object({ type: z.literal("votekick.result"), result: VoteKickResult });
 /** The server removed you (kick/ban); it closes the connection afterwards. */
 export const ServerRemoved = z.object({ type: z.literal("removed"), reason: z.enum(["kicked", "banned"]), message: z.string().nullable() });
 export const ServerError = z.object({
@@ -603,7 +684,7 @@ export const ServerError = z.object({
 
 export const ServerEvent = z.discriminatedUnion("type", [
   ServerWelcome, ServerPong, ServerVoiceState, ServerStructure, ServerMe,
-  ServerMessageCreate, ServerMessageUpdate, ServerMessageDelete, ServerTyping, ServerReadUpdate, ServerMuteUpdate, ServerRadioMeta, ServerRadioPlayback, ServerVoiceMoved, ServerVoiceStop, ServerRemoved, ServerError,
+  ServerMessageCreate, ServerMessageUpdate, ServerMessageDelete, ServerTyping, ServerReadUpdate, ServerMuteUpdate, ServerRadioMeta, ServerRadioPlayback, ServerVoiceMoved, ServerVoiceStop, ServerVoteKick, ServerVoteKickResult, ServerRemoved, ServerError,
 ]);
 
 export type ClientEvent = z.infer<typeof ClientEvent>;

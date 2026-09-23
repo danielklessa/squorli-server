@@ -217,7 +217,10 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 
 /* Sidebar */
 .sidebar { flex: 1; overflow-y: auto; min-height: 0; }
-.server-head { display: flex; align-items: center; gap: 0.5rem; height: var(--head-h); padding: 0 0.9rem; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+/* Which server one is on stays readable while the channel list scrolls (user's wish, 23 September 2026): the header sticks
+   to the top of the scrolling sidebar. Its own background is the panel's, so the list passes underneath it, and the z-index
+   keeps it over the channel rows (the menus are portals far above). In .home-side nothing scrolls around it, so it is a no-op there. */
+.server-head { position: sticky; top: 0; z-index: 2; background: var(--bg2); display: flex; align-items: center; gap: 0.5rem; height: var(--head-h); padding: 0 0.9rem; border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .server-head strong { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .brand-mark { width: 22px; height: 22px; flex: none; }
 .brand-mark.server-icon, .server-icon-preview { border-radius: 6px; object-fit: cover; background: var(--bg); }
@@ -307,18 +310,37 @@ button.dock-stage:hover { background: var(--sel); }
 .dock-row button.icon.danger { color: var(--danger); }
 .dock-name { flex: 1; text-align: left; background: transparent; color: var(--text); font-weight: 600; padding: 0.3rem 0.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dock-name:hover { background: var(--bg4); }
-.settings-modal { width: min(46rem, 100%); height: min(34rem, 90vh); font-size: 0.95rem; }
-.settings-layout { display: grid; grid-template-columns: 11rem minmax(0, 1fr); flex: 1; min-height: 0; }
-.settings-nav { border-right: 1px solid var(--line); padding: 0.6rem 0.5rem; display: flex; flex-direction: column; gap: 0.15rem; background: var(--bg2); border-bottom-left-radius: var(--r-panel); }
-.settings-nav button { text-align: left; background: transparent; color: var(--muted); font-weight: 500; display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; }
+/* Size against the backdrop's available area, including the desktop title bar and outer padding. */
+:is(.settings-backdrop, .admin-backdrop, .channel-backdrop) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+:is(.settings-modal, .admin-modal, .channel-modal).modal { min-width: 0; min-height: 0; max-width: 100%; max-height: 100%; }
+.settings-modal.modal { width: min(64rem, 100%); height: min(44rem, 90dvh); font-size: 0.95rem; }
+.settings-layout { display: grid; grid-template-columns: 13rem minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); flex: 1; min-height: 0; overflow: hidden; }
+.settings-nav { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-right: 1px solid var(--line); padding: 0.6rem 0.5rem; display: flex; flex-direction: column; gap: 0.15rem; background: var(--bg2); border-bottom-left-radius: var(--r-panel); }
+.settings-nav button { flex: none; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; text-align: left; background: transparent; color: var(--muted); font-weight: 500; display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; }
 .settings-nav button:hover { background: var(--bg4); color: var(--text); }
 .settings-nav button.active { background: var(--sel); color: var(--text); }
-.settings-body { overflow-y: auto; padding: 0.5rem 1.25rem 1.25rem; margin-top: 0; }
+.settings-nav button .ic { flex: none; }
+.settings-nav button span { min-width: 0; }
+.settings-body { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-wrap: anywhere; padding: 1rem 1.5rem 1.5rem; margin-top: 0; line-height: 1.5; }
+/* Scrolling flex columns must keep their children's natural height. */
+.settings-body > *, .settings-body .stack > * { flex-shrink: 0; min-width: 0; }
+.settings-body .stack, .settings-body .row, .settings-body label { min-width: 0; max-width: 100%; }
+.settings-body :is(input, select, textarea) { min-width: 0; max-width: 100%; }
+.settings-body button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.settings-body .check { align-items: flex-start; }
+.settings-body .check input { flex: none; margin-top: 0.3em; }
+.settings-body h3:not(:first-child) { padding-top: 1rem; border-top: 1px solid var(--line); }
+:is(.settings-modal, .admin-modal, .channel-modal) .modal-head { flex: none; gap: 0.75rem; }
+:is(.settings-modal, .admin-modal, .channel-modal) .modal-head h2 { min-width: 0; overflow-wrap: anywhere; }
+:is(.settings-modal, .admin-modal, .channel-modal) .modal-head button { flex: none; }
 .settings-body h3 { margin-top: 0.9rem; }
 .settings-body h3:first-child { margin-top: 0.4rem; }
-@media (max-width: 600px) { .settings-layout { grid-template-columns: 1fr; } .settings-nav { flex-direction: row; border-right: 0; border-bottom: 1px solid var(--line); border-radius: 0; } }
-.settings-modal .modal-head h2, .admin-modal .modal-head h2 { margin: 0; font-size: 1.05rem; }
-.admin-modal { width: min(60rem, 100%); height: min(40rem, 90vh); }
+.settings-modal .modal-head h2, .admin-modal .modal-head h2, .channel-modal .modal-head h2 { margin: 0; font-size: 1.05rem; }
+.admin-modal.modal { width: min(76rem, 100%); height: min(46rem, 90dvh); }
+.channel-modal.modal { width: min(76rem, 100%); height: min(46rem, 90dvh); }
+/* "Benachrichtigungen" ran over the 11rem navigation (user's report, 23 September 2026): the column is as wide as that word needs. */
+.channel-modal .settings-layout { grid-template-columns: 14.5rem minmax(0, 1fr); }
+.channel-modal .settings-nav button { min-width: 0; }
 
 /* Channel management: stable action groups and a separate line for channel settings. */
 .channel-manager { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; padding-top: 0.75rem; }
@@ -356,12 +378,6 @@ button.dock-stage:hover { background: var(--sel); }
   .channel-editor-head .channel-actions { grid-column: 3; justify-self: end; }
   .category-editor { grid-template-columns: auto minmax(0, 1fr); }
   .category-editor .channel-actions { grid-column: 2; justify-self: end; }
-}
-@media (max-width: 600px) {
-  .admin-modal .settings-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-  .admin-modal .settings-nav { overflow-x: auto; }
-  .admin-modal .settings-nav button { flex: 0 0 auto; white-space: nowrap; }
-  .admin-modal .settings-body { padding: 0.5rem 0.75rem 1rem; }
 }
 .meter { position: relative; height: 1.2rem; flex-shrink: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-top: 0.4rem; background: var(--bg); }
 .small-meter { height: 0.5rem; margin-top: 0.3rem; }
@@ -844,27 +860,27 @@ button.icon.on { color: var(--brand); }
   .settings-body { padding: 0.75rem; }
   .settings-body input:not([type="checkbox"]):not([type="radio"]), .settings-body select { min-width: 0; max-width: 100%; }
   /* Settings and administration share the phone layout, with independently scrolling columns. */
-  :is(.settings-backdrop, .admin-backdrop) { padding: 0; }
-  :is(.settings-modal, .admin-modal).modal { width: 100%; height: 100%; max-height: 100%; border-radius: 0; overflow: hidden; }
-  :is(.settings-modal, .admin-modal) .modal-head { flex: none; padding: max(0.5rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right)) 0.5rem max(0.75rem, env(safe-area-inset-left)); }
-  :is(.settings-modal, .admin-modal) .modal-head button { min-width: 2.75rem; min-height: 2.75rem; }
-  :is(.settings-modal, .admin-modal) .settings-layout { grid-template-columns: 5.5rem minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; }
-  :is(.settings-modal, .admin-modal) .settings-nav { min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-radius: 0; padding: 0.5rem 0.25rem max(0.5rem, env(safe-area-inset-bottom)); }
-  :is(.settings-modal, .admin-modal) .settings-nav button { flex: none; flex-direction: column; justify-content: center; gap: 0.25rem; min-height: 3.5rem; padding: 0.5rem 0.25rem; text-align: center; font-size: 0.75rem; line-height: 1.3; white-space: normal; }
-  :is(.settings-modal, .admin-modal) .settings-nav button .ic { font-size: 1.125rem; flex: none; }
-  :is(.settings-modal, .admin-modal) .settings-body { min-width: 0; padding: 0.75rem max(0.75rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) 0.75rem; overscroll-behavior: contain; overflow-wrap: anywhere; }
-  :is(.settings-modal, .admin-modal) .settings-body > *, :is(.settings-modal, .admin-modal) .settings-body .stack { flex-shrink: 0; min-width: 0; max-width: 100%; }
-  :is(.settings-modal, .admin-modal) .settings-body input:not([type="checkbox"]):not([type="radio"]), :is(.settings-modal, .admin-modal) .settings-body select { width: 100%; min-width: 0; font-size: 1rem; min-height: 2.75rem; }
-  :is(.settings-modal, .admin-modal) .settings-body button { min-height: 2.75rem; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
-  :is(.settings-modal, .admin-modal) .settings-body button.icon { min-width: 2.75rem; }
-  :is(.settings-modal, .admin-modal) .check { min-height: 2.75rem; }
-  :is(.settings-modal, .admin-modal) .check input { flex-shrink: 0; }
-  :is(.settings-modal, .admin-modal) .profile-preview { flex-wrap: wrap; gap: 0.75rem; padding-block: 0.5rem 1rem; }
-  :is(.settings-modal, .admin-modal) .session-list li { flex-wrap: wrap; }
-  :is(.settings-modal, .admin-modal) .session-list li > .stack { width: 100%; }
-  :is(.settings-modal, .admin-modal) .session-list .spacer { display: none; }
-  :is(.settings-modal, .admin-modal) .license-list summary { flex-wrap: wrap; }
-  :is(.settings-modal, .admin-modal) .license-id { margin-left: 0; }
+:is(.settings-backdrop, .admin-backdrop, .channel-backdrop) { padding: 0; }
+  :is(.settings-modal, .admin-modal, .channel-modal).modal { width: 100%; height: 100%; max-height: 100%; border-radius: 0; overflow: hidden; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .modal-head { flex: none; padding: max(0.5rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right)) 0.5rem max(0.75rem, env(safe-area-inset-left)); }
+  :is(.settings-modal, .admin-modal, .channel-modal) .modal-head button { min-width: 2.75rem; min-height: 2.75rem; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .settings-layout { grid-template-columns: 5.5rem minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .settings-nav { min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-radius: 0; padding: 0.5rem 0.25rem max(0.5rem, env(safe-area-inset-bottom)); }
+  :is(.settings-modal, .admin-modal, .channel-modal) .settings-nav button { flex: none; flex-direction: column; justify-content: center; gap: 0.25rem; min-height: 3.5rem; padding: 0.5rem 0.25rem; text-align: center; font-size: 0.75rem; line-height: 1.3; white-space: normal; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .settings-nav button .ic { font-size: 1.125rem; flex: none; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .settings-body { min-width: 0; padding: 0.75rem max(0.75rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) 0.75rem; overscroll-behavior: contain; overflow-wrap: anywhere; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .settings-body > *, :is(.settings-modal, .admin-modal, .channel-modal) .settings-body .stack { flex-shrink: 0; min-width: 0; max-width: 100%; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .settings-body input:not([type="checkbox"]):not([type="radio"]), :is(.settings-modal, .admin-modal, .channel-modal) .settings-body select { width: 100%; min-width: 0; font-size: 1rem; min-height: 2.75rem; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .settings-body button { min-height: 2.75rem; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .settings-body button.icon { min-width: 2.75rem; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .check { min-height: 2.75rem; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .check input { flex-shrink: 0; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .profile-preview { flex-wrap: wrap; gap: 0.75rem; padding-block: 0.5rem 1rem; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .session-list li { flex-wrap: wrap; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .session-list li > .stack { width: 100%; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .session-list .spacer { display: none; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .license-list summary { flex-wrap: wrap; }
+  :is(.settings-modal, .admin-modal, .channel-modal) .license-id { margin-left: 0; }
   .admin-modal .roles, .admin-modal .category-create, .admin-modal .channel-create { grid-template-columns: minmax(0, 1fr); }
   .admin-modal .channel-editor-head { grid-template-columns: auto auto minmax(0, 1fr); }
   .admin-modal .channel-editor-head > input { grid-column: 1 / -1; grid-row: 2; }
@@ -1078,3 +1094,110 @@ button.emoji-open[aria-expanded="true"] { color: var(--brand); }
 .import-role-swatch { width: 0.75rem; height: 0.75rem; border-radius: 50%; flex: none; }
 .import-dropped { margin: 0; padding-left: 1.25rem; }
 .row > input.grow { flex: 1; min-width: 12rem; }
+
+/* ---- Channel permissions and the channel dialog (docs/features/channel-permissions.md, 23 September 2026) ---- */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.chan-tab { max-width: 36rem; }
+.chan-tab > label:not(.check) { display: flex; flex-direction: column; gap: 0.25rem; color: var(--muted); font-size: 0.875rem; }
+.chan-tab > label:not(.check) > input, .chan-tab > label:not(.check) > select, .chan-tab > label:not(.check) > textarea { color: var(--text); font-size: 1rem; width: 100%; min-width: 0; }
+.chan-tab .perm-group { display: flex; flex-direction: column; gap: 0.4rem; }
+.chan-save { align-items: center; gap: 0.75rem; }
+.chan-danger { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.chan-danger h4 { margin: 0 0 0.5rem; color: var(--danger); font-size: 0.875rem; }
+.chan-perms { display: grid; grid-template-columns: minmax(10rem, 13rem) minmax(0, 1fr); gap: 1rem; min-height: 0; }
+.chan-perm-list { min-width: 0; }
+.chan-perm-list h4 { margin: 0.75rem 0 0.35rem; font-size: 0.8125rem; color: var(--muted); }
+.chan-shortcuts .check { align-items: center; }
+.overwrite-list { list-style: none; margin: 0 0 0.5rem; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.overwrite-row { display: flex; align-items: center; gap: 0.25rem; border-radius: var(--r); }
+.overwrite-row.active { background: var(--sel); }
+.overwrite-pick { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.5rem; background: transparent; color: var(--text); text-align: left; padding: 0.4rem 0.5rem; }
+.overwrite-pick:hover { background: var(--bg4); }
+.overwrite-row.active .overwrite-pick:hover { background: var(--sel); }
+.entity-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.role-dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+.role-fixed { color: var(--muted); padding: 0 0.5rem; display: inline-flex; }
+.chan-status { display: inline-flex; align-items: center; gap: 0.3rem; min-height: 1.2em; margin: 0 0.5rem; color: var(--muted); white-space: nowrap; }
+.chan-status.is-saved { color: var(--ok); }
+.chan-status.is-error { color: var(--danger); }
+.chan-perm-edit { min-width: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+.chan-perm-edit > header { align-items: center; }
+.chan-perm-edit .perm-group { display: flex; flex-direction: column; gap: 0.25rem; }
+.perm-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 0.75rem; row-gap: 0.25rem; padding: 0.65rem 0.5rem; border-left: 2px solid transparent; }
+.perm-row.overridden { border-left-color: var(--brand); }
+.perm-row > span:first-child { grid-column: 1; min-width: 0; }
+.perm-inherited { grid-column: 1; grid-row: 2; white-space: normal; }
+.perm-inherited:empty { display: none; }
+.perm-row > .tri-state { grid-column: 2; grid-row: 1 / 3; }
+.perm-row + .perm-row { border-top: 1px solid var(--line); }
+.perm-effective { margin: 0.25rem 0 0; color: var(--muted); }
+button.link { background: transparent; color: var(--accent); padding: 0; font: inherit; text-decoration: underline; }
+.tri-state { display: inline-flex; margin: 0; padding: 2px; border: 0; background: var(--bg4); border-radius: var(--r); gap: 2px; }
+.tri-state label { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: calc(var(--head-control-h, 35px) - 8px); border-radius: calc(var(--r) - 2px); color: var(--muted); cursor: pointer; }
+.tri-state label input { position: absolute; opacity: 0; width: 0; height: 0; }
+.tri-state label:has(input:focus-visible) { outline: 2px solid var(--brand); outline-offset: 1px; }
+.tri-state label.active.tri-allow { background: var(--ok); color: var(--on-dark); }
+.tri-state label.active.tri-deny { background: var(--danger); color: var(--on-light); }
+.tri-state label.active.tri-neutral { background: var(--bg2); color: var(--text); }
+.tri-state.inherits-allow label.tri-neutral { box-shadow: inset 0 0 0 1px var(--ok); }
+.tri-state.inherits-deny label.tri-neutral { box-shadow: inset 0 0 0 1px var(--danger); }
+.tri-state[disabled] label { opacity: 0.45; cursor: not-allowed; }
+.entity-picker { display: flex; flex-direction: column; gap: 0.35rem; min-width: 16rem; }
+.entity-picker input { width: 100%; }
+.entity-picker ul { list-style: none; margin: 0; padding: 0; max-height: 16rem; overflow: auto; }
+.entity-picker li[role=option] { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.5rem; border-radius: var(--r); cursor: pointer; }
+.entity-picker li[role=option].active { background: var(--sel); }
+.channel-flag { color: var(--muted); display: inline-flex; font-size: 0.8em; }
+.channel-btn .count.full { color: var(--warn); }
+.channel.locked-out .channel-btn { opacity: 0.5; }
+.channel-menu-btn { display: inline-flex; padding: 0 0.2rem; color: var(--muted); }
+h3 > .category-btn { background: transparent; color: inherit; font: inherit; padding: 0; text-align: left; width: 100%; cursor: pointer; }
+h3 > .category-btn:hover { color: var(--text); }
+.channel-title { display: flex; align-items: center; gap: 0.35rem; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.channel-title svg, .channel-title i { color: var(--muted); font-size: 0.85em; }
+.hangup.locked, .bar-btn.leave.locked { opacity: 0.6; cursor: not-allowed; }
+@media (pointer: coarse) { .tri-state label { width: 2.75rem; height: 2.75rem; } }
+/* One column on a phone: the entry list above the chosen entry (after the rule above, so it wins). */
+@media (max-width: 1100px) {
+  .chan-perms { grid-template-columns: minmax(0, 1fr); }
+  .chan-perm-list { padding-bottom: 1rem; border-bottom: 1px solid var(--line); }
+}
+@media (max-width: 420px) {
+  .perm-row { grid-template-columns: minmax(0, 1fr); }
+  .perm-row > .tri-state { grid-column: 1; grid-row: 3; justify-self: start; }
+}
+/* The picker opens out of the channel dialog (the modal sits at z-index 10, the confirm dialogs at 30): between the two. */
+.user-context-menu:has(.entity-picker) { z-index: 20; }
+/* SaveButton.tsx: the answer next to a save button (Verwaltung > Server, > Rollen). */
+.save-answer { display: inline-flex; align-items: center; gap: 0.6rem; }
+.save-status { display: inline-flex; align-items: center; gap: 0.3rem; min-height: 1.2em; color: var(--muted); white-space: nowrap; }
+.save-status.is-saved { color: var(--ok); }
+.save-status.is-failed { color: var(--danger); }
+
+/* Vote kick (docs/features/votekick.md, 23 September 2026): the running vote and its result sit at the TOP OF the member
+   list (user's correction), so the box is a plain block that scrolls with it. Yes and no are a bar over everybody who sat
+   in the channel when the vote started: the empty part has not voted, the mark sits where the quorum is reached. */
+.votekick-box { display: flex; flex-direction: column; gap: 0.4rem; margin: 0 0 1.25rem; padding: 0.7rem 0.75rem;
+  border: 1px solid var(--line); border-left: 3px solid var(--brand); border-radius: var(--r); background: var(--bg4); font-size: 0.875rem; }
+.votekick-box.passed { border-left-color: var(--danger); }
+.votekick-box.stays { border-left-color: var(--ok); }
+.votekick-box header { display: flex; align-items: center; gap: 0.4rem; }
+.votekick-box p { margin: 0; }
+.votekick-clock { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); }
+.votekick-person { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.votekick-person strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.votekick-target { overflow-wrap: anywhere; }
+/* The bar: yes (the member goes) from the left, no (they stay) after it, the rest is what has not voted. */
+.votekick-bar { position: relative; display: flex; height: 0.5rem; border-radius: 999px; background: var(--bg); overflow: hidden; }
+.votekick-fill { display: block; height: 100%; transition: width 200ms ease; }
+.votekick-fill.yes { background: var(--danger); }
+.votekick-fill.no { background: var(--ok); }
+.votekick-quorum { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--text); opacity: 0.55; }
+.votekick-counts { display: flex; justify-content: space-between; gap: 0.5rem; font-variant-numeric: tabular-nums; }
+.votekick-counts .yes { color: var(--danger); }
+.votekick-counts .no { color: var(--ok); }
+.votekick-actions { gap: 0.4rem; }
+.votekick-actions button { flex: 1; }
+.votekick-dialog .votekick-person { margin: 0.25rem 0 0.75rem; }
+.votekick-dialog .votekick-counts { margin-top: 0.35rem; }
+.votekick-dialog .dialog-actions button { display: inline-flex; align-items: center; gap: 0.4rem; }

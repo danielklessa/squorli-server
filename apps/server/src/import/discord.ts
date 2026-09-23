@@ -1,4 +1,4 @@
-import { AUDIO_BITRATES, DEFAULT_AUDIO_BITRATE, Permission, type ImportCategoryPlan, type ImportChannelPlan, type ImportPlan, type ImportRolePlan } from "@squorli/protocol";
+import { AUDIO_BITRATES, CHANNEL_OVERRIDABLE, DEFAULT_AUDIO_BITRATE, Permission, hasPermission, type ImportCategoryPlan, type ImportChannelPlan, type ImportOverwrite, type ImportPlan, type ImportRolePlan } from "@squorli/protocol";
 import { z } from "zod";
 import { canGrant, type Actor } from "../authz";
 
@@ -32,7 +32,8 @@ export const DiscordTemplate = z.object({
       topic: z.string().nullable().optional(),
       bitrate: z.number().optional(),
       parent_id: Id.nullable().optional(),
-      permission_overwrites: z.array(z.unknown()).optional().default([]),
+      /** Channel permissions (docs/features/channel-permissions.md): `type` 0 = a role (its template id, 0 = @everyone), 1 = a member. */
+      permission_overwrites: z.array(z.object({ id: Id, type: z.union([z.number(), z.string()]).transform(Number), allow: Perms, deny: Perms })).optional().default([]),
     })),
   }),
 });
@@ -72,7 +73,7 @@ const PERMISSION_MAP: readonly [bigint, number][] = [
   [D.STREAM, Permission.STREAM_VIDEO],
   [D.MUTE_MEMBERS, Permission.MODERATE_VOICE],
   [D.DEAFEN_MEMBERS, Permission.MODERATE_VOICE],
-  [D.MOVE_MEMBERS, Permission.MODERATE_VOICE],
+  [D.MOVE_MEMBERS, Permission.MOVE_MEMBERS],
 ];
 
 /** Our permission mask for a Discord permission set (decimal string or number). Unreadable = 0. */
@@ -113,6 +114,26 @@ export type ExistingStructure = {
   afkChannelId: string | null;
 };
 
+/** The template's role keys of Discord's @everyone: the role with id 0 (templates number it so) or the one named so. */
+const EVERYONE_KEYS = (g: DiscordTemplate["serialized_source_guild"]) => new Set(g.roles.filter((r) => r.id === "0" || r.name === "@everyone").map((r) => r.id).concat("0"));
+
+/**
+ * A channel's or category's overwrites as Squorli understands them (docs/features/channel-permissions.md): the masks
+ * through the permission map, then only the channel-overridable bits; @everyone becomes "everyone" (the role "Gast" at
+ * the import); overwrites for single accounts are counted and dropped; entries that carry nothing after all fall away.
+ */
+export function mapOverwrites(rows: { id: string; type: number; allow: string | number; deny: string | number }[], everyone: ReadonlySet<string>): { overwrites: ImportOverwrite[]; memberOverwrites: number } {
+  const overwrites: ImportOverwrite[] = [];
+  let memberOverwrites = 0;
+  for (const o of rows) {
+    if (o.type === 1) { memberOverwrites++; continue; }
+    const allow = mapDiscordPermissions(o.allow) & CHANNEL_OVERRIDABLE, deny = mapDiscordPermissions(o.deny) & CHANNEL_OVERRIDABLE & ~allow;
+    if (!allow && !deny) continue;
+    overwrites.push({ roleKey: everyone.has(o.id) ? "everyone" : o.id, allow, deny });
+  }
+  return { overwrites, memberOverwrites };
+}
+
 /**
  * The plan of an import (pure): categories, channels in display order, roles most powerful first, the template's AFK
  * channel and what is dropped. "Ergänzen": what exists by name is skipped, never replaced (user's decision, 22 September
@@ -122,14 +143,15 @@ export type ExistingStructure = {
 export function planDiscordImport(template: DiscordTemplate, existing: ExistingStructure, actor: Actor): ImportPlan {
   const g = template.serialized_source_guild;
   const dropped: ImportPlan["dropped"] = [];
+  const everyone = EVERYONE_KEYS(g);
 
-  // Categories in Discord's order; the template's ids are the keys.
+  // Categories in Discord's order; the template's ids are the keys. Their overwrites come along (live inheritance here = Discord's sync).
   const categories: ImportCategoryPlan[] = g.channels
     .filter((c) => c.type === CATEGORY_TYPE)
     .sort((a, b) => a.position - b.position || byId(a.id, b.id))
     .map((c) => {
       const name = clip(c.name, 64) || "Kategorie";
-      return { key: c.id, name, existingId: existing.categories.find((e) => same(e.name, name))?.id ?? null };
+      return { key: c.id, name, existingId: existing.categories.find((e) => same(e.name, name))?.id ?? null, ...mapOverwrites(c.permission_overwrites, everyone) };
     });
   const categoryKeys = new Set(categories.map((c) => c.key));
 
@@ -154,11 +176,18 @@ export function planDiscordImport(template: DiscordTemplate, existing: ExistingS
       // A duplicate = same name and kind inside the same existing category (or without one). A new category has nothing yet.
       const exists = targetCategoryId === undefined ? false
         : existing.channels.some((e) => e.kind === kind && e.categoryId === targetCategoryId && same(e.name, name));
+      const ow = mapOverwrites(c.permission_overwrites, everyone);
+      // Private on Discord = @everyone may not view it, on the channel or (unless the channel says otherwise) its category.
+      const catEveryone = categories.find((k) => k.key === group.categoryKey)?.overwrites.find((o) => o.roleKey === "everyone");
+      const chanEveryone = ow.overwrites.find((o) => o.roleKey === "everyone");
+      const priv = chanEveryone && (chanEveryone.deny & Permission.VIEW_CHANNELS) ? true
+        : chanEveryone && hasPermission(chanEveryone.allow, Permission.VIEW_CHANNELS) ? false
+        : !!catEveryone && (catEveryone.deny & Permission.VIEW_CHANNELS) !== 0;
       channels.push({
         key: c.id, kind, name,
         topic: kind === "text" && c.topic ? clip(c.topic, 256) || null : null,
         audioBitrate: kind === "voice" ? mapBitrate(c.bitrate) : DEFAULT_AUDIO_BITRATE,
-        categoryKey: group.categoryKey, overwrites: c.permission_overwrites.length, exists,
+        categoryKey: group.categoryKey, ...ow, private: priv, exists,
       });
     }
   }

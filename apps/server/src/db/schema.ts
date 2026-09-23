@@ -1,4 +1,5 @@
-import { bigint, bigserial, boolean, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { bigint, bigserial, boolean, check, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import type { LinkPreview } from "@squorli/protocol";
 
 const ts = (name: string) => timestamp(name, { withTimezone: true });
@@ -58,6 +59,8 @@ export const serverSettings = pgTable("server_settings", {
   statusApi: text("status_api", { enum: ["off", "key", "public"] }).notNull().default("off"),
   /** The key for mode "key" (random, base64url); null until the mode is first switched to "key". Regenerated in the admin area. */
   statusApiKey: text("status_api_key"),
+  /** Whose view GET /api/status answers with; null = the default role ("Gast"). A deleted role falls back to it. */
+  statusApiRoleId: uuid("status_api_role_id").references((): AnyPgColumn => roles.id, { onDelete: "set null" }),
 });
 
 /** Membership. Anyone missing here sees nothing and can do nothing. */
@@ -70,6 +73,12 @@ export const members = pgTable("members", {
   isOwner: boolean("is_owner").notNull().default(false),
   /** The member has muted this server: their clients show no unread mark for it on the server rail. */
   muted: boolean("muted").notNull().default(false),
+  /**
+   * A sticky voice channel holds the member (docs/features/channel-permissions.md): no token for any other voice channel
+   * until somebody with MOVE_MEMBERS moves them. Cleared with the channel (FK), by a move, and, without `sticky_persist`,
+   * when their voice presence ends.
+   */
+  confinedChannelId: uuid("confined_channel_id").references((): AnyPgColumn => channels.id, { onDelete: "set null" }),
 });
 
 export const categories = pgTable("categories", {
@@ -111,7 +120,68 @@ export const channels = pgTable("channels", {
   radioPlayback: jsonb("radio_playback").$type<{ playing: boolean; position: number; rate: number; at: number }>(),
   /** A YouTube playlist played as a queue (radio/queue.ts): its videos and which one is on; `radio_stream_url` is that video. null for everything else. */
   radioQueue: jsonb("radio_queue").$type<{ listId: string; videoIds: string[]; index: number }>(),
+  // ---- Channel settings (docs/features/channel-permissions.md, 23 September 2026). Defaults = how every channel behaved before.
+  /** Voice: whoever sits here is held (members.confined_channel_id) until moved out. */
+  sticky: boolean("sticky").notNull().default(false),
+  /** Voice, with sticky: the hold outlives the member's voice presence (reload, restart). */
+  stickyPersist: boolean("sticky_persist").notNull().default(false),
+  /** Voice, with sticky: a held member gets no other voice channel in their channel list. */
+  stickyHideVoice: boolean("sticky_hide_voice").notNull().default(true),
+  /** Voice: how many may sit here; null = no limit (best effort, presence is advisory). */
+  userLimit: integer("user_limit"),
+  /** Text: seconds between two messages of one member, 0 = off. */
+  slowmodeSeconds: integer("slowmode_seconds").notNull().default(0),
+  /** The channel's notification suggestion for members who set nothing (protocol ChannelNotification). */
+  defaultNotification: text("default_notification", { enum: ["all", "mentions", "none"] }).notNull().default("all"),
+  /** Voice: false = no web radio here, for anybody. */
+  allowRadio: boolean("allow_radio").notNull().default(true),
+  /** Voice: false = no camera or screen share here, for anybody. */
+  allowVideo: boolean("allow_video").notNull().default(true),
+  /** Voice: false = no vote kick here (docs/features/votekick.md), whatever sits in the channel. */
+  allowVoteKick: boolean("allow_vote_kick").notNull().default(true),
 });
+
+/**
+ * Permission overwrites of a channel (docs/features/channel-permissions.md): one row per role or member, allow and deny
+ * masks over CHANNEL_OVERRIDABLE. Two FK columns instead of a (type, id) pair so Postgres drops the rows with the role or
+ * the user; a kicked member's rows are removed by the route (their users row lives on).
+ */
+export const channelOverwrites = pgTable(
+  "channel_overwrites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    channelId: uuid("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+    roleId: uuid("role_id").references(() => roles.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    allow: integer("allow").notNull().default(0),
+    deny: integer("deny").notNull().default(0),
+  },
+  (t) => ({
+    byChannel: index("channel_overwrites_channel_idx").on(t.channelId),
+    uqRole: uniqueIndex("channel_overwrites_role_uq").on(t.channelId, t.roleId),
+    uqUser: uniqueIndex("channel_overwrites_user_uq").on(t.channelId, t.userId),
+    oneTarget: check("channel_overwrites_one_target", sql`(${t.roleId} IS NULL) <> (${t.userId} IS NULL)`),
+  }),
+);
+
+/** The same for a category: its rows apply to every channel inside, a channel's own rows come on top (live inheritance). */
+export const categoryOverwrites = pgTable(
+  "category_overwrites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    categoryId: uuid("category_id").notNull().references(() => categories.id, { onDelete: "cascade" }),
+    roleId: uuid("role_id").references(() => roles.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    allow: integer("allow").notNull().default(0),
+    deny: integer("deny").notNull().default(0),
+  },
+  (t) => ({
+    byCategory: index("category_overwrites_category_idx").on(t.categoryId),
+    uqRole: uniqueIndex("category_overwrites_role_uq").on(t.categoryId, t.roleId),
+    uqUser: uniqueIndex("category_overwrites_user_uq").on(t.categoryId, t.userId),
+    oneTarget: check("category_overwrites_one_target", sql`(${t.roleId} IS NULL) <> (${t.userId} IS NULL)`),
+  }),
+);
 
 export const roles = pgTable("roles", {
   id: uuid("id").primaryKey().defaultRandom(),

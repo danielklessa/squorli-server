@@ -7,6 +7,7 @@ import type { Db } from "../db";
 import { members, serverSettings, users } from "../db/schema";
 import type { Hub } from "../hub";
 import { SETTINGS_ID, loadCategories, loadChannels, loadSettings } from "../state";
+import { roleView, visibility } from "../visibility";
 import type { VoicePresence } from "../voice/presence";
 
 /** One answer serves every request of the same moment: a widget on a busy page must not turn into a query per visitor. */
@@ -20,18 +21,27 @@ const CACHE_MS = 1000;
  * no permissions, roles, keys or messages leave the server this way.
  */
 export async function registerStatusRoutes(app: FastifyInstance, db: Db, hub: Hub, presence: VoicePresence, config: Config) {
-  let cached: { at: number; status: ServerStatus } | null = null;
-  const build = async (): Promise<ServerStatus> => {
-    if (cached && Date.now() - cached.at < CACHE_MS) return cached.status;
-    const [settings, categories, channels, rows] = await Promise.all([
+  // The viewpoint belongs in the cache key: switching the role in the admin area must show at once, not a second later.
+  // A permission change still has the one-second window, which is what the cache is for (docs/features/status-api.md).
+  let cached: { at: number; roleId: string | null; status: ServerStatus } | null = null;
+  const build = async (roleId: string | null): Promise<ServerStatus> => {
+    if (cached && cached.roleId === roleId && Date.now() - cached.at < CACHE_MS) return cached.status;
+    // Private channels (docs/features/channel-permissions.md): the outside gets what one role would see, in both modes (the
+    // key reads, it is no membership), and nobody sitting in a channel that role may not see. Which role is the admin's
+    // choice (`statusApiRoleId`, user's wish of 23 September 2026); null = the default role, i.e. a plain visitor.
+    const [settings, allCategories, allChannels, rows, ctx] = await Promise.all([
       loadSettings(db), loadCategories(db), loadChannels(db),
       db.select({ userId: members.userId, isOwner: members.isOwner, publicKey: users.publicKey, displayName: users.displayName, handle: users.handle, avatarUrl: users.avatarUrl })
         .from(members).innerJoin(users, eq(users.id, members.userId)).orderBy(asc(members.joinedAt)),
+      visibility.refresh(db),
     ]);
+    const view = roleView(ctx, roleId);
+    const categories = allCategories.filter((k) => view.categories.has(k.id));
+    const channels = allChannels.filter((c) => view.channels.has(c.id));
     const statusMembers: StatusMember[] = [];
     for (const r of rows) {
       const seat = presence.statusOfUser(r.userId);
-      if (!seat) continue;
+      if (!seat || !view.channels.has(seat.channelId)) continue;
       statusMembers.push({
         userId: r.userId, displayName: displayNameOf(r), handle: r.handle,
         // The directory account's picture, public there like the handle (user's decision: no extra consent for it).
@@ -45,16 +55,16 @@ export async function registerStatusRoutes(app: FastifyInstance, db: Db, hub: Hu
       name: settings.name, iconUrl: settings.iconUrl ? `${config.publicOrigin}${settings.iconUrl}` : null, time: new Date().toISOString(),
       categories, channels: statusChannels, members: statusMembers,
     };
-    cached = { at: Date.now(), status };
+    cached = { at: Date.now(), roleId, status };
     return status;
   };
 
   app.get("/api/status", async (req, reply) => {
-    const [row] = await db.select({ mode: serverSettings.statusApi, key: serverSettings.statusApiKey }).from(serverSettings).where(eq(serverSettings.id, SETTINGS_ID)).limit(1);
+    const [row] = await db.select({ mode: serverSettings.statusApi, key: serverSettings.statusApiKey, roleId: serverSettings.statusApiRoleId }).from(serverSettings).where(eq(serverSettings.id, SETTINGS_ID)).limit(1);
     reply.header("cache-control", "no-store");
     if (!row || row.mode === "off") return reply.code(404).send({ error: "status_api_off" });
     if (row.mode === "key" && !keyMatches(req, row.key)) return reply.code(401).send({ error: "unauthorized" });
-    return build();
+    return build(row.roleId);
   });
 }
 

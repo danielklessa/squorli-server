@@ -1,5 +1,6 @@
-import { PROTOCOL_VERSION, ServerEvent, type ClientEvent, type GamePresence, type Me, type Message, type ServerState, type VoiceMember, type VoiceStatus } from "@squorli/protocol";
+import { PROTOCOL_VERSION, ServerEvent, VOTEKICK_RESULT_MS, type ClientEvent, type GamePresence, type Me, type Message, type ServerState, type VoiceMember, type VoiceStatus, type VoteKickResult } from "@squorli/protocol";
 import { ServerApi, explainLoginError, type Health } from "./api";
+import type { VoteKickState } from "./voteKick";
 import type { Identity } from "./identity";
 import { t } from "./i18n";
 import { mentionsUser } from "./mentions";
@@ -29,6 +30,15 @@ export type ServerConnState = {
   removed: { reason: "kicked" | "banned"; message: string | null } | null;
   server: ServerState | null;
   voice: Record<string, VoiceMember[]>;
+  /**
+   * Vote kick (docs/features/votekick.md): per voice channel whether the server would take a vote right now (enough
+   * members, nobody present who may throw somebody out, none running); no entry = no, and a server from before it never
+   * says yes. `voteKick` = the vote running in the channel one sits in, `voteKickResult` = how the last one ended, shown
+   * for VOTEKICK_RESULT_MS and then dropped by the timer below.
+   */
+  voteKickAllowed: Record<string, boolean>;
+  voteKick: VoteKickState | null;
+  voteKickResult: VoteKickResult | null;
   /** Web radio: what a voice channel's station is playing right now (server event `radio.meta`); no entry = unknown. */
   radioTitles: Record<string, string>;
   /** The server's clock minus ours in ms (from the welcome's `serverTime`): videos played in step are timed by the server's clock. */
@@ -71,8 +81,10 @@ export type ConnectionHooks = {
   onRemoved: () => void;
   /** First welcome of a session (not after a reconnect): e.g. refresh the server list at the directory. */
   onConnected: () => void;
-  /** Moderation (M3): moving to another voice channel (null = out) and stopping camera/screen. */
-  onVoiceMoved: (channelId: string | null, by: string, reason: "afk" | "elsewhere" | null) => void;
+  /** Moderation (M3): moving to another voice channel (null = out) and stopping camera/screen. `votekick` = voted out of the channel (docs/features/votekick.md). */
+  onVoiceMoved: (channelId: string | null, by: string, reason: "afk" | "elsewhere" | "votekick" | null) => void;
+  /** The voice channel this connection sits in vanished from the channel list (the access is gone): the client hangs up. */
+  onVoiceGone: () => void;
   onVoiceStop: (what: { camera: boolean; screen: boolean }, by: string) => void;
   /** A live message of someone else mentions me (also in the channel that is open: the store knows whether the user looks at it). */
   onMention: (channelId: string) => void;
@@ -117,6 +129,10 @@ export class ServerConnection {
   private liveLatest: ReadState = {};
   private lastReadSync = 0;
   private recountTimer: number | null = null;
+  /** Vote kick: when I was last voted out of a channel, so the `voice.moved` right after it is explained as one. */
+  private voteKickedAt = 0;
+  /** The result box goes by itself after VOTEKICK_RESULT_MS (user's wish). */
+  private resultTimer: number | null = null;
   /** AFK detection: what the user's activity tracker says (activity.ts); reported to servers that know the `activity` event. */
   private idle = false;
   private game: GamePresence | null = null;
@@ -125,7 +141,7 @@ export class ServerConnection {
     this.api = new ServerApi(base);
     this.state = {
       host, base, me: null, userId: null, connection: "idle", error: null, removed: null, server: null,
-      voice: {}, radioTitles: {}, clockOffset: 0, messages: {}, typing: {}, currentChannelId: null, unread: {}, mentions: {}, muted: {}, serverMuted: false, readSync: false, log: [],
+      voice: {}, voteKickAllowed: {}, voteKick: null, voteKickResult: null, radioTitles: {}, clockOffset: 0, messages: {}, typing: {}, currentChannelId: null, unread: {}, mentions: {}, muted: {}, serverMuted: false, readSync: false, log: [],
       serverName: null, iconUrl: null, serverDomain: null, requireAccount: false, inviteRequired: false, serverVersion: null, directoryUrl: null,
     };
     // Token rejected by the server (expired, signed out from another device): do not keep running with a dead token.
@@ -301,6 +317,31 @@ export class ServerConnection {
 
   private pushLog(e: RawLogEntry) { this.set({ log: [...this.state.log.slice(-(LOG_MAX - 1)), e] }); }
 
+  /** My permissions in one channel or category: the server's channel-resolved mask, or on a server from before the server-wide one. */
+  channelPermissions(id: string): number {
+    const s = this.state.server;
+    return s?.myChannelPermissions?.[id] ?? s?.myPermissions ?? 0;
+  }
+
+  /**
+   * The channel list changed (docs/features/channel-permissions.md): a channel that is gone takes its traces with it,
+   * above all its cached messages (a channel one lost the access to must not show an old page when it comes back), and
+   * a channel that appeared gets its read state. The voice channel one sits in going away is told to App.tsx.
+   */
+  private channelsChanged(before: { id: string }[], after: { id: string; name: string }[]) {
+    const now = new Set(after.map((c) => c.id));
+    const gone = before.filter((c) => !now.has(c.id)).map((c) => c.id);
+    if (gone.length) {
+      const drop = <T>(rec: Record<string, T>): Record<string, T> => Object.fromEntries(Object.entries(rec).filter(([id]) => now.has(id)));
+      this.set({ messages: drop(this.state.messages), typing: drop(this.state.typing), unread: drop(this.state.unread), mentions: drop(this.state.mentions), muted: drop(this.state.muted), radioTitles: drop(this.state.radioTitles), voice: drop(this.state.voice), voteKickAllowed: drop(this.state.voteKickAllowed) });
+      this.liveLatest = drop(this.liveLatest);
+      this.acked = drop(this.acked);
+      if (this.state.userId) { this.read = pruneReadState(this.read, [...now]); saveReadState(this.state.host, this.state.userId, this.read); }
+      if (this.voiceChannelId && gone.includes(this.voiceChannelId)) { this.voiceChannelId = null; this.hooks.onVoiceGone(); }
+    }
+    if (after.some((c) => !before.some((b) => b.id === c.id))) void this.syncReadState();
+  }
+
   private handle(e: ServerEvent) {
     switch (e.type) {
       case "welcome": {
@@ -309,7 +350,7 @@ export class ServerConnection {
         const current = this.state.currentChannelId && e.state.channels.some((c) => c.id === this.state.currentChannelId)
           ? this.state.currentChannelId
           : e.state.channels.find((c) => c.kind === "text")?.id ?? null;
-        this.set({ server: e.state, userId: e.userId, connection: "connected", currentChannelId: current, error: null, radioTitles: {}, clockOffset: Date.parse(e.serverTime) - Date.now() }); // the server sends the known titles after the welcome
+        this.set({ server: e.state, userId: e.userId, connection: "connected", currentChannelId: current, error: null, radioTitles: {}, voteKick: null, voteKickAllowed: {}, clockOffset: Date.parse(e.serverTime) - Date.now() }); // the server sends the known titles after the welcome
         this.read = pruneReadState(loadReadState(this.state.host, e.userId), e.state.channels.map((c) => c.id));
         void this.syncReadState();
         if (this.idle || this.game) this.reportIdle();
@@ -338,10 +379,11 @@ export class ServerConnection {
         const current = this.state.currentChannelId && next.channels.some((c) => c.id === this.state.currentChannelId)
           ? this.state.currentChannelId : next.channels.find((c) => c.kind === "text")?.id ?? null;
         this.set({ server: next, currentChannelId: current });
+        if (e.channels) this.channelsChanged(server.channels, e.channels);
         break;
       }
       case "me":
-        if (this.state.server) this.set({ server: { ...this.state.server, myPermissions: e.myPermissions } });
+        if (this.state.server) this.set({ server: { ...this.state.server, myPermissions: e.myPermissions, ...(e.myChannelPermissions !== undefined ? { myChannelPermissions: e.myChannelPermissions } : {}), ...(e.myVoiceLock !== undefined ? { myVoiceLock: e.myVoiceLock } : {}) } });
         break;
       case "radio.meta": {
         const { [e.channelId]: _old, ...rest } = this.state.radioTitles;
@@ -354,10 +396,22 @@ export class ServerConnection {
         break;
       }
       case "voice.state":
-        this.set({ voice: { ...this.state.voice, [e.channelId]: e.members } });
+        this.set({ voice: { ...this.state.voice, [e.channelId]: e.members }, voteKickAllowed: { ...this.state.voteKickAllowed, [e.channelId]: e.voteKick } });
         break;
+      case "votekick":
+        // Only the channel one sits in ever has a vote; the server sends it to whoever is in it.
+        this.set({ voteKick: e.vote ? { vote: e.vote, myVote: e.myVote, canVote: e.canVote } : null });
+        break;
+      case "votekick.result": {
+        // My own client hangs up on the `voice.moved` that follows: it must say why, not "somebody removed you".
+        if (e.result.outcome === "passed" && e.result.targetId === this.state.userId) this.voteKickedAt = Date.now();
+        if (this.resultTimer) window.clearTimeout(this.resultTimer);
+        this.resultTimer = window.setTimeout(() => { this.resultTimer = null; this.set({ voteKickResult: null }); }, VOTEKICK_RESULT_MS);
+        this.set({ voteKickResult: e.result });
+        break;
+      }
       case "voice.moved":
-        this.hooks.onVoiceMoved(e.channelId, e.by, e.reason ?? null);
+        this.hooks.onVoiceMoved(e.channelId, e.by, e.reason ?? (e.channelId === null && Date.now() - this.voteKickedAt < 5000 ? "votekick" : null));
         break;
       case "voice.stop":
         this.hooks.onVoiceStop({ camera: e.camera, screen: e.screen }, e.by);

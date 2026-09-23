@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ClientEvent, CreateMessageRequest, MarkReadRequest, MuteRequest, ReadStateResponse, DEFAULT_EVERYONE_PERMISSIONS, DEFAULT_MEMBER_PERMISSIONS, PERMISSION_GROUPS, Permission, RtcTokenRequest, ServerEvent,
+  CHANNEL_OVERRIDABLE, CHANNEL_PERMISSION_GROUPS, channelOverridableFor,
   ServerSettings, ServerStatus, StatusApiMode, UpdateMeRequest, VerifyRequest, challengeMessage, displayNameOf, hasPermission, mentionedUserIds, permissionNames,
 } from "./index";
 
@@ -93,6 +94,21 @@ describe("permissions", () => {
     expect([...grouped].sort()).toEqual(Object.keys(Permission).sort());
     expect(new Set(PERMISSION_GROUPS.map((g) => g.id)).size).toBe(PERMISSION_GROUPS.length);
   });
+  it("lists every channel-overridable permission once per channel kind, and nothing else", () => {
+    // The channel dialog shows CHANNEL_PERMISSION_GROUPS; what a group names must be overridable, and a text or voice channel
+    // must see each of its bits exactly once (docs/features/channel-permissions.md).
+    for (const kind of ["text", "voice"] as const) {
+      const names = CHANNEL_PERMISSION_GROUPS.filter((g) => (g.kinds as readonly string[]).includes(kind)).flatMap((g) => [...g.permissions]);
+      expect(new Set(names).size).toBe(names.length);
+      for (const n of names) expect(CHANNEL_OVERRIDABLE & Permission[n]).toBe(Permission[n]);
+    }
+    const union = CHANNEL_PERMISSION_GROUPS.flatMap((g) => [...g.permissions]).reduce((m, n) => m | Permission[n], 0);
+    expect(union).toBe(CHANNEL_OVERRIDABLE);
+    expect(channelOverridableFor("text") & Permission.CONNECT_VOICE).toBe(0);
+    expect(channelOverridableFor("voice") & Permission.SEND_MESSAGES).toBe(0);
+    // Server-wide only: an overwrite may not hand these out.
+    for (const n of ["ADMINISTRATOR", "MANAGE_SERVER", "MANAGE_ROLES", "KICK_MEMBERS", "BAN_MEMBERS", "CREATE_INVITES"] as const) expect(CHANNEL_OVERRIDABLE & Permission[n]).toBe(0);
+  });
   it("administrator implies everything", () => {
     expect(hasPermission(Permission.ADMINISTRATOR, Permission.BAN_MEMBERS)).toBe(true);
   });
@@ -113,6 +129,10 @@ describe("permissions", () => {
     // Starting the radio plays it for everyone in the channel: neither guests nor members may by default (admins always).
     expect(Permission.CONTROL_RADIO).toBe(32768);
     expect(hasPermission(DEFAULT_MEMBER_PERMISSIONS, Permission.CONTROL_RADIO)).toBe(false);
+    // Channel permissions (23 September 2026): moving got its own bit (migration 0028 gives it to every role with
+    // MODERATE_VOICE), and BYPASS_STICKY frees a member from sticky voice channels.
+    expect(Permission.MOVE_MEMBERS).toBe(65536);
+    expect(Permission.BYPASS_STICKY).toBe(131072);
     expect(DEFAULT_EVERYONE_PERMISSIONS).toBe(1152);
     expect(DEFAULT_MEMBER_PERMISSIONS).toBe(7616 | 16384);
     expect(permissionNames(Permission.KICK_MEMBERS | Permission.BAN_MEMBERS)).toEqual(["KICK_MEMBERS", "BAN_MEMBERS"]);

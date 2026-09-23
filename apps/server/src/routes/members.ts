@@ -1,15 +1,19 @@
-import { BanRequest, MoveMemberRequest, Permission, SetMemberRolesRequest, SetOwnerRequest, SetStreamBlockedRequest, StopStreamRequest, displayNameOf, type Ban } from "@squorli/protocol";
+import { BanRequest, MoveMemberRequest, Permission, SetMemberRolesRequest, SetOwnerRequest, SetStreamBlockedRequest, StopStreamRequest, displayNameOf, hasPermission, type Ban } from "@squorli/protocol";
 import { desc, eq, inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { requireMember } from "../auth/session";
 import { can, canSetRolesOf, canTouchRole, outranks, type Actor } from "../authz";
 import type { Db } from "../db";
-import { bans, channels, memberRoles, members, roles, users } from "../db/schema";
+import { bans, categoryOverwrites, channelOverwrites, channels, memberRoles, members, roles, users } from "../db/schema";
 import type { Hub } from "../hub";
 import type { LivekitAdmin } from "../livekit/admin";
-import { syncStreamGrantsOf } from "../livekit/sync";
-import { actorOf, broadcastStructure, loadSettings } from "../state";
+import { syncVoiceAccessOf } from "../livekit/sync";
+import { actorOf, broadcastStructure, loadSettings, sendStructureTo } from "../state";
+import { visibility } from "../visibility";
+import { moveGrants } from "../voice/confine";
+import { voteKicks } from "../voice/votekick";
 import type { VoicePresence } from "../voice/presence";
+import { setHold } from "../voice/sticky";
 
 const Params = { type: "object", properties: { id: { type: "string", format: "uuid" } }, required: ["id"] } as const;
 
@@ -20,8 +24,14 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
 
   async function removeMember(userId: string, reason: "kicked" | "banned", message: string | null) {
     await db.delete(memberRoles).where(eq(memberRoles.userId, userId));
+    // Their channel overwrites too: the users row stays (a kicked member may come back), so no cascade does it.
+    await db.delete(channelOverwrites).where(eq(channelOverwrites.userId, userId));
+    await db.delete(categoryOverwrites).where(eq(categoryOverwrites.userId, userId));
     await db.delete(members).where(eq(members.userId, userId));
     presence.leaveUser(userId);
+    moveGrants.clear(userId);
+    voteKicks.clearUser(userId);
+    visibility.dropUser(userId);
     hub.disconnectUser(userId, { type: "removed", reason, message });
   }
 
@@ -40,7 +50,7 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     if (!body.data.owner && settings.ownerId === target.userId) return reply.code(403).send({ error: "founder" });
     await db.update(members).set({ isOwner: body.data.owner }).where(eq(members.userId, target.userId));
     req.log.info({ by: m.userId, target: target.userId, owner: body.data.owner }, "Eigentuemerstatus geaendert");
-    await syncStreamGrantsOf(db, presence, lk, [target.userId]);
+    await syncVoiceAccessOf(db, hub, presence, lk, { userIds: [target.userId] });
     await broadcastStructure(db, hub, ["members"]);
     return { ok: true };
   });
@@ -69,43 +79,58 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     const toInsert = wanted.filter((r) => !r.isDefault).map((r) => ({ userId: target.userId, roleId: r.id }));
     if (toInsert.length) await db.insert(memberRoles).values(toInsert);
     // A member sitting in a voice channel: their LiveKit grants follow the new roles (camera/screen), see livekit/sync.ts.
-    await syncStreamGrantsOf(db, presence, lk, [target.userId]);
+    await syncVoiceAccessOf(db, hub, presence, lk, { userIds: [target.userId] });
     await broadcastStructure(db, hub, ["members"]);
     return { ok: true };
   });
 
-  // ---------- Voice channel moderation (M3): move, stop camera/screen, block streaming.
-  // Requires MODERATE_VOICE and a rank above the target. LiveKit enforces muting/publish permissions; the WS event
-  // lets the client update its interface (and join the new room when being moved).
-  async function moderationTarget(req: Parameters<typeof requireMember>[1], reply: Parameters<typeof requireMember>[2], targetId: string) {
+  // ---------- Voice channel moderation (M3): move (MOVE_MEMBERS since 23 September 2026), stop camera/screen, block
+  // streaming (MODERATE_VOICE). The right counts server-wide or in the channel the target sits in (an overwrite may give it
+  // there only), plus a rank above the target. LiveKit enforces muting/publish permissions; the WS event lets the client
+  // update its interface (and join the new room when being moved).
+  async function moderationTarget(req: Parameters<typeof requireMember>[1], reply: Parameters<typeof requireMember>[2], targetId: string, perm: number) {
     const m = await requireMember(db, req, reply);
     if (!m) return null;
-    if (!can(m.actor, Permission.MODERATE_VOICE)) { reply.code(403).send({ error: "forbidden" }); return null; }
     const target = await targetOf(targetId);
     if (!target) { reply.code(404).send({ error: "not_found" }); return null; }
+    const room = presence.channelOfUser(target.userId);
+    await visibility.refresh(db);
+    if (!can(m.actor, perm) && !(room !== undefined && hasPermission(visibility.masksOf(m.userId).get(room) ?? 0, perm))) { reply.code(403).send({ error: "forbidden" }); return null; }
     if (target.userId === m.userId) { reply.code(400).send({ error: "self" }); return null; }
     if (!outranks(m.actor, target)) { reply.code(403).send({ error: "target_above_you" }); return null; }
     const [me] = await db.select({ publicKey: users.publicKey, displayName: users.displayName, handle: users.handle }).from(users).where(eq(users.id, m.userId)).limit(1);
     return { m, target, by: me ? displayNameOf(me) : "Moderator" };
   }
 
+  /**
+   * Move a member (docs/features/channel-permissions.md). The mover needs MOVE_MEMBERS resolved in the destination (an
+   * overwrite may give or take it there), but neither VIEW_CHANNELS nor CONNECT_VOICE there; the moved member's own
+   * rights at the destination are not asked at all (user's decision: one may be pushed into a channel one may neither see
+   * nor enter). The move is advisory (the client joins by itself), so a grant lets that join through and the member's
+   * channel list gets the destination first (the client cannot join an id it does not know). A hold by a sticky channel
+   * ends with the move; the destination holds again if it is sticky (voice/sticky.ts at the join).
+   */
   app.post<{ Params: { id: string } }>("/api/members/:id/move", { schema: { params: Params } }, async (req, reply) => {
-    const ctx = await moderationTarget(req, reply, req.params.id);
+    const ctx = await moderationTarget(req, reply, req.params.id, Permission.MOVE_MEMBERS);
     if (!ctx) return;
     const body = MoveMemberRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
     if (!presence.channelOfUser(ctx.target.userId)) return reply.code(409).send({ error: "not_in_voice" });
     if (body.data.channelId) {
-      const [ch] = await db.select().from(channels).where(eq(channels.id, body.data.channelId)).limit(1);
+      const [ch] = await db.select({ id: channels.id, kind: channels.kind }).from(channels).where(eq(channels.id, body.data.channelId)).limit(1);
       if (!ch || ch.kind !== "voice") return reply.code(404).send({ error: "unknown_channel" });
-    }
+      if (!hasPermission(visibility.masksOf(ctx.m.userId).get(ch.id) ?? 0, Permission.MOVE_MEMBERS)) return reply.code(403).send({ error: "forbidden" });
+      moveGrants.grant(ctx.target.userId, ch.id);
+    } else moveGrants.clear(ctx.target.userId);
+    const held = (await visibility.refresh(db)).members.get(ctx.target.userId)?.confinedChannelId;
+    if (held) await setHold(db, hub, ctx.target.userId, null); else await sendStructureTo(db, hub, ctx.target.userId, true);
     hub.sendToUser(ctx.target.userId, { type: "voice.moved", channelId: body.data.channelId, by: ctx.by });
     req.log.info({ by: ctx.m.userId, target: ctx.target.userId, to: body.data.channelId }, "Mitglied verschoben");
     return { ok: true };
   });
 
   app.post<{ Params: { id: string } }>("/api/members/:id/stream/stop", { schema: { params: Params } }, async (req, reply) => {
-    const ctx = await moderationTarget(req, reply, req.params.id);
+    const ctx = await moderationTarget(req, reply, req.params.id, Permission.MODERATE_VOICE);
     if (!ctx) return;
     const body = StopStreamRequest.safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
@@ -117,19 +142,15 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
   });
 
   app.put<{ Params: { id: string } }>("/api/members/:id/stream", { schema: { params: Params } }, async (req, reply) => {
-    const ctx = await moderationTarget(req, reply, req.params.id);
+    const ctx = await moderationTarget(req, reply, req.params.id, Permission.MODERATE_VOICE);
     if (!ctx) return;
     const body = SetStreamBlockedRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
     await db.update(members).set({ streamBlocked: body.data.blocked }).where(eq(members.userId, ctx.target.userId));
     const room = presence.channelOfUser(ctx.target.userId);
     if (room) {
-      const after = await actorOf(db, ctx.target.userId);
-      await lk.setCanStream(room, ctx.target.userId, !!after && can(after, Permission.STREAM_VIDEO));
-      if (body.data.blocked) {
-        await lk.stopStreams(room, ctx.target.userId, { camera: true, screen: true });
-        hub.sendToUser(ctx.target.userId, { type: "voice.stop", camera: true, screen: true, by: ctx.by });
-      }
+      await syncVoiceAccessOf(db, hub, presence, lk, { userIds: [ctx.target.userId] });
+      if (body.data.blocked) hub.sendToUser(ctx.target.userId, { type: "voice.stop", camera: true, screen: true, by: ctx.by });
     }
     await broadcastStructure(db, hub, ["members"]); // also sends the target its new permissions ("me")
     req.log.info({ by: ctx.m.userId, target: ctx.target.userId, blocked: body.data.blocked }, "Streamen-Sperre gesetzt");

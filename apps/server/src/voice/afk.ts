@@ -20,6 +20,8 @@ export type AfkMoveInput = {
   channelOf: (userId: string) => string | undefined;
   /** Channels nobody is moved out of (a video is showing). */
   exemptChannels: ReadonlySet<string>;
+  /** Members a sticky channel holds (docs/features/channel-permissions.md): the server does not break its own hold. */
+  confined: ReadonlySet<string>;
 };
 
 export class AfkMover {
@@ -35,7 +37,7 @@ export class AfkMover {
     for (const userId of input.afk) {
       if (this.moved.has(userId)) continue;
       const from = input.channelOf(userId);
-      if (!from || from === input.afkChannelId || input.exemptChannels.has(from)) continue;
+      if (!from || from === input.afkChannelId || input.exemptChannels.has(from) || input.confined.has(userId)) continue;
       this.moved.add(userId);
       out.push({ userId, from });
     }

@@ -20,6 +20,8 @@ type Props = {
   /** Own avatar (directory account), null = initials. */
   avatarUrl: string | null;
   onLeave: () => Promise<void>;
+  /** A sticky channel holds the user (docs/features/channel-permissions.md): the hang-up button is disabled, not hidden, and says why. */
+  locked?: boolean;
   /** Click on your own name: the mini profile, anchored at the name. */
   onOpenProfile: (anchor: MenuAnchor) => void;
   /** The gear: all user and profile settings (SettingsDialog). */
@@ -37,7 +39,7 @@ type Props = {
 };
 
 /** Bottom area of the sidebar: voice status with mute and leave, below it your own name (mini profile) and the gear (settings). */
-export function VoiceDock({ client, voice, channel, serverName, displayName, avatarUrl, onLeave, onOpenProfile, onOpenSettings, pttSuspended, onOpenStage, canStream, onToggleCamera, quickShare, afkReturn }: Props) {
+export function VoiceDock({ client, voice, channel, serverName, displayName, avatarUrl, onLeave, locked = false, onOpenProfile, onOpenSettings, pttSuspended, onOpenStage, canStream, onToggleCamera, quickShare, afkReturn }: Props) {
   const settings = useVoiceSettings();
   const joined = voice.status !== "disconnected";
   const openProfile = (event: MouseEvent<HTMLButtonElement>) => {
@@ -91,7 +93,7 @@ export function VoiceDock({ client, voice, channel, serverName, displayName, ava
             <button aria-label={t("voice.deafen")} aria-pressed={voice.deafened} className={`icon ${voice.deafened ? "danger" : ""}`} disabled={voice.afkRoom} title={voice.afkRoom ? t("dock.afkChannel") : voice.deafened ? t("voice.undeafen") : t("voice.deafen")} onClick={() => client.setDeafened(!voice.deafened)}><Icon name={voice.deafened ? "headphone-off" : "headphones"} /></button>
             {canStream && !voice.afkRoom && <button aria-label={t("voice.cameraOnBtn")} aria-pressed={voice.cameraOn} className={`icon ${voice.cameraOn ? "on" : ""}`} title={voice.cameraOn ? t("voice.cameraOff") : t("voice.cameraOnBtn")} onClick={() => { void onToggleCamera(); }}><Icon name={voice.cameraOn ? "video" : "video-off"} /></button>}
             {canStream && !voice.afkRoom && quickShare && <button aria-label={t("dock.quickShare")} className="icon" title={`${t("dock.quickShare")}: ${t("dock.quickShareHint", { name: quickShare.name })}`} onClick={quickShare.onShare}><Icon name="gamepad-2" /></button>}
-            <button aria-label={t("voice.leave")} className="icon hangup" title={t("voice.leave")} onClick={() => onLeave()}><Icon name="phone" rotate={135} /></button>
+            <button aria-label={t("voice.leave")} aria-disabled={locked} className={`icon hangup${locked ? " locked" : ""}`} title={locked ? t("voice.stickyNotice") : t("voice.leave")} onClick={() => onLeave()}><Icon name={locked ? "lock" : "phone"} rotate={locked ? 0 : 135} /></button>
           </div>
         </div>
       )}

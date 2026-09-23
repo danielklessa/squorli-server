@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AfkMover, type AfkMoveInput } from "./afk";
 
 const input = (p: Partial<AfkMoveInput> & { channels?: Record<string, string> }): AfkMoveInput => ({
-  afkChannelId: "afk", afk: [], exemptChannels: new Set(),
+  afkChannelId: "afk", afk: [], exemptChannels: new Set(), confined: new Set(),
   channelOf: (userId) => p.channels?.[userId], ...p,
 });
 

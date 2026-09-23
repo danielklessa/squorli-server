@@ -6,6 +6,8 @@ import { can } from "../authz";
 import type { Db } from "../db";
 import { channelMutes, channels, members, readStates } from "../db/schema";
 import type { Hub } from "../hub";
+import { channelActor } from "../channelGuard";
+import { visibility } from "../visibility";
 
 const Params = { type: "object", properties: { id: { type: "string", format: "uuid" } }, required: ["id"] } as const;
 
@@ -23,7 +25,11 @@ export async function registerReadStateRoutes(app: FastifyInstance, db: Db, hub:
   app.get("/api/read-state", async (req, reply) => {
     const m = await requireMember(db, req, reply);
     if (!m) return;
-    if (!can(m.actor, Permission.VIEW_CHANNELS)) return reply.code(403).send({ error: "forbidden" });
+    if (!can(m.actor, Permission.VIEW_CHANNELS) && !visibility.visibleIds(m.userId).length) return reply.code(403).send({ error: "forbidden" });
+    // Only the channels this member may see (docs/features/channel-permissions.md): counts for the others would give them away.
+    await visibility.refresh(db);
+    // As one array literal: the sql template would spread a JS array into a record.
+    const visible = `{${visibility.visibleIds(m.userId).join(",")}}`;
     // The token as the client stores a mention. The substring test only finds candidates: a token quoted inside code is
     // no mention for the client, so the candidates are checked below with the rules of the client (mentionedUserIds).
     const token = `%${mentionToken(m.userId)}%`;
@@ -41,13 +47,13 @@ export async function registerReadStateRoutes(app: FastifyInstance, db: Db, hub:
           AND CASE WHEN rs.last_read_seq IS NOT NULL THEN msg.seq > rs.last_read_seq
                    ELSE msg.created_at > (SELECT joined_at FROM members WHERE user_id = ${m.userId}) END
       ) agg ON true
-      WHERE c.kind = 'text'`) as unknown as Row[];
+      WHERE c.kind = 'text' AND c.id = ANY(${visible}::uuid[])`) as unknown as Row[];
     const mentions = new Map<string, number>();
     if (rows.some((r) => Number(r.mentions) > 0)) {
       const candidates = await db.execute(sql`
         SELECT msg.channel_id, msg.content
         FROM messages msg
-        JOIN channels c ON c.id = msg.channel_id AND c.kind = 'text'
+        JOIN channels c ON c.id = msg.channel_id AND c.kind = 'text' AND c.id = ANY(${visible}::uuid[])
         LEFT JOIN read_states rs ON rs.channel_id = msg.channel_id AND rs.user_id = ${m.userId}
         WHERE msg.author_id <> ${m.userId} AND msg.content LIKE ${token}
           AND CASE WHEN rs.last_read_seq IS NOT NULL THEN msg.seq > rs.last_read_seq
@@ -77,13 +83,11 @@ export async function registerReadStateRoutes(app: FastifyInstance, db: Db, hub:
 
   /** Mute or unmute one text channel for myself. Needs no permission beyond seeing channels: it only changes my own view. */
   app.put<{ Params: { id: string } }>("/api/channels/:id/mute", { schema: { params: Params } }, async (req, reply) => {
-    const m = await requireMember(db, req, reply);
+    const m = await channelActor(db, req, reply, req.params.id, "text");
     if (!m) return;
-    if (!can(m.actor, Permission.VIEW_CHANNELS)) return reply.code(403).send({ error: "forbidden" });
     const body = MuteRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
-    const [ch] = await db.select({ id: channels.id, kind: channels.kind }).from(channels).where(eq(channels.id, req.params.id)).limit(1);
-    if (!ch || ch.kind !== "text") return reply.code(404).send({ error: "unknown_channel" });
+    const ch = m.channel;
     if (body.data.muted) await db.insert(channelMutes).values({ userId: m.userId, channelId: ch.id }).onConflictDoNothing();
     else await db.delete(channelMutes).where(and(eq(channelMutes.userId, m.userId), eq(channelMutes.channelId, ch.id)));
     return announce(m.userId);
@@ -101,13 +105,11 @@ export async function registerReadStateRoutes(app: FastifyInstance, db: Db, hub:
 
   /** "I have seen this channel up to seq." Never moves backwards and never beyond the newest message of the server. */
   app.post<{ Params: { id: string } }>("/api/channels/:id/read", { schema: { params: Params } }, async (req, reply) => {
-    const m = await requireMember(db, req, reply);
+    const m = await channelActor(db, req, reply, req.params.id, "text");
     if (!m) return;
-    if (!can(m.actor, Permission.VIEW_CHANNELS)) return reply.code(403).send({ error: "forbidden" });
     const body = MarkReadRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
-    const [ch] = await db.select({ id: channels.id, kind: channels.kind }).from(channels).where(eq(channels.id, req.params.id)).limit(1);
-    if (!ch || ch.kind !== "text") return reply.code(404).send({ error: "unknown_channel" });
+    const ch = m.channel;
 
     // A number from the future would hide messages that do not exist yet: cap it at the newest message there is.
     const seq = sql`least(${body.data.seq}::bigint, coalesce((SELECT max(seq) FROM messages), 0))`;

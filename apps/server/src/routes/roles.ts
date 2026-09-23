@@ -7,7 +7,7 @@ import type { Db } from "../db";
 import { roles } from "../db/schema";
 import type { Hub } from "../hub";
 import type { LivekitAdmin } from "../livekit/admin";
-import { syncStreamGrantsOf } from "../livekit/sync";
+import { syncVoiceAccessOf } from "../livekit/sync";
 import { broadcastStructure } from "../state";
 import { compact } from "../util";
 import type { VoicePresence } from "../voice/presence";
@@ -43,7 +43,7 @@ export async function registerRoleRoutes(app: FastifyInstance, db: Db, hub: Hub,
     if (role.isDefault && body.data.position !== undefined && body.data.position !== 0) return reply.code(400).send({ error: "default_role_position_fixed" });
     const [row] = await db.update(roles).set(compact(body.data)).where(eq(roles.id, role.id)).returning();
     // Members in a voice channel: LiveKit's publish grants follow the role's new permissions (livekit/sync.ts).
-    if (body.data.permissions !== undefined && body.data.permissions !== role.permissions) await syncStreamGrantsOf(db, presence, lk);
+    if (body.data.permissions !== undefined && body.data.permissions !== role.permissions) await syncVoiceAccessOf(db, hub, presence, lk);
     await broadcastStructure(db, hub, ["roles"]);
     return row;
   });
@@ -57,7 +57,7 @@ export async function registerRoleRoutes(app: FastifyInstance, db: Db, hub: Hub,
     if (role.isDefault) return reply.code(400).send({ error: "default_role_undeletable" });
     if (!canTouchRole(m.actor, role.position)) return reply.code(403).send({ error: "role_above_you" });
     await db.delete(roles).where(eq(roles.id, role.id));
-    await syncStreamGrantsOf(db, presence, lk);
+    await syncVoiceAccessOf(db, hub, presence, lk);
     await broadcastStructure(db, hub, ["roles", "members"]);
     return { ok: true };
   });

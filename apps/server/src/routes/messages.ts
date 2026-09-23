@@ -2,7 +2,7 @@ import { CreateMessageRequest, Permission, RemovePreviewRequest, UpdateMessageRe
 import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { requireMember } from "../auth/session";
-import { can } from "../authz";
+import { canIn, channelActor, resolveChannel } from "../channelGuard";
 import type { Db } from "../db";
 import { attachments, channels, messages } from "../db/schema";
 import type { Hub } from "../hub";
@@ -34,19 +34,14 @@ export async function loadMessages(db: Db, rows: (typeof messages.$inferSelect)[
 
 export async function registerMessageRoutes(app: FastifyInstance, db: Db, hub: Hub, previews: LinkPreviews) {
   const load = (rows: (typeof messages.$inferSelect)[]) => loadMessages(db, rows, previews.enabled);
-  async function textChannel(id: string) {
-    const [c] = await db.select().from(channels).where(eq(channels.id, id)).limit(1);
-    return c && c.kind === "text" ? c : null;
-  }
+  /** Every route here goes by the member's permissions in the channel (channelGuard.ts): an invisible channel is a 404. */
 
   /** History, loaded newest-first and returned oldest-first. ?before=<seq> pages backwards. */
   app.get<{ Params: { id: string }; Querystring: { before?: string; limit?: string } }>(
     "/api/channels/:id/messages", { schema: { params: Params } }, async (req, reply) => {
-      const m = await requireMember(db, req, reply);
-      if (!m) return;
-      if (!can(m.actor, Permission.VIEW_CHANNELS)) return reply.code(403).send({ error: "forbidden" });
-      const ch = await textChannel(req.params.id);
-      if (!ch) return reply.code(404).send({ error: "unknown_channel" });
+      const c = await channelActor(db, req, reply, req.params.id, "text");
+      if (!c) return;
+      const ch = c.channel;
       const before = req.query.before ? Number(req.query.before) : null;
       const limit = Math.min(100, Math.max(1, Number(req.query.limit) || PAGE));
       const rows = await db.select().from(messages)
@@ -59,17 +54,22 @@ export async function registerMessageRoutes(app: FastifyInstance, db: Db, hub: H
     });
 
   app.post<{ Params: { id: string } }>("/api/channels/:id/messages", { schema: { params: Params } }, async (req, reply) => {
-    const m = await requireMember(db, req, reply);
-    if (!m) return;
-    if (!can(m.actor, Permission.SEND_MESSAGES)) return reply.code(403).send({ error: "forbidden" });
+    const c = await channelActor(db, req, reply, req.params.id, "text");
+    if (!c) return;
+    const m = c, ch = c.channel;
+    if (!canIn(c.perms, Permission.SEND_MESSAGES)) return reply.code(403).send({ error: "forbidden" });
     const body = CreateMessageRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
-    const ch = await textChannel(req.params.id);
-    if (!ch) return reply.code(404).send({ error: "unknown_channel" });
+    // Slowmode: one message per `slowmodeSeconds` and member; whoever manages messages in the channel is exempt.
+    if (ch.slowmodeSeconds > 0 && !canIn(c.perms, Permission.MANAGE_MESSAGES)) {
+      const [last] = await db.select({ at: messages.createdAt }).from(messages).where(and(eq(messages.channelId, ch.id), eq(messages.authorId, m.userId))).orderBy(desc(messages.seq)).limit(1);
+      const wait = last ? last.at.getTime() + ch.slowmodeSeconds * 1000 - Date.now() : 0;
+      if (wait > 0) return reply.code(429).send({ error: "slowmode", retryAfter: Math.ceil(wait / 1000) });
+    }
 
     const attIds = body.data.attachmentIds ?? [];
     if (attIds.length) {
-      if (!can(m.actor, Permission.ATTACH_FILES)) return reply.code(403).send({ error: "forbidden" });
+      if (!canIn(c.perms, Permission.ATTACH_FILES)) return reply.code(403).send({ error: "forbidden" });
       // Only your own uploads that are not linked yet.
       const mine = await db.select({ id: attachments.id }).from(attachments)
         .where(and(inArray(attachments.id, attIds), eq(attachments.uploaderId, m.userId), isNull(attachments.messageId)));
@@ -79,7 +79,7 @@ export async function registerMessageRoutes(app: FastifyInstance, db: Db, hub: H
     const [row] = await db.insert(messages).values({ channelId: ch.id, authorId: m.userId, content: body.data.content }).returning();
     if (attIds.length) await db.update(attachments).set({ messageId: row!.id }).where(inArray(attachments.id, attIds));
     const [msg] = await load([row!]);
-    hub.broadcast({ type: "message.create", message: msg! });
+    hub.broadcastToChannel(ch.id, { type: "message.create", message: msg! });
     // The links are looked up afterwards; the previews follow as a `message.update`.
     previews.schedule(row!.id);
     return msg;
@@ -91,11 +91,11 @@ export async function registerMessageRoutes(app: FastifyInstance, db: Db, hub: H
     const body = UpdateMessageRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
     const [row] = await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1);
-    if (!row) return reply.code(404).send({ error: "not_found" });
+    if (!row || !(await resolveChannel(db, m.userId, row.channelId))) return reply.code(404).send({ error: "not_found" });
     if (row.authorId !== m.userId) return reply.code(403).send({ error: "forbidden" }); // Only the author may edit
     const [updated] = await db.update(messages).set({ content: body.data.content, editedAt: new Date() }).where(eq(messages.id, row.id)).returning();
     const [msg] = await load([updated!]);
-    hub.broadcast({ type: "message.update", message: msg! });
+    hub.broadcastToChannel(row.channelId, { type: "message.update", message: msg! });
     previews.schedule(row.id);
     return msg;
   });
@@ -106,8 +106,8 @@ export async function registerMessageRoutes(app: FastifyInstance, db: Db, hub: H
     if (!m) return;
     const body = RemovePreviewRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
-    const [row] = await db.select({ authorId: messages.authorId }).from(messages).where(eq(messages.id, req.params.id)).limit(1);
-    if (!row) return reply.code(404).send({ error: "not_found" });
+    const [row] = await db.select({ authorId: messages.authorId, channelId: messages.channelId }).from(messages).where(eq(messages.id, req.params.id)).limit(1);
+    if (!row || !(await resolveChannel(db, m.userId, row.channelId))) return reply.code(404).send({ error: "not_found" });
     if (row.authorId !== m.userId) return reply.code(403).send({ error: "forbidden" });
     if (!(await previews.remove(req.params.id, body.data.url))) return reply.code(404).send({ error: "unknown_preview" });
     return { ok: true };
@@ -117,12 +117,13 @@ export async function registerMessageRoutes(app: FastifyInstance, db: Db, hub: H
     const m = await requireMember(db, req, reply);
     if (!m) return;
     const [row] = await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1);
-    if (!row) return reply.code(404).send({ error: "not_found" });
-    if (row.authorId !== m.userId && !can(m.actor, Permission.MANAGE_MESSAGES)) return reply.code(403).send({ error: "forbidden" });
+    const r = row ? await resolveChannel(db, m.userId, row.channelId) : null;
+    if (!row || !r) return reply.code(404).send({ error: "not_found" });
+    if (row.authorId !== m.userId && !canIn(r.perms, Permission.MANAGE_MESSAGES)) return reply.code(403).send({ error: "forbidden" });
     const files = await db.select({ id: attachments.id }).from(attachments).where(eq(attachments.messageId, row.id));
     await db.delete(messages).where(eq(messages.id, row.id)); // Attachments cascade in the DB
     await app.removeAttachmentFiles(files.map((f) => f.id));
-    hub.broadcast({ type: "message.delete", channelId: row.channelId, id: row.id });
+    hub.broadcastToChannel(row.channelId, { type: "message.delete", channelId: row.channelId, id: row.id });
     return { ok: true };
   });
 }

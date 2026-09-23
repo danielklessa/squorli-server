@@ -110,12 +110,14 @@ export function ImportTab({ api, server, run }: { api: ServerApi; server: Server
               <label className={`check import-item${c.exists ? " muted" : ""}`} key={c.key}>
                 <input type="checkbox" disabled={c.exists || !catOn} checked={!c.exists && catOn && on(c.key)} onChange={(e) => toggle(c.key, e.target.checked)} />
                 <Icon name={c.kind === "voice" ? "volume-2" : "hash"} />
-                <span className="import-name">{c.name}</span>
+                <span className="import-name">{c.name}{c.private && <> <Icon name="lock" title={t("admin.import.private")} /></>}</span>
                 <span className="muted small import-meta">
                   {c.exists ? t("admin.import.exists") : [
                     c.kind === "voice" ? `${c.audioBitrate} kbit/s` : null,
                     c.topic ? c.topic : null,
-                    c.overwrites ? t("admin.import.overwrites", { n: String(c.overwrites) }) : null,
+                    c.private ? t("admin.import.private") : null,
+                    c.overwrites.length ? t("admin.import.overwrites", { n: String(c.overwrites.length) }) : null,
+                    c.memberOverwrites ? t("admin.import.memberOverwrites", { n: String(c.memberOverwrites) }) : null,
                   ].filter(Boolean).join(" · ")}
                 </span>
               </label>

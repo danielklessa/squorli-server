@@ -43,6 +43,8 @@ type Props = {
   onToggleCamera: () => Promise<void>;
   onToggleBlur: () => Promise<void>;
   onLeave: () => Promise<void>;
+  /** A sticky channel holds the user: leaving is refused with the reason (App.tsx), the button says so. */
+  locked?: boolean;
   /** `opener`: the window the click happened in (a browser lets only that one open a window). */
   onPopout: (tile: VideoTile, opener?: Window) => void;
   poppedIds: Set<string>;
@@ -51,6 +53,8 @@ type Props = {
   detached: boolean;
   /** Move the whole stage into a window of its own, or back. May throw with a text for the user (window refused). */
   onToggleWindow: () => void;
+  /** Vote kick (docs/features/votekick.md): set while the server would take a vote in this channel right now; null = no entry. */
+  voteKick: { onStart: (userId: string) => void } | null;
 };
 
 type Layout = "grid" | "focus";
@@ -69,7 +73,7 @@ type Item = { key: string; participant: StageParticipant; tile: VideoTile | null
  * The tile view can hide participants without video while any video is being sent; that choice is never stored.
  * Receive quality follows the tile size (adaptiveStream in the voice core); here the <video> only has to have the right size.
  */
-export function VoiceStage({ client, voice, channel, members, myPermissions, api, radio, radioStations, radioTitle, playerTile, playerOff, onDismissPlayerOff, playerPopped, onRestorePlayer, onToggleCamera, onToggleBlur, onLeave, onPopout, poppedIds, onRestore, detached, onToggleWindow }: Props) {
+export function VoiceStage({ client, voice, channel, members, myPermissions, api, radio, radioStations, radioTitle, playerTile, playerOff, onDismissPlayerOff, playerPopped, onRestorePlayer, onToggleCamera, onToggleBlur, onLeave, locked = false, onPopout, poppedIds, onRestore, detached, onToggleWindow, voteKick }: Props) {
   // Names from the server's member list (arrives via WS immediately on every rename), not from the LiveKit token,
   // which is only created on joining. Unknown identities (bots, "external") keep the LiveKit name.
   const participants = voice.participants.map((p) => {
@@ -79,7 +83,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
   const [layout, setLayout] = useState<Layout>("grid"); // always start with tiles
   const [pinned, setPinned] = useState<string | null>(null);
   const [lastSpeaker, setLastSpeaker] = useState<string | null>(null);
-  const canStream = hasPermission(myPermissions, Permission.STREAM_VIDEO) && !voice.afkRoom; // nothing is sent in the AFK channel
+  const canStream = hasPermission(myPermissions, Permission.STREAM_VIDEO) && channel.allowVideo && !voice.afkRoom; // nothing is sent in the AFK channel, nor where the channel forbids video
   // Without VIEW_VIDEO others' camera and screen never arrive; say so while somebody is sharing, instead of just showing avatars.
   const mayView = hasPermission(myPermissions, Permission.VIEW_VIDEO);
   const hiddenStreams = !mayView && participants.some((p) => !p.isLocal && (p.cameraOn || p.screenOn));
@@ -222,6 +226,10 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
             const on = client.isVideoWatching(id);
             return <button key={source} role="menuitem" className="secondary small" onClick={() => { setMenu(null); client.setVideoWatching(id, !on); }}><Icon name={on ? "eye-off" : "eye"} /> {t(`stage.${source}${on ? "Off" : "On"}`)}</button>;
           })}
+          {/* Vote kick (docs/features/votekick.md): offered while the server would take one here; never about oneself. */}
+          {voteKick && menuParticipant && !menuParticipant.isLocal && (
+            <button role="menuitem" className="secondary small" onClick={() => { setMenu(null); voteKick.onStart(menuParticipant.identity); }}><Icon name="gavel" /> {t("votekick.menu")}</button>
+          )}
         </ContextMenu>
       )}
 
@@ -237,7 +245,7 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
         {/* Phones and tablets cannot share a screen (no getDisplayMedia): no button instead of one that only fails. */}
         {VoiceClient.supportsScreenShare() && <button className={`bar-btn ${voice.screenOn ? "on" : ""}`} disabled={!canStream} title={voice.afkRoom ? t("dock.afkChannel") : canStream ? (voice.screenOn ? t("stage.stopShare") : isChromium() ? t("stage.shareWithAudio") : t("stage.shareNoAudio")) : t("stage.noStreamPermission")}
           onClick={() => client.setScreenShareEnabled(!voice.screenOn)}><Icon name={voice.screenOn ? "screen-share-off" : "screen-share"} /></button>}
-        <button className="bar-btn leave" title={t("voice.leave")} onClick={() => onLeave()}><Icon name="phone" rotate={135} /></button>
+        <button className={`bar-btn leave${locked ? " locked" : ""}`} aria-disabled={locked} title={locked ? t("voice.stickyNotice") : t("voice.leave")} onClick={() => onLeave()}><Icon name={locked ? "lock" : "phone"} rotate={locked ? 0 : 135} /></button>
       </footer>
     </section>
   );

@@ -2,11 +2,15 @@ import { Avatar } from "./Avatar";
 import { Permission, hasPermission, type Channel, type ServerState, type VoiceMember } from "@squorli/protocol";
 import { useState } from "react";
 import type { ServerApi } from "./api";
-import { ContextMenu, type MenuAnchor } from "./ContextMenu";
+import { moveErrorText } from "./apiErrorText";
+import { ContextMenu, ContextSubmenu, type MenuAnchor } from "./ContextMenu";
+import { askConfirm, askInput } from "./dialogs";
+import type { ChannelDialogTarget } from "./ChannelDialog";
 import { UserVolumeControl } from "./UserVolumeControl";
 import type { VoiceClient, VoiceState } from "./voice/voiceClient";
 import { Icon } from "./Icon";
 import { t, tOr } from "./i18n";
+import { voteKickChannel } from "./voteKick";
 
 type Props = {
   server: ServerState;
@@ -27,6 +31,8 @@ type Props = {
   radioTitles: Record<string, string>;
   canMute: boolean;
   onMuteChannel: (channelId: string, muted: boolean) => void;
+  /** Right-click "Kanal bearbeiten" / "Kategorie bearbeiten" (docs/features/channel-permissions.md): App.tsx opens the channel dialog. */
+  onOpenChannelDialog: (target: ChannelDialogTarget) => void;
   connection: string;
   onSelect: (channelId: string) => void;
   onJoinVoice: (channelId: string) => void;
@@ -34,31 +40,50 @@ type Props = {
   myUserId: string;
   /** Phone: opens the member list over the navigation (button at the right end of the header); null = not offered. */
   onOpenMembers: (() => void) | null;
+  /** Vote kick (docs/features/votekick.md): per voice channel whether the server would take a vote right now. */
+  voteKickAllowed: Record<string, boolean>;
+  onVoteKick: (userId: string, channelId: string) => void;
 };
 
-export function Sidebar({ server, api, currentChannelId, voice, voiceState, client, unread, mentions, muted, radioTitles, canMute, onMuteChannel, connection, onSelect, onJoinVoice, onOpenAdmin, myUserId, onOpenMembers }: Props) {
+export function Sidebar({ server, api, currentChannelId, voice, voiceState, client, unread, mentions, muted, radioTitles, canMute, onMuteChannel, onOpenChannelDialog, connection, onSelect, onJoinVoice, onOpenAdmin, myUserId, onOpenMembers, voteKickAllowed, onVoteKick }: Props) {
   // Right-click on a voice member: how loud to play them back (not for yourself).
   const [menu, setMenu] = useState<({ userId: string } & MenuAnchor) | null>(null);
-  // Right-click on a text channel: mute it for myself.
+  // Right-click on a channel: mute it for myself, edit or delete it (with the right in that channel).
   const [channelMenu, setChannelMenu] = useState<({ channelId: string } & MenuAnchor) | null>(null);
+  // Right-click (or a click) on a category's heading: edit, create a channel inside, delete.
+  const [categoryMenu, setCategoryMenu] = useState<({ categoryId: string } & MenuAnchor) | null>(null);
   const menuChannel = channelMenu ? server.channels.find((c) => c.id === channelMenu.channelId) ?? null : null;
+  const menuCategory = categoryMenu ? server.categories.find((k) => k.id === categoryMenu.categoryId) ?? null : null;
   const menuMember = menu ? server.members.find((m) => m.userId === menu.userId) ?? null : null;
   // Voice rows carry only id and name (VoiceMember); the avatar comes from the member list.
   const avatarOf = new Map(server.members.map((m) => [m.userId, m.avatarUrl]));
-  // Drag & drop: drag a voice participant onto another voice channel (yourself always, others with MODERATE_VOICE).
-  const canModerate = hasPermission(server.myPermissions, Permission.MODERATE_VOICE);
+  // My permissions in a channel or category (docs/features/channel-permissions.md); a server from before knows only the server-wide mask.
+  const permsIn = (id: string) => server.myChannelPermissions?.[id] ?? server.myPermissions;
+  const canManage = (id: string) => hasPermission(permsIn(id), Permission.MANAGE_CHANNELS);
+  // Only against a server that does channel permissions: the dialog would find no routes on an older one.
+  const dialogOffered = server.myChannelPermissions !== undefined;
+  // Drag & drop: drag a voice participant onto another voice channel (yourself always, others with MOVE_MEMBERS in the channel they sit in).
   const [dragging, setDragging] = useState<{ userId: string; from: string } | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [dragErr, setDragErr] = useState<string | null>(null);
   const isOwner = (userId: string) => server.members.find((m) => m.userId === userId)?.isOwner ?? false;
-  const canDrag = (userId: string) => userId === myUserId || (canModerate && !isOwner(userId));
+  const canDrag = (userId: string, from: string) => userId === myUserId || (hasPermission(permsIn(from), Permission.MOVE_MEMBERS) && !isOwner(userId));
+  const lock = server.myVoiceLock ?? null;
+  const openChannelMenu = (c: Channel, trigger: HTMLElement, x: number, y: number) => {
+    const items = (c.kind === "text" && canMute ? 1 : 0) + (dialogOffered && canManage(c.id) ? 1 : 0);
+    if (items > 0) setChannelMenu({ channelId: c.id, trigger, x, y });
+  };
+  const createChannel = async (kind: "text" | "voice", categoryId: string) => {
+    const name = await askInput({ title: t("sidebar.createChannel"), label: t("sidebar.newChannelName"), confirmLabel: t("admin.create") });
+    if (name?.trim()) await api.createChannel({ kind, name: name.trim(), categoryId }).catch((e: unknown) => setDragErr(e instanceof Error ? e.message : String(e)));
+  };
   const onDrop = (channelId: string) => {
     const d = dragging;
     setDragging(null); setDropTarget(null);
     if (!d || d.from === channelId) return;
     if (d.userId === myUserId) { onJoinVoice(channelId); return; }
     setDragErr(null);
-    api.moveMember(d.userId, channelId).catch((e: unknown) => setDragErr(e instanceof Error ? e.message : String(e)));
+    api.moveMember(d.userId, channelId).catch((e: unknown) => setDragErr(moveErrorText(e)));
   };
   const canAdmin = hasPermission(server.myPermissions, Permission.MANAGE_CHANNELS) || hasPermission(server.myPermissions, Permission.MANAGE_ROLES)
     || hasPermission(server.myPermissions, Permission.MANAGE_SERVER) || hasPermission(server.myPermissions, Permission.BAN_MEMBERS)
@@ -75,17 +100,28 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, clie
     const active = c.id === currentChannelId;
     const joined = c.kind === "voice" && voiceState?.channelId === c.id;
     const droppable = c.kind === "voice" && dragging !== null && dragging.from !== c.id;
+    // Held by a sticky channel: the other voice channels are out of reach (the server refuses them; App.tsx says so on a click).
+    const lockedOut = c.kind === "voice" && !!lock && lock.channelId !== c.id;
+    // Visible but not enterable (an overwrite denies "enter"): dimmed like a locked-out one, the title says why, and the
+    // click still asks the server, whose refusal comes back as the same sentence (apiErrorText.ts).
+    const noEntry = c.kind === "voice" && !lockedOut && !hasPermission(permsIn(c.id), Permission.CONNECT_VOICE);
+    const full = c.kind === "voice" && c.userLimit !== null && members.length >= c.userLimit && !joined;
     return (
-      <li key={c.id} className={`channel ${active ? "active" : ""} ${joined ? "joined" : ""} ${unread[c.id] && !muted[c.id] ? "unread" : ""} ${(mentions[c.id] ?? 0) > 0 ? "mentioned" : ""} ${muted[c.id] ? "muted-channel" : ""} ${droppable ? "droppable" : ""} ${dropTarget === c.id ? "drop-target" : ""}`}
+      <li key={c.id} className={`channel ${active ? "active" : ""} ${joined ? "joined" : ""} ${unread[c.id] && !muted[c.id] ? "unread" : ""} ${(mentions[c.id] ?? 0) > 0 ? "mentioned" : ""} ${muted[c.id] ? "muted-channel" : ""} ${droppable ? "droppable" : ""} ${dropTarget === c.id ? "drop-target" : ""} ${lockedOut || noEntry ? "locked-out" : ""}`}
         onDragOver={(e) => { if (droppable) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dropTarget !== c.id) setDropTarget(c.id); } }}
         onDragLeave={(e) => { if (dropTarget === c.id && !e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(null); }}
         onDrop={(e) => { if (droppable) { e.preventDefault(); onDrop(c.id); } }}>
-        <button className="channel-btn" aria-current={active ? "page" : undefined} onClick={() => (c.kind === "text" ? onSelect(c.id) : onJoinVoice(c.id))} title={isAfkChannel ? t("sidebar.afkChannel") : c.topic ?? undefined}
-          onContextMenu={(e) => { if (c.kind !== "text" || !canMute) return; e.preventDefault(); setChannelMenu({ channelId: c.id, trigger: e.currentTarget, x: e.clientX, y: e.clientY }); }}>
-          <span className="channel-icon"><Icon name={c.kind === "text" ? "hash" : isAfkChannel ? "moon" : "volume-2"} /></span>
+        <button className="channel-btn" aria-current={active ? "page" : undefined} onClick={() => (c.kind === "text" ? onSelect(c.id) : onJoinVoice(c.id))} title={lockedOut ? t("voice.stickyBlocked") : noEntry ? t("voice.joinErr.forbidden") : full ? t("sidebar.full") : isAfkChannel ? t("sidebar.afkChannel") : c.topic ?? undefined}
+          onContextMenu={(e) => { e.preventDefault(); openChannelMenu(c, e.currentTarget, e.clientX, e.clientY); }}>
+          <span className="channel-icon"><Icon name={c.kind === "text" ? "hash" : isAfkChannel ? "moon" : c.private ? "lock" : "volume-2"} /></span>
           <span className="channel-name">{c.name}</span>
+          {c.private && c.kind === "text" && <span className="channel-flag" title={t("sidebar.private")}><Icon name="lock" /></span>}
+          {/* A lock stands for "private" only (user's rule, 23 September 2026), so a sticky channel gets a pin. */}
+          {c.sticky && <span className="channel-flag" title={t("sidebar.sticky")}><Icon name="pin" /></span>}
           {c.radio && <span className="channel-radio" title={radioTitles[c.id] ? t("radio.inChannelPlaying", { name: c.radio.name, title: radioTitles[c.id] ?? "" }) : t("radio.inChannel", { name: c.radio.name })}><Icon name="radio" /></span>}
-          {c.kind === "voice" && members.length > 0 && <span className="count">{members.length}</span>}
+          {c.kind === "voice" && (members.length > 0 || c.userLimit !== null) && <span className={`count${full ? " full" : ""}`}>{c.userLimit !== null ? `${members.length}/${c.userLimit}` : members.length}</span>}
+          {onOpenMembers && dialogOffered && canManage(c.id) && <span className="channel-menu-btn" role="button" tabIndex={0} aria-label={t("sidebar.channelMenu")} title={t("sidebar.channelMenu")}
+            onClick={(e) => { e.stopPropagation(); openChannelMenu(c, e.currentTarget, e.clientX, e.clientY); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openChannelMenu(c, e.currentTarget, r.left, r.bottom); } }}><Icon name="ellipsis-vertical" /></span>}
           {muted[c.id] && <span className="channel-muted" title={t("sidebar.muted")}><Icon name="bell-off" /></span>}
           {(mentions[c.id] ?? 0) > 0 && <span className="mention-badge" title={t("sidebar.mentions", { n: mentions[c.id] ?? 0 })}>{mentions[c.id]}</span>}
         </button>
@@ -96,7 +132,7 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, clie
               // Mute, sound off, camera and screen: from LiveKit while in the same room (media state, at once), otherwise what
               // the member's client told the server (voice.join/voice.status), so the whole server sees it (23 September 2026).
               const micMuted = p ? p.micMuted : m.micMuted, deafened = p ? p.deafened : m.deafened, cameraOn = p ? p.cameraOn : m.cameraOn, screenOn = p ? p.screenOn : m.screenOn;
-              const draggable = canDrag(m.userId);
+              const draggable = canDrag(m.userId, c.id);
               return <li key={m.userId} className={`${p?.speaking ? "speaking" : ""} ${draggable ? "draggable" : ""} ${dragging?.userId === m.userId ? "dragging" : ""} ${menu?.userId === m.userId ? "menu-open" : ""}`}
                 draggable={draggable} title={draggable ? t("sidebar.dragHint") : undefined}
                 onContextMenu={(e) => { if (m.userId === myUserId) return; e.preventDefault(); setMenu({ userId: m.userId, trigger: e.currentTarget, x: e.clientX, y: e.clientY }); }}
@@ -120,22 +156,47 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, clie
       </header>
       {channelMenu && menuChannel && (
         <ContextMenu anchor={channelMenu} label={menuChannel.name} onClose={() => setChannelMenu(null)}>
-          <button role="menuitem" onClick={() => { onMuteChannel(menuChannel.id, !muted[menuChannel.id]); setChannelMenu(null); }}>
+          {menuChannel.kind === "text" && canMute && <button role="menuitem" onClick={() => { onMuteChannel(menuChannel.id, !muted[menuChannel.id]); setChannelMenu(null); }}>
             <Icon name={muted[menuChannel.id] ? "bell" : "bell-off"} /> {muted[menuChannel.id] ? t("sidebar.unmuteChannel") : t("sidebar.muteChannel")}
-          </button>
+          </button>}
+          {dialogOffered && canManage(menuChannel.id) && <>
+            <button role="menuitem" onClick={() => { onOpenChannelDialog({ kind: "channel", id: menuChannel.id }); setChannelMenu(null); }}><Icon name="pencil" /> {t("sidebar.editChannel")}</button>
+            <button role="menuitem" className="danger" onClick={() => { setChannelMenu(null); void askConfirm({ title: t("admin.deleteChannelTitle", { name: menuChannel.name }), text: menuChannel.kind === "text" ? t("admin.deleteTextChannelText") : t("admin.deleteVoiceChannelText"), confirmLabel: t("common.delete"), danger: true })
+              .then((ok) => { if (ok) return api.deleteChannel(menuChannel.id); }).catch((e: unknown) => setDragErr(e instanceof Error ? e.message : String(e))); }}><Icon name="trash-2" /> {t("sidebar.deleteChannel")}</button>
+          </>}
+        </ContextMenu>
+      )}
+      {categoryMenu && menuCategory && (
+        <ContextMenu anchor={categoryMenu} label={menuCategory.name} onClose={() => setCategoryMenu(null)}>
+          <button role="menuitem" onClick={() => { onOpenChannelDialog({ kind: "category", id: menuCategory.id }); setCategoryMenu(null); }}><Icon name="pencil" /> {t("sidebar.editCategory")}</button>
+          <ContextSubmenu label={t("sidebar.createChannel")}>
+            <button role="menuitem" onClick={() => { setCategoryMenu(null); void createChannel("text", menuCategory.id); }}><Icon name="hash" /> {t("sidebar.newTextChannel")}</button>
+            <button role="menuitem" onClick={() => { setCategoryMenu(null); void createChannel("voice", menuCategory.id); }}><Icon name="volume-2" /> {t("sidebar.newVoiceChannel")}</button>
+          </ContextSubmenu>
+          <button role="menuitem" className="danger" onClick={() => { setCategoryMenu(null); void askConfirm({ title: t("admin.deleteCategoryTitle", { name: menuCategory.name }), text: t("admin.deleteCategoryText"), confirmLabel: t("common.delete"), danger: true })
+            .then((ok) => { if (ok) return api.deleteCategory(menuCategory.id); }).catch((e: unknown) => setDragErr(e instanceof Error ? e.message : String(e))); }}><Icon name="trash-2" /> {t("sidebar.deleteCategory")}</button>
         </ContextMenu>
       )}
       {menu && menuMember && (
         <ContextMenu anchor={menu} label={menuMember.displayName} onClose={() => setMenu(null)}>
           <div className="context-identity" role="presentation"><Avatar name={menuMember.displayName} src={menuMember.avatarUrl} online={menuMember.online} afk={menuMember.afk} /><strong>{menuMember.displayName}</strong></div>
           <UserVolumeControl client={client} publicKey={menuMember.publicKey} />
+          {(() => {
+            const channelId = voteKickChannel({ voice, voteKickAllowed, myUserId, targetId: menuMember.userId });
+            return channelId && <button role="menuitem" className="secondary small" onClick={() => { setMenu(null); onVoteKick(menuMember.userId, channelId); }}><Icon name="gavel" /> {t("votekick.menu")}</button>;
+          })()}
         </ContextMenu>
       )}
       {dragErr && <p className="error small" style={{ padding: "0 0.9rem" }}>{dragErr}</p>}
       <div className="channel-list">
         {groups.map((g) => (
           <section key={g.id ?? "none"}>
-            {g.id !== null && <h3>{g.name}</h3>}
+            {g.id !== null && (dialogOffered && canManage(g.id)
+              // A button inside the heading keeps its semantics and makes the category reachable by keyboard; a click or a right-click opens its menu.
+              ? <h3><button className="category-btn" aria-haspopup="menu" aria-label={t("sidebar.categoryMenu", { name: g.name })} title={t("sidebar.categoryMenu", { name: g.name })}
+                  onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setCategoryMenu({ categoryId: g.id!, trigger: e.currentTarget, x: r.left, y: r.bottom }); }}
+                  onContextMenu={(e) => { e.preventDefault(); setCategoryMenu({ categoryId: g.id!, trigger: e.currentTarget, x: e.clientX, y: e.clientY }); }}>{g.name}</button></h3>
+              : <h3>{g.name}</h3>)}
             <ul>{g.channels.map(renderChannel)}</ul>
           </section>
         ))}

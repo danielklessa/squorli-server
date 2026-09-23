@@ -34,8 +34,15 @@ export function discordTemplateCodeOf(input: string): string | null {
   return code !== undefined && TEMPLATE_CODE.test(code) ? code : null;
 }
 
+/**
+ * A permission overwrite the template has for a channel or category (docs/features/channel-permissions.md, 23 September
+ * 2026): `roleKey` is the template's role, "everyone" Discord's @everyone (which becomes an entry for the role "Gast"
+ * here); the masks are already translated to Squorli's bits. Discord's overwrites for single accounts are dropped and
+ * counted (`memberOverwrites`): their ids mean nothing here.
+ */
+export const ImportOverwrite = z.object({ roleKey: z.string(), allow: z.number().int().nonnegative(), deny: z.number().int().nonnegative() });
 /** A category the template names. `existingId` = a category of that name already exists here; the channels then go into it and no category is created. */
-export const ImportCategoryPlan = z.object({ key: z.string(), name: z.string().min(1).max(64), existingId: Uuid.nullable() });
+export const ImportCategoryPlan = z.object({ key: z.string(), name: z.string().min(1).max(64), existingId: Uuid.nullable(), overwrites: z.array(ImportOverwrite).default([]), memberOverwrites: z.number().int().nonnegative().default(0) });
 /** A channel the template names, in the order it should appear. `exists` = a channel of that name and kind already sits in that category, so it is not offered. */
 export const ImportChannelPlan = z.object({
   key: z.string(),
@@ -45,8 +52,10 @@ export const ImportChannelPlan = z.object({
   /** Opus bitrate in kbit/s, rounded to the client's steps from Discord's bit/s (only for voice channels). */
   audioBitrate: z.number().int(),
   categoryKey: z.string().nullable(),
-  /** Channel-specific rights Discord had for it (permission overwrites): Squorli's permissions apply server-wide, so they fall away. */
-  overwrites: z.number().int().nonnegative(),
+  /** The channel's permission overwrites, translated (ImportOverwrite); `private` = @everyone may not see it. */
+  overwrites: z.array(ImportOverwrite).default([]),
+  memberOverwrites: z.number().int().nonnegative().default(0),
+  private: z.boolean().default(false),
   exists: z.boolean(),
 });
 /** A role the template names, most powerful first. `exists` = a role of that name already exists; `blocked` = the actor may not grant its permissions. */
@@ -62,8 +71,8 @@ export const ImportRolePlan = z.object({
 export const ImportDropped = z.object({
   name: z.string(),
   kind: z.enum(["channel", "role"]),
-  /** unsupported = a channel type without a counterpart (Discord's directory channels and the like); default_role = @everyone, the role "Gast" stays as it is (user's decision). */
-  reason: z.enum(["unsupported", "default_role"]),
+  /** unsupported = a channel type without a counterpart (Discord's directory channels and the like); default_role = @everyone, the role "Gast" stays as it is (user's decision); role_not_imported = an overwrite for a role that is not taken over. */
+  reason: z.enum(["unsupported", "default_role", "role_not_imported"]),
 });
 
 /** POST /api/import/discord/preview: what an import of the template would create here. The same plan is built again when it is applied. */
@@ -78,6 +87,7 @@ export const ImportPlan = z.object({
 });
 export type ImportPlan = z.infer<typeof ImportPlan>;
 export type ImportCategoryPlan = z.infer<typeof ImportCategoryPlan>;
+export type ImportOverwrite = z.infer<typeof ImportOverwrite>;
 export type ImportChannelPlan = z.infer<typeof ImportChannelPlan>;
 export type ImportRolePlan = z.infer<typeof ImportRolePlan>;
 

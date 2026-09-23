@@ -10,10 +10,12 @@ import { requireMember } from "../auth/session";
 import { can } from "../authz";
 import type { Config } from "../config";
 import type { Db } from "../db";
-import { channels, serverSettings } from "../db/schema";
+import { channels, roles, serverSettings } from "../db/schema";
 import type { Hub } from "../hub";
 import type { LivekitAdmin } from "../livekit/admin";
-import { SETTINGS_ID, actorOf, broadcastStructure, loadSettings, loadState } from "../state";
+import { SETTINGS_ID, broadcastStructure, loadSettings, loadState } from "../state";
+import { syncVoiceAccessOf } from "../livekit/sync";
+import { visibility } from "../visibility";
 import { compact } from "../util";
 import type { DirectoryClient } from "../directory";
 import type { VoicePresence } from "../voice/presence";
@@ -65,8 +67,16 @@ export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: 
     if (body.data.requireAccount !== undefined && before.requireAccountLocked) return reply.code(409).send({ error: "locked_by_config" });
     const afkChannelId = body.data.afkChannelId;
     if (afkChannelId) {
-      const [ch] = await db.select({ kind: channels.kind }).from(channels).where(eq(channels.id, afkChannelId)).limit(1);
+      const [ch] = await db.select({ kind: channels.kind, sticky: channels.sticky }).from(channels).where(eq(channels.id, afkChannelId)).limit(1);
       if (ch?.kind !== "voice") return reply.code(400).send({ error: "unknown_channel" });
+      // Absent members are pushed there without asking: a sticky one would trap them, a private one is one they may not see.
+      if (ch.sticky) return reply.code(409).send({ error: "afk_channel_sticky" });
+      if ((await visibility.refresh(db)).privateChannels.has(afkChannelId)) return reply.code(409).send({ error: "afk_channel_private" });
+    }
+    // The status API's viewpoint: an unknown role would break the foreign key, and null means "the default role".
+    if (body.data.statusApiRoleId) {
+      const [r] = await db.select({ id: roles.id }).from(roles).where(eq(roles.id, body.data.statusApiRoleId)).limit(1);
+      if (!r) return reply.code(400).send({ error: "unknown_role" });
     }
     // Status API in mode "key" needs a key: made the first time the mode is chosen, kept over later switches (Regenerate = the route below).
     const [keyRow] = body.data.statusApi === "key" ? await db.select({ key: serverSettings.statusApiKey }).from(serverSettings).where(eq(serverSettings.id, SETTINGS_ID)).limit(1) : [];
@@ -80,12 +90,7 @@ export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: 
       if (off) { await broadcastStructure(db, hub, ["channels"]); voice.onRadioChange(); }
       for (const vm of voice.presence.members(afkChannelId)) await voice.lk.silence(afkChannelId, vm.userId);
     }
-    if (afkChanged && before.afkChannelId) {
-      for (const vm of voice.presence.members(before.afkChannelId)) {
-        const actor = await actorOf(db, vm.userId);
-        await voice.lk.setCanStream(before.afkChannelId, vm.userId, !!actor && can(actor, Permission.STREAM_VIDEO));
-      }
-    }
+    if (afkChanged && before.afkChannelId) await syncVoiceAccessOf(db, hub, voice.presence, voice.lk, { channelIds: [before.afkChannelId] });
     await broadcastStructure(db, hub, ["settings"]);
     if (body.data.name !== undefined || body.data.listed !== undefined || body.data.description !== undefined || body.data.openJoin !== undefined) reregister();
     return { ok: true };

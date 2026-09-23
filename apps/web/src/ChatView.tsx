@@ -1,6 +1,8 @@
 import { AutoGrowTextarea } from "./AutoGrowTextarea";
 import { Avatar } from "./Avatar";
 import { Permission, hasPermission, type Channel, type Member, type Message } from "@squorli/protocol";
+import { ApiError } from "./api";
+import { slowmodeLabel, slowmodeRemaining } from "./channelPerms";
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { askConfirm } from "./dialogs";
 import { EmojiButton } from "./EmojiPicker";
@@ -65,9 +67,20 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
   const canSend = hasPermission(myPermissions, Permission.SEND_MESSAGES);
   const canAttach = hasPermission(myPermissions, Permission.ATTACH_FILES);
   const canManage = hasPermission(myPermissions, Permission.MANAGE_MESSAGES);
+  // Slowmode (docs/features/channel-permissions.md): the wait since my last message here, counted down only while it runs;
+  // whoever manages messages in the channel is exempt, as on the server. A 429 from the server sets the clock right.
+  const slowmode = canManage ? 0 : channel.slowmodeSeconds;
+  const [lastSentAt, setLastSentAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const waitLeft = slowmodeRemaining(now, lastSentAt, slowmode);
+  useEffect(() => {
+    if (waitLeft <= 0) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [waitLeft]);
 
   // Stay at the bottom when switching channels and on new messages, unless the user has scrolled up.
-  useEffect(() => { stickToBottom.current = true; setDraft(""); setFiles([]); setEditing(null); mention.picked.clear(); mention.close(); editMention.close(); }, [channel.id]);
+  useEffect(() => { stickToBottom.current = true; setDraft(""); setFiles([]); setEditing(null); setLastSentAt(null); mention.picked.clear(); mention.close(); editMention.close(); }, [channel.id]);
   useEffect(() => {
     const el = listRef.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
@@ -93,14 +106,17 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
 
   async function submit() {
     const content = draft.trim();
-    if ((!content && files.length === 0) || sending) return;
+    if ((!content && files.length === 0) || sending || waitLeft > 0) return;
     setSending(true); setErr(null);
     try {
       await conn.sendMessage(channel.id, encodeMentions(content, members, mention.picked), files);
       setDraft(""); setFiles([]); mention.picked.clear();
       stickToBottom.current = true;
+      if (slowmode > 0) { setLastSentAt(Date.now()); setNow(Date.now()); }
     } catch (e) {
-      setErr(String(e));
+      const retry = e instanceof ApiError && e.code === "slowmode" && typeof e.body.retryAfter === "number" ? e.body.retryAfter : null;
+      if (retry !== null) { setLastSentAt(Date.now() - Math.max(0, slowmode - retry) * 1000); setNow(Date.now()); }
+      else setErr(String(e));
     } finally { setSending(false); inputRef.current?.focus(); }   // keep writing right away, also after a click on "Senden"
   }
 
@@ -231,13 +247,13 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
             onClick={mention.sync}
             onBlur={mention.close}
             rows={1}
-            placeholder={canSend ? t("chat.placeholder", { name: channel.name }) : t("chat.noPermission")}
+            placeholder={!canSend ? t("chat.noPermission") : slowmode > 0 ? t("chat.slowmodePlaceholder", { label: slowmodeLabel(slowmode, { s: t("chan.unit.s"), min: t("chan.unit.min"), h: t("chan.unit.h") }) }) : t("chat.placeholder", { name: channel.name })}
             disabled={!canSend}
             readOnly={sending}
             inputRef={inputRef}
           />
           <EmojiButton inputRef={inputRef} value={draft} onChange={setDraft} disabled={!canSend || sending} />
-          <button onClick={submit} disabled={!canSend || sending || (!draft.trim() && files.length === 0)}>{t("chat.send")}</button>
+          <button onClick={submit} disabled={!canSend || sending || waitLeft > 0 || (!draft.trim() && files.length === 0)} title={waitLeft > 0 ? t("chat.slowmodePlaceholder", { label: slowmodeLabel(slowmode, { s: t("chan.unit.s"), min: t("chan.unit.min"), h: t("chan.unit.h") }) }) : undefined}>{waitLeft > 0 ? t("chat.slowmodeWait", { s: waitLeft }) : t("chat.send")}</button>
         </div>
       </footer>
     </section>

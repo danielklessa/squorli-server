@@ -2,8 +2,8 @@ import { Permission } from "@squorli/protocol";
 import { describe, expect, it } from "vitest";
 import { canGrant, canSetRolesOf, canTouchRole, effectivePermissions, outranks, type Actor } from "./authz";
 
-const owner: Actor = { userId: "o", isOwner: true, permissions: Permission.ADMINISTRATOR, topPosition: 0 };
-const mod: Actor = { userId: "m", isOwner: false, permissions: Permission.KICK_MEMBERS | Permission.MANAGE_ROLES, topPosition: 5 };
+const owner: Actor = { userId: "o", isOwner: true, permissions: Permission.ADMINISTRATOR, roleIds: [], topPosition: 0 };
+const mod: Actor = { userId: "m", isOwner: false, permissions: Permission.KICK_MEMBERS | Permission.MANAGE_ROLES, roleIds: [], topPosition: 5 };
 
 describe("authz", () => {
   it("owner outranks everyone but themselves", () => {
@@ -35,9 +35,9 @@ describe("authz", () => {
 });
 
 describe("roles of owners", () => {
-  const founder: Actor = { userId: "f", isOwner: true, permissions: 0, topPosition: Number.MAX_SAFE_INTEGER };
-  const owner2: Actor = { userId: "o2", isOwner: true, permissions: 0, topPosition: Number.MAX_SAFE_INTEGER };
-  const admin: Actor = { userId: "a", isOwner: false, permissions: 0, topPosition: 9 };
+  const founder: Actor = { userId: "f", isOwner: true, permissions: 0, roleIds: [], topPosition: Number.MAX_SAFE_INTEGER };
+  const owner2: Actor = { userId: "o2", isOwner: true, permissions: 0, roleIds: [], topPosition: Number.MAX_SAFE_INTEGER };
+  const admin: Actor = { userId: "a", isOwner: false, permissions: 0, roleIds: [], topPosition: 9 };
   it("only the first owner changes another owner's roles", () => {
     expect(canSetRolesOf(founder, owner2, "f")).toBe(true);
     expect(canSetRolesOf(owner2, founder, "f")).toBe(false);

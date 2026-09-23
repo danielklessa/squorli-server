@@ -23,7 +23,9 @@ import { registerChannelRoutes } from "./routes/channels";
 import { registerImportRoutes } from "./routes/import";
 import { registerInviteRoutes } from "./routes/invites";
 import { registerMemberRoutes } from "./routes/members";
+import { registerVoteKickRoutes } from "./routes/votekick";
 import { loadMessages, registerMessageRoutes } from "./routes/messages";
+import { registerOverwriteRoutes } from "./routes/overwrites";
 import { registerPreviewRoutes } from "./routes/previews";
 import { LinkPreviews } from "./previews/service";
 import { registerReadStateRoutes } from "./routes/readState";
@@ -37,7 +39,9 @@ import { deleteUserAccount, type DeleteUserResult } from "./users/deleteUser";
 import { registerUserRoutes } from "./users/routes";
 import { DirectoryClient, SYNC_INTERVAL_MS } from "./directory";
 import { broadcastStructure, loadChannels, loadSettings, setRequireAccountForced } from "./state";
+import { visibility } from "./visibility";
 import { AfkMover } from "./voice/afk";
+import { moveGrants } from "./voice/confine";
 import { VoicePresence } from "./voice/presence";
 import { registerWs } from "./ws/handler";
 
@@ -133,6 +137,11 @@ async function main() {
 
   const hub = new Hub();
   const presence = new VoicePresence<WebSocket>();
+  // Channel permissions (docs/features/channel-permissions.md): the visibility snapshot decides who gets which channel
+  // and its events; it needs to know who sits where and whom a moderator just moved.
+  visibility.setSources({ seatOf: (userId) => presence.channelOfUser(userId), grantOf: (userId) => moveGrants.grantOf(userId) });
+  hub.setVisibility((userId, channelId) => visibility.canSee(userId, channelId));
+  await visibility.refresh(db);
   // Online and AFK status change everyone's member list.
   hub.onPresence(() => { void broadcastStructure(db, hub, ["members"]).catch((err) => app.log.warn({ err }, "presence broadcast")); });
   const lk = new LivekitAdmin(config, app.log);
@@ -145,8 +154,12 @@ async function main() {
     const settings = afk.length ? await loadSettings(db) : null;
     const afkChannelId = settings?.afkChannelId ?? null;
     const exemptChannels = new Set(afkChannelId ? (await loadChannels(db)).filter((c) => c.radio?.twitchChannel || c.radio?.youtubeVideo).map((c) => c.id) : []);
-    const due = afkMover.due({ afkChannelId, afk, channelOf: (userId) => presence.channelOfUser(userId), exemptChannels });
+    // Members a sticky channel holds stay (voice/sticky.ts); the move itself is a placement, so the AFK channel takes them whatever their rights there.
+    if (afk.length) await visibility.refresh(db);
+    const confined = new Set(afk.filter((userId) => visibility.voiceLockOf(userId) !== null));
+    const due = afkMover.due({ afkChannelId, afk, channelOf: (userId) => presence.channelOfUser(userId), exemptChannels, confined });
     for (const { userId, from } of due) {
+      moveGrants.grant(userId, afkChannelId!);
       hub.sendToUser(userId, { type: "voice.moved", channelId: afkChannelId, by: settings!.name, reason: "afk" });
       app.log.info({ userId, from }, "Mitglied in den AFK-Kanal verschoben");
     }
@@ -156,7 +169,7 @@ async function main() {
   hub.onPresence(() => { void afkSweep().catch((err) => app.log.warn({ err }, "afk sweep")); }); // right away when somebody turns absent
 
   // Web radio "now playing": the server reads a station's titles only while somebody sits in a voice channel playing it.
-  const radioMeta = new RadioMetadata((channelId, title) => hub.broadcast({ type: "radio.meta", channelId, title }), app.log);
+  const radioMeta = new RadioMetadata((channelId, title) => hub.broadcastToChannel(channelId, { type: "radio.meta", channelId, title }), app.log);
   // Nobody left in the channel: its radio goes off after two minutes (setting radioAutoStop). Checked again when the time is up.
   const radioIdle = new RadioIdleStop((channelId) => {
     void (async () => {
@@ -186,15 +199,17 @@ async function main() {
   await registerUserRoutes(app, db, directory, hub, presence);
   await registerSettingsRoutes(app, db, hub, config, directory, { presence, lk, onRadioChange: syncRadioMeta });
   await registerStatusRoutes(app, db, hub, presence, config);
-  await registerChannelRoutes(app, db, hub, presence);
+  await registerChannelRoutes(app, db, hub, presence, lk);
+  await registerOverwriteRoutes(app, db, hub, presence, lk);
   await registerRoleRoutes(app, db, hub, presence, lk);
   await registerMemberRoutes(app, db, hub, presence, lk);
+  await registerVoteKickRoutes(app, db, hub, presence, lk);
   await registerInviteRoutes(app, db);
   await registerImportRoutes(app, db, hub);
   // Link previews: looked up after a message is stored; the result goes out as the message itself, once more.
   const previews = new LinkPreviews(db, config, app.log, async (row) => {
     const [message] = await loadMessages(db, [row]);
-    if (message) hub.broadcast({ type: "message.update", message });
+    if (message) hub.broadcastToChannel(message.channelId, { type: "message.update", message });
   });
   await previews.init();
   app.addHook("onClose", async () => previews.close());
@@ -203,7 +218,7 @@ async function main() {
   await registerReadStateRoutes(app, db, hub);
   await registerRadioRoutes(app, db, hub, presence, syncRadioMeta);
   await registerAttachmentRoutes(app, db, config);
-  await registerLivekitRoutes(app, db, config);
+  await registerLivekitRoutes(app, db, config, presence);
   await registerWs(app, db, hub, presence, radioMeta, lk);
 
   // The built web client is served by the same process (one container less).

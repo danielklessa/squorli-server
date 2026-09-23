@@ -28,12 +28,15 @@ describe("import schemas", () => {
     const plan = ImportPlan.parse({
       source: { code: "abc", name: "Gilde", description: null },
       categories: [{ key: "1", name: "Allgemein", existingId: null }],
-      channels: [{ key: "2", kind: "voice", name: "Lobby", topic: null, audioBitrate: 64, categoryKey: "1", overwrites: 2, exists: false }],
+      channels: [{ key: "2", kind: "voice", name: "Lobby", topic: null, audioBitrate: 64, categoryKey: "1", overwrites: [{ roleKey: "everyone", allow: 0, deny: 128 }], memberOverwrites: 1, private: true, exists: false }],
       roles: [{ key: "3", name: "Mod", color: "#ff0000", permissions: 16, exists: false, blocked: null }],
       afkChannelKey: null,
       dropped: [{ name: "@everyone", kind: "role", reason: "default_role" }],
     });
-    expect(plan.channels[0]?.overwrites).toBe(2);
+    expect(plan.channels[0]?.overwrites).toEqual([{ roleKey: "everyone", allow: 0, deny: 128 }]);
+    expect(plan.channels[0]?.private).toBe(true);
+    // A plan from before channel permissions (no overwrite fields) still parses.
+    expect(ImportPlan.parse({ ...plan, channels: [{ key: "3", kind: "text", name: "x", topic: null, audioBitrate: 64, categoryKey: null, exists: false }] }).channels[0]?.overwrites).toEqual([]);
     expect(DiscordImportRequest.parse({ code: "abc", categories: [], channels: ["2"], roles: [] }).afkChannel).toBe(false);
     expect(ServerState.shape.importSources.safeParse(undefined).success).toBe(true);
     expect(ServerState.shape.importSources.safeParse(["discord-template"]).success).toBe(true);

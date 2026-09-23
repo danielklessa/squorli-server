@@ -19,6 +19,8 @@ export const Permission = {
   MODERATE_VOICE: 1 << 13,
   VIEW_VIDEO: 1 << 14,
   CONTROL_RADIO: 1 << 15,
+  MOVE_MEMBERS: 1 << 16,
+  BYPASS_STICKY: 1 << 17,
 } as const;
 
 export type PermissionName = keyof typeof Permission;
@@ -37,9 +39,11 @@ export const PERMISSION_LABELS: Record<PermissionName, string> = {
   CONNECT_VOICE: "Sprachkanäle betreten",
   ATTACH_FILES: "Dateien anhängen",
   STREAM_VIDEO: "Kamera und Bildschirm teilen",
-  MODERATE_VOICE: "Sprachkanäle moderieren (verschieben, Kamera/Bildschirm beenden, Streamen sperren)",
+  MODERATE_VOICE: "Sprachkanäle moderieren (Kamera/Bildschirm beenden, Streamen sperren)",
   VIEW_VIDEO: "Kamera- und Bildschirmübertragungen sehen",
   CONTROL_RADIO: "Webradio in Sprachkanälen starten und stoppen",
+  MOVE_MEMBERS: "Mitglieder in andere Sprachkanäle verschieben",
+  BYPASS_STICKY: "Von festsetzenden Sprachkanälen nicht gehalten werden",
 };
 
 /**
@@ -52,11 +56,39 @@ export const PERMISSION_LABELS: Record<PermissionName, string> = {
 export const PERMISSION_GROUPS = [
   { id: "admin", permissions: ["ADMINISTRATOR", "MANAGE_CHANNELS", "MANAGE_ROLES", "MANAGE_SERVER"] },
   { id: "text", permissions: ["VIEW_CHANNELS", "SEND_MESSAGES", "ATTACH_FILES", "MANAGE_MESSAGES"] },
-  { id: "voice", permissions: ["CONNECT_VOICE", "VIEW_VIDEO", "STREAM_VIDEO", "CONTROL_RADIO", "MODERATE_VOICE"] },
+  { id: "voice", permissions: ["CONNECT_VOICE", "VIEW_VIDEO", "STREAM_VIDEO", "CONTROL_RADIO", "MOVE_MEMBERS", "MODERATE_VOICE", "BYPASS_STICKY"] },
   { id: "members", permissions: ["CREATE_INVITES", "KICK_MEMBERS", "BAN_MEMBERS"] },
 ] as const satisfies readonly { id: string; permissions: readonly PermissionName[] }[];
 
 export type PermissionGroupId = (typeof PERMISSION_GROUPS)[number]["id"];
+
+/**
+ * Channel permissions (docs/features/channel-permissions.md, 23 September 2026): a channel or category carries overwrites
+ * (allow/deny masks per role or member) that change these bits for that channel; everything else stays server-wide and an
+ * overwrite naming it is refused. The server-wide mask of the roles is the base every overwrite starts from.
+ */
+export const CHANNEL_OVERRIDABLE =
+  Permission.VIEW_CHANNELS | Permission.SEND_MESSAGES | Permission.ATTACH_FILES | Permission.MANAGE_MESSAGES | Permission.MANAGE_CHANNELS |
+  Permission.CONNECT_VOICE | Permission.STREAM_VIDEO | Permission.VIEW_VIDEO | Permission.CONTROL_RADIO | Permission.MODERATE_VOICE |
+  Permission.MOVE_MEMBERS | Permission.BYPASS_STICKY;
+
+/**
+ * How the channel dialog shows them: groups per channel kind (a category shows the union). Not PERMISSION_GROUPS: the
+ * server-wide order puts MANAGE_CHANNELS next to ADMINISTRATOR and mixes text and voice, half of each group would be empty here.
+ */
+export const CHANNEL_PERMISSION_GROUPS = [
+  { id: "general", kinds: ["text", "voice"], permissions: ["VIEW_CHANNELS", "MANAGE_CHANNELS"] },
+  { id: "text", kinds: ["text"], permissions: ["SEND_MESSAGES", "ATTACH_FILES", "MANAGE_MESSAGES"] },
+  { id: "voice", kinds: ["voice"], permissions: ["CONNECT_VOICE", "VIEW_VIDEO", "STREAM_VIDEO", "CONTROL_RADIO", "MOVE_MEMBERS", "MODERATE_VOICE", "BYPASS_STICKY"] },
+] as const satisfies readonly { id: string; kinds: readonly ("text" | "voice")[]; permissions: readonly PermissionName[] }[];
+
+export type ChannelPermissionGroupId = (typeof CHANNEL_PERMISSION_GROUPS)[number]["id"];
+
+/** The overridable bits that matter for a channel of this kind (what the dialog offers). */
+export function channelOverridableFor(kind: "text" | "voice"): number {
+  return CHANNEL_PERMISSION_GROUPS.filter((g) => (g.kinds as readonly string[]).includes(kind))
+    .flatMap((g) => [...g.permissions]).reduce((m, n) => m | Permission[n], 0);
+}
 
 /**
  * Default role "guest" (everyone gets it on joining): only view channels and enter voice channels.

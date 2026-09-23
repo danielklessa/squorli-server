@@ -1,15 +1,17 @@
 import { Avatar } from "./Avatar";
 import { Permission, hasPermission, type Channel, type Friend, type Member, type Role, type VoiceMember } from "@squorli/protocol";
-import { useState, type MouseEvent } from "react";
+import { useState, type MouseEvent, type ReactNode } from "react";
 import { ContextMenu, ContextSubmenu, type MenuAnchor } from "./ContextMenu";
 import type { ServerApi } from "./api";
+import { moveErrorText } from "./apiErrorText";
 import { askConfirm, askInput } from "./dialogs";
 import { Icon } from "./Icon";
 import { GameLine } from "./GameLine";
 import { UserVolumeControl } from "./UserVolumeControl";
 import type { VoiceClient } from "./voice/voiceClient";
 import { t } from "./i18n";
-import { assignableRoles, canSetRolesOf } from "./memberRank";
+import { assignableRoles, canSetRolesOf, topRoleOf } from "./memberRank";
+import { voteKickChannel } from "./voteKick";
 
 type Props = {
   api: ServerApi;
@@ -23,10 +25,15 @@ type Props = {
   client: VoiceClient;
   /** Phone: the list is a panel slid in from the right; a header with this close button sits on top. null = the desktop column. */
   onClose?: (() => void) | null;
+  /** Vote kick (docs/features/votekick.md): per voice channel whether the server would take a vote right now. */
+  voteKickAllowed: Record<string, boolean>;
+  onVoteKick: (userId: string, channelId: string) => void;
+  /** The running vote's box, at the top of this list (user's wish, 23 September 2026); null = none right now. */
+  voteKickBox: ReactNode;
 };
 
 /** Right column: owners at the very top, then members grouped by highest role, online first. Context actions depending on permissions. */
-export function MemberList({ api, members, roles, myUserId, myPermissions, ownerId, voice, channels, friends, client, onClose = null }: Props) {
+export function MemberList({ api, members, roles, myUserId, myPermissions, ownerId, voice, channels, friends, client, onClose = null, voteKickAllowed, onVoteKick, voteKickBox }: Props) {
   const [open, setOpen] = useState<({ userId: string } & MenuAnchor) | null>(null);
   const openMenu = (event: MouseEvent<HTMLButtonElement>, userId: string) => {
     event.preventDefault();
@@ -34,8 +41,7 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
     setOpen({ userId, trigger: event.currentTarget, x: event.type === "contextmenu" && event.clientX ? event.clientX : box.left, y: event.type === "contextmenu" && event.clientY ? event.clientY : box.bottom });
   };
   const [err, setErr] = useState<string | null>(null);
-  const roleById = new Map(roles.map((r) => [r.id, r]));
-  const topRole = (m: Member) => m.roleIds.map((id) => roleById.get(id)).filter((r): r is Role => !!r).sort((a, b) => b.position - a.position)[0];
+  const topRole = (m: Member) => topRoleOf(m, roles);
   const groups = new Map<string, { name: string; color: string | null; position: number; members: Member[] }>();
   for (const m of members) {
     const r = topRole(m);
@@ -51,6 +57,8 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
   const canBan = hasPermission(myPermissions, Permission.BAN_MEMBERS);
   const canRoles = hasPermission(myPermissions, Permission.MANAGE_ROLES);
   const canModerate = hasPermission(myPermissions, Permission.MODERATE_VOICE);
+  // Moving got its own right (23 September 2026, docs/features/channel-permissions.md); an overwrite may give it in one channel only, the server decides.
+  const canMove = hasPermission(myPermissions, Permission.MOVE_MEMBERS);
   const meMember = members.find((m) => m.userId === myUserId) ?? null;
   const iAmOwner = meMember?.isOwner ?? false;
   // Only what the server would accept is offered (memberRank.ts): roles below my own, and members I may act on.
@@ -58,15 +66,16 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
   const voiceChannels = channels.filter((c) => c.kind === "voice");
   const voiceChannelOf = (userId: string) => Object.keys(voice).find((cid) => (voice[cid] ?? []).some((m) => m.userId === userId)) ?? null;
 
-  async function run(fn: () => Promise<unknown>) {
+  async function run(fn: () => Promise<unknown>, explain: (e: unknown) => string = String) {
     setErr(null);
     setOpen(null);
-    try { await fn(); } catch (e) { setErr(String(e)); }
+    try { await fn(); } catch (e) { setErr(explain(e)); }
   }
 
   return (
     <aside className="members-col" aria-label={t("members.title")}>
       {onClose && <header className="members-head"><strong>{t("members.title")} · {members.length}</strong><button className="icon" title={t("members.close")} aria-label={t("members.close")} onClick={onClose}><Icon name="x" /></button></header>}
+      {voteKickBox}
       {err && <p className="error small">{err}</p>}
       {ordered.map((g) => (
         <section key={g.name + g.position}>
@@ -124,23 +133,30 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
                           })}>{m.isOwner ? t("members.revokeOwner") : t("members.makeOwner")}</button>
                         </div>
                       )}
-                      {!isMe && canModerate && !m.isOwner && (() => {
+                      {!isMe && (canModerate || canMove) && !m.isOwner && (() => {
                         const inVoice = voiceChannelOf(m.userId);
                         return (
                           <div className="stack mod-voice">
                             <span className="muted small">{t("members.voiceChannel")}: {inVoice ? channels.find((c) => c.id === inVoice)?.name ?? "?" : t("members.notConnected")}</span>
-                            {inVoice && (
-                              <>
-                                <ContextSubmenu label={t("members.moveTo")}>
-                                  {voiceChannels.filter((c) => c.id !== inVoice).map((c) => <button role="menuitem" key={c.id} onClick={() => run(() => api.moveMember(m.userId, c.id))}><Icon name="volume-2" /> {c.name}</button>)}
-                                  <button role="menuitem" className="danger" onClick={() => run(() => api.moveMember(m.userId, null))}>{t("members.removeFromVoice")}</button>
-                                </ContextSubmenu>
-                                <button role="menuitem" className="secondary small" onClick={() => run(() => api.stopMemberStreams(m.userId, { camera: true, screen: true }))}>{t("members.stopStreams")}</button>
-                              </>
+                            {inVoice && canMove && (
+                              <ContextSubmenu label={t("members.moveTo")}>
+                                {voiceChannels.filter((c) => c.id !== inVoice).map((c) => <button role="menuitem" key={c.id} onClick={() => run(() => api.moveMember(m.userId, c.id), moveErrorText)}><Icon name="volume-2" /> {c.name}</button>)}
+                                <button role="menuitem" className="danger" onClick={() => run(() => api.moveMember(m.userId, null), moveErrorText)}>{t("members.removeFromVoice")}</button>
+                              </ContextSubmenu>
                             )}
-                            <button role="menuitem" className={`${m.streamBlocked ? "" : "danger"} small`} onClick={() => run(() => api.setStreamBlocked(m.userId, !m.streamBlocked))}>
+                            {inVoice && canModerate && <button role="menuitem" className="secondary small" onClick={() => run(() => api.stopMemberStreams(m.userId, { camera: true, screen: true }))}>{t("members.stopStreams")}</button>}
+                            {canModerate && <button role="menuitem" className={`${m.streamBlocked ? "" : "danger"} small`} onClick={() => run(() => api.setStreamBlocked(m.userId, !m.streamBlocked))}>
                               {m.streamBlocked ? t("members.allowStreams") : t("members.blockStreams")}
-                            </button>
+                            </button>}
+                          </div>
+                        );
+                      })()}
+                      {(() => {
+                        // Vote kick: only where we both sit and the server allows it right now (it checks again).
+                        const channelId = voteKickChannel({ voice, voteKickAllowed, myUserId, targetId: m.userId });
+                        return channelId && (
+                          <div className="row">
+                            <button role="menuitem" className="secondary small" onClick={() => { setOpen(null); onVoteKick(m.userId, channelId); }}><Icon name="gavel" /> {t("votekick.menu")}</button>
                           </div>
                         );
                       })()}

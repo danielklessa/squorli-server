@@ -6,6 +6,14 @@ import type { Member, Role } from "@squorli/protocol";
  * authority; this only decides what is drawn.
  */
 
+/**
+ * The member's highest role, for the colour of their name and the grouping of the member list; the default role is not one
+ * of `roleIds`, so it never colours anybody. undefined = only the default role.
+ */
+export function topRoleOf(m: Pick<Member, "roleIds">, roles: readonly Role[]): Role | undefined {
+  return m.roleIds.map((id) => roles.find((r) => r.id === id)).filter((r): r is Role => !!r).sort((a, b) => b.position - a.position)[0];
+}
+
 /** Highest role position of a member, the default role included; owners stand above every role. */
 export function topPositionOf(m: Pick<Member, "roleIds" | "isOwner">, roles: readonly Role[]): number {
   if (m.isOwner) return Number.MAX_SAFE_INTEGER;

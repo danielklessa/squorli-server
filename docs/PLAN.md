@@ -335,6 +335,8 @@ My knowledge of versions and maturity is a snapshot; check the current state bef
 
 These must be made before M0 or at the latest before the respective milestone:
 
+*Channel permissions (23 September 2026, user's decisions, `docs/features/channel-permissions.md`): the M2 provisional "permissions apply server-wide, no channel overrides" of decision 3 is replaced; channels and categories carry Discord-style overwrites for roles and members, private channels never reach a client that may not see them, voice channels can hold their members (sticky).*
+
 Already decided: permissive license, PTT and voice activation both, screen share with audio in release 1.
 
 1. **MIT or Apache 2.0.** Both allow everything including closed forks. Apache 2.0 additionally contains an explicit patent license from contributors and matches LiveKit's license; MIT is shorter and more common in the JS world. In substance hardly any difference for this project. I am not a lawyer; if in doubt, a brief review. Consequence of the permissive choice: code from Stoat (AGPL-3) must not be adopted, it may only serve as reference.

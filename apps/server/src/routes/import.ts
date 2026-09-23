@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { requireMember } from "../auth/session";
 import { can, type Actor } from "../authz";
 import type { Db } from "../db";
-import { categories, channels, roles, serverSettings } from "../db/schema";
+import { categories, categoryOverwrites, channelOverwrites, channels, roles, serverSettings } from "../db/schema";
 import type { Hub } from "../hub";
 import { planDiscordImport, type ExistingStructure } from "../import/discord";
 import { DiscordTemplates, TemplateFetchError } from "../import/fetch";
@@ -23,7 +23,7 @@ export async function registerImportRoutes(app: FastifyInstance, db: Db, hub: Hu
     const [cats, chans, rs, [settings]] = await Promise.all([
       db.select({ id: categories.id, name: categories.name }).from(categories),
       db.select({ name: channels.name, kind: channels.kind, categoryId: channels.categoryId }).from(channels),
-      db.select({ name: roles.name, isDefault: roles.isDefault }).from(roles),
+      db.select({ id: roles.id, name: roles.name, isDefault: roles.isDefault }).from(roles),
       db.select({ afkChannelId: serverSettings.afkChannelId }).from(serverSettings).where(eq(serverSettings.id, SETTINGS_ID)).limit(1),
     ]);
     return { categories: cats, channels: chans, roles: rs, afkChannelId: settings?.afkChannelId ?? null };
@@ -96,13 +96,33 @@ export async function registerImportRoutes(app: FastifyInstance, db: Db, hub: Hu
       }
       // Roles: below every existing role (they are new and have no members), among themselves in the template's order.
       // The existing ones move up by as many places, so their order stays and nothing lands above anybody.
+      // Their ids are kept for the overwrites (docs/features/channel-permissions.md); a role that already exists here by
+      // name resolves to that one, and Discord's @everyone to the default role "Gast".
+      const existingRoles = await tx.select({ id: roles.id, name: roles.name, isDefault: roles.isDefault }).from(roles);
+      const roleIds = new Map<string, string>();
+      for (const r of plan.roles) if (r.exists) { const hit = existingRoles.find((e) => e.name.trim().toLowerCase() === r.name.trim().toLowerCase() && !e.isDefault); if (hit) roleIds.set(r.key, hit.id); }
+      const defaultRoleId = existingRoles.find((e) => e.isDefault)?.id;
+      if (defaultRoleId) roleIds.set("everyone", defaultRoleId);
       if (newRoles.length) {
         await tx.update(roles).set({ position: sql`${roles.position} + ${newRoles.length}` }).where(eq(roles.isDefault, false));
         let rolePos = 1;
         for (const r of [...newRoles].reverse()) {
-          await tx.insert(roles).values({ name: r.name, color: r.color, permissions: r.permissions, position: rolePos++ });
+          const [row] = await tx.insert(roles).values({ name: r.name, color: r.color, permissions: r.permissions, position: rolePos++ }).returning({ id: roles.id });
+          roleIds.set(r.key, row!.id);
         }
       }
+      // Overwrites, for what was created here only ("nur ergänzen": an existing channel or category keeps its own).
+      let overwritesSkipped = 0;
+      const rowsFor = (list: { roleKey: string; allow: number; deny: number }[]) => list.flatMap((o) => { const roleId = roleIds.get(o.roleKey); if (!roleId) { overwritesSkipped++; return []; } return [{ roleId, allow: o.allow, deny: o.deny }]; });
+      for (const c of newCategories) {
+        const rows = rowsFor(c.overwrites);
+        if (rows.length) await tx.insert(categoryOverwrites).values(rows.map((r) => ({ categoryId: categoryIds.get(c.key)!, ...r, userId: null })));
+      }
+      for (const c of newChannels) {
+        const rows = rowsFor(c.overwrites);
+        if (rows.length) await tx.insert(channelOverwrites).values(rows.map((r) => ({ channelId: channelIds.get(c.key)!, ...r, userId: null })));
+      }
+      if (overwritesSkipped) app.log.info({ overwritesSkipped }, "Discord-Import: Kanalrechte fuer nicht uebernommene Rollen ausgelassen");
       let afkChannelSet = false;
       const afkId = setAfk && plan.afkChannelKey !== null ? channelIds.get(plan.afkChannelKey) : undefined;
       if (afkId) {
@@ -115,8 +135,8 @@ export async function registerImportRoutes(app: FastifyInstance, db: Db, hub: Hu
     });
 
     const parts: StructurePart[] = [];
-    if (result.categories) parts.push("categories");
-    if (result.channels) parts.push("channels");
+    if (result.categories) parts.push("categories", "overwrites");
+    if (result.channels) parts.push("channels", "overwrites");
     if (result.roles) parts.push("roles");
     if (result.afkChannelSet) parts.push("settings");
     if (parts.length) await broadcastStructure(db, hub, parts);

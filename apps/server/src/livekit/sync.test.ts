@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { VoicePresence } from "../voice/presence";
-import { syncStreamGrants } from "./sync";
+import { syncVoiceAccess } from "./sync";
 
 function fakeLk() {
   const calls: string[] = [];
@@ -8,24 +8,33 @@ function fakeLk() {
     calls,
     setCanStream: async (room: string, identity: string, allowed: boolean) => { calls.push(`grant ${room} ${identity} ${allowed}`); },
     stopStreams: async (room: string, identity: string) => { calls.push(`stop ${room} ${identity}`); },
+    removeParticipant: async (room: string, identity: string) => { calls.push(`remove ${room} ${identity}`); },
   };
 }
+const stay = (mayStream: boolean) => async () => ({ mayStay: true, mayStream });
 
-describe("syncStreamGrants", () => {
+describe("syncVoiceAccess", () => {
   it("grants camera and screen to a member who got the permission while sitting in voice", async () => {
     const lk = fakeLk();
-    await syncStreamGrants([{ userId: "u1", channelId: "c1" }], null, async () => true, lk);
+    await syncVoiceAccess([{ userId: "u1", channelId: "c1" }], null, stay(true), lk, () => {});
     expect(lk.calls).toEqual(["grant c1 u1 true"]);
   });
   it("takes them away and ends running streams when the permission is gone", async () => {
     const lk = fakeLk();
-    await syncStreamGrants([{ userId: "u1", channelId: "c1" }], null, async () => false, lk);
+    await syncVoiceAccess([{ userId: "u1", channelId: "c1" }], null, stay(false), lk, () => {});
     expect(lk.calls).toEqual(["grant c1 u1 false", "stop c1 u1"]);
   });
   it("leaves members in the AFK channel silenced", async () => {
     const lk = fakeLk();
-    await syncStreamGrants([{ userId: "u1", channelId: "afk" }, { userId: "u2", channelId: "c1" }], "afk", async () => true, lk);
+    await syncVoiceAccess([{ userId: "u1", channelId: "afk" }, { userId: "u2", channelId: "c1" }], "afk", stay(true), lk, () => {});
     expect(lk.calls).toEqual(["grant c1 u2 true"]);
+  });
+  it("throws out whoever may no longer see or enter the channel (channel permissions)", async () => {
+    const lk = fakeLk();
+    const evicted: string[] = [];
+    await syncVoiceAccess([{ userId: "u1", channelId: "c1" }, { userId: "u2", channelId: "c1" }], null, async (userId) => ({ mayStay: userId === "u2", mayStream: true }), lk, (userId, channelId) => { evicted.push(`${userId}@${channelId}`); });
+    expect(lk.calls).toEqual(["remove c1 u1", "grant c1 u2 true"]);
+    expect(evicted).toEqual(["u1@c1"]);
   });
 });
 

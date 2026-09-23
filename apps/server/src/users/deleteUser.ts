@@ -4,6 +4,7 @@ import type { Db } from "../db";
 import { attachments, serverSettings, users } from "../db/schema";
 import type { Hub } from "../hub";
 import { SETTINGS_ID, broadcastStructure } from "../state";
+import { visibility } from "../visibility";
 import type { VoicePresence } from "../voice/presence";
 
 /** WebSocket close code for "your account on this server was deleted" (the client goes to the login with a message, no reconnect). */
@@ -36,6 +37,7 @@ export async function deleteUserAccount(
   await db.delete(users).where(eq(users.id, u.id));
   await app.removeAttachmentFiles(files.map((f) => f.id));
   presence.leaveUser(u.id);
+  visibility.dropUser(u.id);
   hub.closeUser(u.id, CLOSE_ACCOUNT_DELETED, "account_deleted");
   await broadcastStructure(db, hub, ["members"]);
   app.log.info({ userId: u.id, attachments: files.length }, "Konto auf Wunsch des Nutzers (ueber das Verzeichnis) geloescht");

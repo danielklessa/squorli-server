@@ -1,0 +1,1 @@
+ALTER TABLE "channels" ADD COLUMN "allow_vote_kick" boolean DEFAULT true NOT NULL;

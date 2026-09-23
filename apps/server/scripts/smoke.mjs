@@ -17,7 +17,7 @@ const OWNER_FILE = join(dirname(fileURLToPath(import.meta.url)), ".smoke-owner.j
 const hex = (b) => Buffer.from(b).toString("hex");
 let failures = 0;
 const check = (label, ok, detail = "") => { console.log(`${ok ? "ok  " : "FAIL"} ${label}${detail ? " " + detail : ""}`); if (!ok) failures++; };
-const P = { ADMINISTRATOR: 1, MANAGE_CHANNELS: 4, KICK_MEMBERS: 16, VIEW_CHANNELS: 128, SEND_MESSAGES: 256, MANAGE_MESSAGES: 512, CONNECT_VOICE: 1024, STREAM_VIDEO: 4096, MODERATE_VOICE: 8192, VIEW_VIDEO: 16384 };
+const P = { ADMINISTRATOR: 1, MANAGE_CHANNELS: 4, KICK_MEMBERS: 16, VIEW_CHANNELS: 128, SEND_MESSAGES: 256, MANAGE_MESSAGES: 512, CONNECT_VOICE: 1024, ATTACH_FILES: 2048, STREAM_VIDEO: 4096, MODERATE_VOICE: 8192, VIEW_VIDEO: 16384, CONTROL_RADIO: 32768, MOVE_MEMBERS: 65536, BYPASS_STICKY: 131072 };
 
 async function api(method, path, body, token, raw = false, extraHeaders = {}) {
   const headers = { ...extraHeaders };
@@ -48,6 +48,14 @@ async function login(key, invite, userAgent) {
 }
 
 // WebSocket client with an event buffer
+/**
+ * Waits for an event that arrives *after* this call. `waitFor()` also matches what is already in the buffer, so a check
+ * that repeats an earlier action (the same member joining the same voice channel a second time) would be served the old
+ * event at once — and would then go on before the server has even seen the new one (that raced `voice.status` past the
+ * seat on 23 September 2026 and failed three checks that had nothing wrong with them).
+ */
+const waitNew = (ws, pred, ms) => { const mark = ws.events.length; return ws.waitFor((e) => pred(e) && ws.events.indexOf(e) >= mark, ms); };
+
 async function connectWs(token) {
   const ws = new WebSocket(BASE.replace(/^http/, "ws") + "/api/ws");
   const events = [];
@@ -738,13 +746,15 @@ check("delete own message removes attachment", sd2 === 200 && dlGone.status === 
 wsB.send({ type: "typing", channelId: textCh.id });
 const evTyping = await wsA.waitFor((e) => e.type === "typing" && e.userId === B.userId).catch(() => null);
 check("typing forwarded", !!evTyping);
+const pVoiceJoin = waitNew(wsA, (e) => e.type === "voice.state" && e.channelId === voiceCh.id && e.members.some((m) => m.userId === B.userId));
 wsB.send({ type: "voice.join", channelId: voiceCh.id, micMuted: true });
-const evVoice = await wsA.waitFor((e) => e.type === "voice.state" && e.channelId === voiceCh.id && e.members.some((m) => m.userId === B.userId)).catch(() => null);
+const evVoice = await pVoiceJoin.catch(() => null);
 check("voice.join broadcast", evVoice?.members[0]?.displayName === "Bea");
 check("voice.join carries the mute state to everybody", evVoice?.members[0]?.micMuted === true && evVoice?.members[0]?.deafened === false);
 // Mute and sound off reach the whole server through voice.status (docs/features/status-api.md), and the status API shows the seat.
+const pVoiceSt = waitNew(wsA, (e) => e.type === "voice.state" && e.channelId === voiceCh.id && e.members.some((m) => m.userId === B.userId && m.deafened === true));
 wsB.send({ type: "voice.status", micMuted: true, deafened: true, screenOn: true });
-const evVoiceSt = await wsA.waitFor((e) => e.type === "voice.state" && e.channelId === voiceCh.id && e.members.some((m) => m.userId === B.userId && m.deafened === true)).catch(() => null);
+const evVoiceSt = await pVoiceSt.catch(() => null);
 check("voice.status broadcast (mute, sound, screen)", !!evVoiceSt && evVoiceSt.members.find((m) => m.userId === B.userId)?.screenOn === true);
 await api("PATCH", "/api/settings", { statusApi: "public" }, owner.token);
 const [, stSeat] = await api("GET", "/api/status");
@@ -920,6 +930,266 @@ if (health0.directoryUrl) {
   const Cnew = await login(keyC, invite2.code);
   check("leave: joining again afterwards creates a new user", Cnew.status === 200 && Cnew.userId !== C.userId, `${Cnew.status}`);
   await api("DELETE", `/api/members/${Cnew.userId}`, undefined, owner.token);
+}
+
+// ---------- Channel permissions (docs/features/channel-permissions.md): overwrites, hard visibility, the write rules,
+// slowmode, the user limit, sticky channels, a move into an invisible channel, eviction, the AFK guards.
+{
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const [, invP] = await api("POST", "/api/invites", {}, owner.token);
+  const G = await login(await newKey(), invP.code); // a guest: the default role only
+  const wsG = await connectWs(G.token);
+  const gState = async () => (await api("GET", "/api/state", undefined, G.token))[1];
+  const [spc, privCh] = await api("POST", "/api/channels", { kind: "text", name: "smoke-private", categoryId: cat.id }, owner.token);
+  const [spv, privVoice] = await api("POST", "/api/channels", { kind: "voice", name: "smoke-sticky", categoryId: cat.id, sticky: true, stickyPersist: true, stickyHideVoice: false, userLimit: 1 }, owner.token);
+  check("channel perms: channel settings round-trip", spc === 200 && spv === 200 && privVoice.sticky === true && privVoice.stickyPersist === true && privVoice.stickyHideVoice === false && privVoice.userLimit === 1 && privVoice.slowmodeSeconds === 0 && privVoice.defaultNotify === "all" && privVoice.private === false, JSON.stringify({ sticky: privVoice.sticky, hide: privVoice.stickyHideVoice, limit: privVoice.userLimit, notify: privVoice.defaultNotify }));
+  const stG0 = await gState();
+  check("channel perms: state carries myChannelPermissions (visible channels only) and the guest sees the new channel", !!stG0.myChannelPermissions && (stG0.myChannelPermissions[privCh.id] & P.VIEW_CHANNELS) !== 0 && stG0.channels.some((c) => c.id === privCh.id) && stG0.myVoiceLock === null && stG0.channels.every((c) => c.private === false));
+  const everyoneDeny = (perm) => ({ targetType: "role", targetId: defaultRole.id, allow: 0, deny: perm });
+  // ---- Private: the default role may not see it. The guest's structure loses it, the state leaves it out, and nothing of it reaches them.
+  const [so1, ro1] = await api("PUT", `/api/channels/${privCh.id}/overwrites`, { overwrites: [everyoneDeny(P.VIEW_CHANNELS)] }, owner.token);
+  const evGone = await wsG.waitFor((e) => e.type === "structure" && e.channels && !e.channels.some((c) => c.id === privCh.id)).catch(() => null);
+  const stG1 = await gState();
+  const [, stO1] = await api("GET", "/api/state", undefined, owner.token);
+  check("channel perms: private channel vanishes from the guest's structure and state, the owner keeps it with the lock", so1 === 200 && ro1.overwrites.length === 1 && evGone !== null && !stG1.channels.some((c) => c.id === privCh.id) && stG1.myChannelPermissions[privCh.id] === undefined && stO1.channels.find((c) => c.id === privCh.id)?.private === true, `${so1} ${evGone ? "gone" : "no structure"}`);
+  const [sh1] = await api("GET", `/api/channels/${privCh.id}/messages`, undefined, G.token);
+  const [, rs1] = await api("GET", "/api/read-state", undefined, G.token);
+  const [sp1] = await api("POST", `/api/channels/${privCh.id}/messages`, { content: "hallo?" }, G.token);
+  const [sr1] = await api("POST", `/api/channels/${privCh.id}/read`, { seq: 1 }, G.token);
+  const [sow1] = await api("GET", `/api/channels/${privCh.id}/overwrites`, undefined, G.token);
+  check("channel perms: an invisible channel answers 404 everywhere (never 403) and is out of the read state", sh1 === 404 && sp1 === 404 && sr1 === 404 && sow1 === 404 && rs1.channels.every((c) => c.channelId !== privCh.id), `${sh1} ${sp1} ${sr1} ${sow1}`);
+  const [sm1, pm] = await api("POST", `/api/channels/${privCh.id}/messages`, { content: "geheim" }, owner.token);
+  const gotA = await wsA.waitFor((e) => e.type === "message.create" && e.message.id === pm.id).catch(() => null);
+  await sleep(300);
+  check("channel perms: the message reaches the owner's socket, not the guest's", sm1 === 200 && gotA !== null && !wsG.events.some((e) => e.type === "message.create" && e.message?.id === pm.id));
+  // The status API shows one role's view: the default role by default, any other role when the admin picks it.
+  await api("PATCH", "/api/settings", { statusApi: "public" }, owner.token);
+  const [sst, stPub] = await api("GET", "/api/status");
+  check("channel perms: the status API leaves the private channel out", sst === 200 && !stPub.channels.some((c) => c.id === privCh.id) && stPub.channels.some((c) => c.id === textCh.id));
+  // From the moderator role's view the same channel is in, once that role may see it (user's wish, 23 September 2026).
+  await api("PUT", `/api/channels/${privCh.id}/overwrites`, { overwrites: [everyoneDeny(P.VIEW_CHANNELS), { targetType: "role", targetId: modRole.id, allow: P.VIEW_CHANNELS, deny: 0 }] }, owner.token);
+  const [ssr0] = await api("PATCH", "/api/settings", { statusApiRoleId: modRole.id }, owner.token);
+  const [, stMod] = await api("GET", "/api/status");
+  const [, stSettings] = await api("GET", "/api/state", undefined, owner.token);
+  const [ssr1] = await api("PATCH", "/api/settings", { statusApiRoleId: "00000000-0000-0000-0000-000000000000" }, owner.token);
+  const [ssr2] = await api("PATCH", "/api/settings", { statusApiRoleId: modRole.id }, B.token);
+  await api("PATCH", "/api/settings", { statusApiRoleId: null }, owner.token);
+  const [, stBack] = await api("GET", "/api/status");
+  check("channel perms: the status API answers from the chosen role's view (unknown role 400, MANAGE_SERVER only, null = default role)",
+    ssr0 === 200 && stMod.channels.some((c) => c.id === privCh.id) && stSettings.settings.statusApiRoleId === modRole.id
+    && ssr1 === 400 && ssr2 === 403 && !stBack.channels.some((c) => c.id === privCh.id),
+    `${ssr0} ${ssr1} ${ssr2} mod=${stMod.channels.some((c) => c.id === privCh.id)} back=${stBack.channels.some((c) => c.id === privCh.id)}`);
+  await api("PUT", `/api/channels/${privCh.id}/overwrites`, { overwrites: [everyoneDeny(P.VIEW_CHANNELS)] }, owner.token);
+  await api("PATCH", "/api/settings", { statusApi: "off" }, owner.token);
+  // ---- A member allow brings it back, with its history.
+  const [so2] = await api("PUT", `/api/channels/${privCh.id}/overwrites`, { overwrites: [everyoneDeny(P.VIEW_CHANNELS), { targetType: "member", targetId: G.userId, allow: P.VIEW_CHANNELS, deny: 0 }] }, owner.token);
+  const evBack = await wsG.waitFor((e) => e.type === "structure" && e.channels?.some((c) => c.id === privCh.id)).catch(() => null);
+  const [sh2, hist2] = await api("GET", `/api/channels/${privCh.id}/messages`, undefined, G.token);
+  check("channel perms: a member allow makes it reappear within one structure, history included", so2 === 200 && evBack !== null && sh2 === 200 && hist2.messages.some((m) => m.id === pm.id));
+  // ---- Write rules: the right to manage the channel, only channel bits, only what one holds, no locking oneself out.
+  const [sw0] = await api("PUT", `/api/channels/${privCh.id}/overwrites`, { overwrites: [] }, G.token);
+  const [sw1, rw1] = await api("PUT", `/api/channels/${privCh.id}/overwrites`, { overwrites: [{ targetType: "role", targetId: modRole.id, allow: 32, deny: 0 }] }, owner.token); // BAN_MEMBERS is no channel right
+  const [sw2, rw2] = await api("PUT", `/api/channels/${privCh.id}/overwrites`, { overwrites: [{ targetType: "role", targetId: modRole.id, allow: P.VIEW_CHANNELS, deny: P.VIEW_CHANNELS }] }, owner.token);
+  // B manages this one channel by overwrite (server-wide B has no MANAGE_CHANNELS), may then hand out what B has here, not more.
+  await api("PUT", `/api/channels/${privCh.id}/overwrites`, { overwrites: [everyoneDeny(P.VIEW_CHANNELS), { targetType: "member", targetId: G.userId, allow: P.VIEW_CHANNELS, deny: 0 }, { targetType: "member", targetId: B.userId, allow: P.VIEW_CHANNELS | P.MANAGE_CHANNELS, deny: 0 }] }, owner.token);
+  const [sw3, rw3] = await api("PUT", `/api/channels/${privCh.id}/overwrites`, { overwrites: [everyoneDeny(P.VIEW_CHANNELS), { targetType: "member", targetId: B.userId, allow: P.VIEW_CHANNELS | P.MANAGE_CHANNELS, deny: 0 }, { targetType: "member", targetId: G.userId, allow: P.VIEW_CHANNELS | P.CONTROL_RADIO, deny: 0 }] }, B.token);
+  const [sw4, rw4] = await api("PUT", `/api/channels/${privCh.id}/overwrites`, { overwrites: [everyoneDeny(P.VIEW_CHANNELS)] }, B.token); // would leave B without the channel
+  const [sw5] = await api("PUT", `/api/channels/${privCh.id}/overwrites`, { overwrites: [everyoneDeny(P.VIEW_CHANNELS), { targetType: "member", targetId: B.userId, allow: P.VIEW_CHANNELS | P.MANAGE_CHANNELS, deny: 0 }, { targetType: "member", targetId: G.userId, allow: P.VIEW_CHANNELS | P.SEND_MESSAGES, deny: 0 }] }, B.token);
+  check("channel perms: write rules (403 without the right, 400 not_channel_permission, 400 allow&deny, 403 cannot_grant, 409 would_lock_out, 200 within one's rights)",
+    sw0 === 403 && sw1 === 400 && rw1.error === "not_channel_permission" && sw2 === 400 && sw3 === 403 && rw3.error === "cannot_grant" && sw4 === 409 && rw4.error === "would_lock_out" && sw5 === 200, `${sw0} ${sw1} ${sw2} ${sw3} ${sw4} ${sw5}`);
+  // ---- Read-only by the everyone deny; slowmode with the exemption.
+  await api("PUT", `/api/channels/${privCh.id}/overwrites`, { overwrites: [everyoneDeny(P.VIEW_CHANNELS | P.SEND_MESSAGES), { targetType: "member", targetId: G.userId, allow: P.VIEW_CHANNELS, deny: 0 }] }, owner.token);
+  const [sro] = await api("POST", `/api/channels/${privCh.id}/messages`, { content: "darf ich?" }, G.token);
+  await api("PUT", `/api/channels/${privCh.id}/overwrites`, { overwrites: [everyoneDeny(P.VIEW_CHANNELS), { targetType: "member", targetId: G.userId, allow: P.VIEW_CHANNELS | P.SEND_MESSAGES, deny: 0 }] }, owner.token);
+  const [ssl] = await api("PATCH", `/api/channels/${privCh.id}`, { slowmodeSeconds: 1 }, owner.token);
+  const [ss1] = await api("POST", `/api/channels/${privCh.id}/messages`, { content: "eins" }, G.token);
+  const [ss2, rss2] = await api("POST", `/api/channels/${privCh.id}/messages`, { content: "zwei" }, G.token);
+  const [ssO] = await api("POST", `/api/channels/${privCh.id}/messages`, { content: "owner exempt" }, owner.token);
+  await sleep(1100);
+  const [ss3] = await api("POST", `/api/channels/${privCh.id}/messages`, { content: "drei" }, G.token);
+  check("channel perms: read-only = a SEND_MESSAGES deny (403); slowmode 429 with retryAfter, then 200; MANAGE_MESSAGES exempt", sro === 403 && ssl === 200 && ss1 === 200 && ss2 === 429 && rss2.error === "slowmode" && rss2.retryAfter >= 1 && ssO === 200 && ss3 === 200, `${sro} ${ss1} ${ss2} ${ssO} ${ss3}`);
+  // ---- User limit: the owner takes the one seat, the guest gets channel_full; a moderator's move ignores the limit (below).
+  wsA.send({ type: "voice.join", channelId: privVoice.id });
+  await wsA.waitFor((e) => e.type === "voice.state" && e.channelId === privVoice.id && e.members.some((m) => m.userId === owner.userId));
+  const [sfull, rfull] = await api("POST", "/api/rtc-token", { channelId: privVoice.id }, G.token);
+  wsA.send({ type: "voice.leave" });
+  await wsA.waitFor((e) => e.type === "voice.state" && e.channelId === privVoice.id && e.members.length === 0);
+  check("channel perms: user limit answers 409 channel_full", sfull === 409 && rfull.error === "channel_full");
+  await api("PATCH", `/api/channels/${privVoice.id}`, { userLimit: null }, owner.token);
+  // ---- Sticky: the guest joins the sticky channel and is held: no token for another channel, the lock in the state, other
+  // voice channels gone from the list (text channels stay), the hold survives a reconnect (stickyPersist), a move frees.
+  const [stk0] = await api("POST", "/api/rtc-token", { channelId: privVoice.id }, G.token);
+  wsG.send({ type: "voice.join", channelId: privVoice.id });
+  await wsG.waitFor((e) => e.type === "voice.state" && e.channelId === privVoice.id && e.members.some((m) => m.userId === G.userId));
+  const evLock = await wsG.waitFor((e) => e.type === "me" && e.myVoiceLock?.channelId === privVoice.id).catch(() => null);
+  const [stk1, rtk1] = await api("POST", "/api/rtc-token", { channelId: voiceCh.id }, G.token);
+  const stG2 = await gState();
+  check("channel perms: sticky holds (403 confined with the lock, myVoiceLock in the state, the other channel still listed)", stk0 === 200 && evLock !== null && stk1 === 403 && rtk1.error === "confined" && rtk1.lock?.channelId === privVoice.id && stG2.myVoiceLock?.channelId === privVoice.id && stG2.myVoiceLock.hideVoice === false && stG2.channels.some((c) => c.id === voiceCh.id), `${stk0} ${stk1} ${rtk1.error ?? ""}`);
+  // stickyHideVoice: the other voice channels leave the held member's list (text channels stay), and are a 404 from then on.
+  const [shv] = await api("PATCH", `/api/channels/${privVoice.id}`, { stickyHideVoice: true }, owner.token);
+  const evHide = await wsG.waitFor((e) => e.type === "structure" && e.channels && !e.channels.some((c) => c.id === voiceCh.id)).catch(() => null);
+  const stG2b = await gState();
+  const [stk1b] = await api("POST", "/api/rtc-token", { channelId: voiceCh.id }, G.token);
+  check("channel perms: stickyHideVoice hides the other voice channels (text channels stay), they answer 404", shv === 200 && evHide !== null && stG2b.myVoiceLock?.hideVoice === true && !stG2b.channels.some((c) => c.id === voiceCh.id) && stG2b.channels.some((c) => c.id === textCh.id) && stG2b.channels.some((c) => c.id === privVoice.id) && stk1b === 404, `${shv} ${stk1b}`);
+  await wsG.close();
+  await sleep(200);
+  const stG3 = await gState();
+  const [stk2] = await api("POST", "/api/rtc-token", { channelId: voiceCh.id }, G.token);
+  const [stk3] = await api("POST", "/api/rtc-token", { channelId: privVoice.id }, G.token);
+  check("channel perms: with stickyPersist the hold outlives the connection (the way back stays open)", stG3.myVoiceLock?.channelId === privVoice.id && stk2 === 404 && stk3 === 200, `${stk2} ${stk3}`);
+  const wsG2 = await connectWs(G.token);
+  check("channel perms: the welcome carries the lock", wsG2.welcome.state.myVoiceLock?.channelId === privVoice.id);
+  wsG2.send({ type: "voice.join", channelId: privVoice.id });
+  await wsG2.waitFor((e) => e.type === "voice.state" && e.channelId === privVoice.id && e.members.some((m) => m.userId === G.userId));
+  const [smv0] = await api("POST", `/api/members/${G.userId}/move`, { channelId: voiceCh.id }, B.token); // B: MODERATE_VOICE? no, and no MOVE_MEMBERS
+  const [smv1] = await api("POST", `/api/members/${G.userId}/move`, { channelId: voiceCh.id }, owner.token);
+  const evFree = await wsG2.waitFor((e) => e.type === "me" && e.myVoiceLock === null).catch(() => null);
+  const evMoved = await wsG2.waitFor((e) => e.type === "voice.moved" && e.channelId === voiceCh.id).catch(() => null);
+  const [stk4] = await api("POST", "/api/rtc-token", { channelId: voiceCh.id }, G.token);
+  check("channel perms: only MOVE_MEMBERS moves (403 for B), a move frees the hold and the other channels", smv0 === 403 && smv1 === 200 && evFree !== null && evMoved !== null && stk4 === 200, `${smv0} ${smv1}`);
+  wsG2.send({ type: "voice.join", channelId: voiceCh.id });
+  await wsG2.waitFor((e) => e.type === "voice.state" && e.channelId === voiceCh.id && e.members.some((m) => m.userId === G.userId));
+  // ---- The AFK channel may be neither sticky nor private.
+  const [safk1, rafk1] = await api("PATCH", "/api/settings", { afkChannelId: privVoice.id }, owner.token);
+  const [safk2, rafk2] = await api("PATCH", "/api/settings", { afkChannelId: privCh.id }, owner.token); // a text channel anyway: 400
+  check("channel perms: a sticky channel cannot be the AFK channel", safk1 === 409 && rafk1.error === "afk_channel_sticky" && safk2 === 400, `${safk1} ${rafk1.error ?? ""} ${safk2}`);
+  // ---- A move into a channel the member may not see: the owner makes the sticky channel private, moves the guest in.
+  await api("PATCH", `/api/channels/${privVoice.id}`, { sticky: false }, owner.token);
+  await api("PUT", `/api/channels/${privVoice.id}/overwrites`, { overwrites: [everyoneDeny(P.VIEW_CHANNELS)] }, owner.token);
+  const stG4 = await gState();
+  const [smv2] = await api("POST", `/api/members/${G.userId}/move`, { channelId: privVoice.id }, owner.token);
+  const evSee = await wsG2.waitFor((e) => e.type === "structure" && e.channels?.some((c) => c.id === privVoice.id)).catch(() => null);
+  const evMoved2 = await wsG2.waitFor((e) => e.type === "voice.moved" && e.channelId === privVoice.id).catch(() => null);
+  const [stk5] = await api("POST", "/api/rtc-token", { channelId: privVoice.id }, G.token);
+  wsG2.send({ type: "voice.join", channelId: privVoice.id });
+  const evSeat = await wsG2.waitFor((e) => e.type === "voice.state" && e.channelId === privVoice.id && e.members.some((m) => m.userId === G.userId)).catch(() => null);
+  check("channel perms: a move into an invisible channel: the channel arrives first, the token and the join pass, the seat keeps it visible", !stG4.channels.some((c) => c.id === privVoice.id) && smv2 === 200 && evSee !== null && evMoved2 !== null && stk5 === 200 && evSeat !== null, `${smv2} ${stk5}`);
+  // A permission change does not throw out somebody a moderator placed: the placed guest stays while the everyone deny lands.
+  const [sev0] = await api("PUT", `/api/channels/${privVoice.id}/overwrites`, { overwrites: [everyoneDeny(P.VIEW_CHANNELS | P.CONNECT_VOICE)] }, owner.token);
+  await sleep(300);
+  const placedStays = !wsG2.events.some((e) => e.type === "voice.moved" && e.channelId === null);
+  const movedMark = wsG2.events.length;
+  const [smv3] = await api("POST", `/api/members/${G.userId}/move`, { channelId: voiceCh.id }, owner.token);
+  await wsG2.waitFor((e) => e.type === "voice.moved" && e.channelId === voiceCh.id && wsG2.events.indexOf(e) >= movedMark).catch(() => null);
+  // The client follows the move (that join uses the grant up and is a placement), then leaves and comes back on its own:
+  // a seat taken by oneself, which the eviction below applies to. Every step waits for its own fresh event, otherwise the
+  // PUT below could reach the server before the join did.
+  let p1 = waitNew(wsG2, (e) => e.type === "voice.state" && e.channelId === voiceCh.id && e.members.some((m) => m.userId === G.userId));
+  wsG2.send({ type: "voice.join", channelId: voiceCh.id });
+  await p1;
+  p1 = waitNew(wsG2, (e) => e.type === "voice.state" && e.channelId === voiceCh.id && !e.members.some((m) => m.userId === G.userId));
+  wsG2.send({ type: "voice.leave" });
+  await p1;
+  p1 = waitNew(wsG2, (e) => e.type === "voice.state" && e.channelId === voiceCh.id && e.members.some((m) => m.userId === G.userId));
+  wsG2.send({ type: "voice.join", channelId: voiceCh.id });
+  await p1;
+  await sleep(200);
+  // ---- Eviction: whoever loses CONNECT_VOICE (or the channel) while seated is put out (voice.moved null); B keeps it by a role allow.
+  const bMovedBefore = wsB.events.filter((e) => e.type === "voice.moved" && e.channelId === null).length;
+  const [sev] = await api("PUT", `/api/channels/${voiceCh.id}/overwrites`, { overwrites: [everyoneDeny(P.CONNECT_VOICE), { targetType: "role", targetId: modRole.id, allow: P.CONNECT_VOICE, deny: 0 }] }, owner.token);
+  const evOut = await wsG2.waitFor((e) => e.type === "voice.moved" && e.channelId === null).catch(() => null);
+  await sleep(200);
+  const bMovedAfter = wsB.events.filter((e) => e.type === "voice.moved" && e.channelId === null).length;
+  check("channel perms: a placed member stays through a permission change; losing CONNECT_VOICE on one's own seat = voice.moved out; a role allow keeps B inside", sev0 === 200 && placedStays && smv3 === 200 && sev === 200 && evOut !== null && bMovedAfter === bMovedBefore, `${sev0} ${placedStays} ${sev} ${evOut ? "evicted" : "still there"} B ${bMovedBefore}->${bMovedAfter}`);
+  await api("PUT", `/api/channels/${voiceCh.id}/overwrites`, { overwrites: [] }, owner.token);
+  // ---- BYPASS_STICKY: given by overwrite, the guest is not held.
+  await api("PUT", `/api/channels/${privVoice.id}/overwrites`, { overwrites: [{ targetType: "member", targetId: G.userId, allow: P.BYPASS_STICKY, deny: 0 }] }, owner.token);
+  await api("PATCH", `/api/channels/${privVoice.id}`, { sticky: true }, owner.token);
+  wsG2.send({ type: "voice.join", channelId: privVoice.id });
+  await wsG2.waitFor((e) => e.type === "voice.state" && e.channelId === privVoice.id && e.members.some((m) => m.userId === G.userId));
+  await sleep(200);
+  const [stk6] = await api("POST", "/api/rtc-token", { channelId: voiceCh.id }, G.token);
+  check("channel perms: BYPASS_STICKY by overwrite: not held", stk6 === 200 && (await gState()).myVoiceLock === null, `${stk6}`);
+  wsG2.send({ type: "voice.leave" });
+  // ---- Category overwrites inherit live: a deny on the category hides its channels, a channel allow undoes it for that one.
+  const [scat] = await api("PUT", `/api/categories/${cat.id}/overwrites`, { overwrites: [everyoneDeny(P.VIEW_CHANNELS)] }, owner.token);
+  const evCat = await wsG2.waitFor((e) => e.type === "structure" && e.channels && !e.channels.some((c) => c.id === textCh.id)).catch(() => null);
+  const [scat2] = await api("PUT", `/api/channels/${textCh.id}/overwrites`, { overwrites: [{ targetType: "role", targetId: defaultRole.id, allow: P.VIEW_CHANNELS, deny: 0 }] }, owner.token);
+  const evCat2 = await wsG2.waitFor((e) => e.type === "structure" && e.channels?.some((c) => c.id === textCh.id)).catch(() => null);
+  const [, sow] = await api("GET", `/api/categories/${cat.id}/overwrites`, undefined, owner.token);
+  check("channel perms: a category deny hides its channels for the guest, a channel allow brings one back; GET reads the category's list", scat === 200 && evCat !== null && scat2 === 200 && evCat2 !== null && sow.overwrites.length === 1, `${scat} ${scat2}`);
+  await api("PUT", `/api/categories/${cat.id}/overwrites`, { overwrites: [] }, owner.token);
+  await api("PUT", `/api/channels/${textCh.id}/overwrites`, { overwrites: [] }, owner.token);
+  // ---- Cleanup of this section.
+  await wsG2.close();
+  await api("DELETE", `/api/channels/${privCh.id}`, undefined, owner.token);
+  await api("DELETE", `/api/channels/${privVoice.id}`, undefined, owner.token);
+  await api("DELETE", `/api/members/${G.userId}`, undefined, owner.token);
+  await api("DELETE", `/api/invites/${invP.code}`, undefined, owner.token);
+}
+
+// ---------- Vote kick (docs/features/votekick.md): three guests in a voice channel, nobody who may throw anybody out.
+{
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const [, invV] = await api("POST", "/api/invites", {}, owner.token);
+  const guests = [];
+  for (let i = 0; i < 3; i++) {
+    const g = await login(await newKey(), invV.code);
+    guests.push({ ...g, ws: await connectWs(g.token) });
+  }
+  const [g1, g2, g3] = guests;
+  const [svk, vkCh] = await api("POST", "/api/channels", { kind: "voice", name: "smoke-vote", categoryId: cat.id }, owner.token);
+  check("votekick: a new voice channel allows it by default", svk === 200 && vkCh.allowVoteKick === true, `${svk}`);
+  for (const g of guests) g.ws.send({ type: "voice.join", channelId: vkCh.id });
+  const evThree = await g1.ws.waitFor((e) => e.type === "voice.state" && e.channelId === vkCh.id && e.members.length === 3).catch(() => null);
+  check("votekick: with three guests and no moderation the channel offers a vote", evThree?.voteKick === true, JSON.stringify({ n: evThree?.members.length, offer: evThree?.voteKick }));
+
+  // ---- A vote that the member it is about ends by leaving; afterwards no second one about them for a while.
+  const pVote = waitNew(g3.ws, (e) => e.type === "votekick" && e.vote).catch(() => null);
+  const pOffer = waitNew(g1.ws, (e) => e.type === "voice.state" && e.channelId === vkCh.id).catch(() => null);
+  const [sv1] = await api("POST", `/api/channels/${vkCh.id}/votekick`, { targetId: g2.userId }, g1.token);
+  const evVote = await pVote;
+  const [svSelf] = await api("POST", `/api/channels/${vkCh.id}/votekick/vote`, { yes: false }, g2.token);
+  const [svTwice] = await api("POST", `/api/channels/${vkCh.id}/votekick/vote`, { yes: true }, g1.token);
+  const [svSecond] = await api("POST", `/api/channels/${vkCh.id}/votekick`, { targetId: g3.userId }, g1.token);
+  check("votekick: the starter counts as a yes, the member it is about does not vote, one vote per member and per channel",
+    sv1 === 200 && evVote?.vote?.yes === 1 && evVote?.vote?.no === 0 && evVote.vote.voters === 2 && evVote.vote.roomSize === 3 && evVote.vote.targetId === g2.userId
+    && svSelf === 403 && svTwice === 409 && svSecond === 409, `${sv1} ${svSelf} ${svTwice} ${svSecond}`);
+  const evOffer = await pOffer;
+  check("votekick: while a vote runs the channel offers no second one", evOffer?.voteKick === false, JSON.stringify({ offer: evOffer?.voteKick }));
+  g2.ws.send({ type: "voice.leave" });
+  const evCancel = await g1.ws.waitFor((e) => e.type === "votekick.result").catch(() => null);
+  check("votekick: the member leaving the channel decides nothing", evCancel?.result?.outcome === "cancelled" && evCancel.result.blockedUntil === null, JSON.stringify(evCancel?.result));
+  const pBack = waitNew(g1.ws, (e) => e.type === "voice.state" && e.channelId === vkCh.id && e.members.length === 3).catch(() => null);
+  g2.ws.send({ type: "voice.join", channelId: vkCh.id });
+  await pBack;
+  const [svCool] = await api("POST", `/api/channels/${vkCh.id}/votekick`, { targetId: g2.userId }, g1.token);
+  check("votekick: no second vote about the same member right away", svCool === 429, `${svCool}`);
+
+  // ---- A vote that passes: out of the channel and locked out of it, other channels stay open.
+  const pLeft = waitNew(g1.ws, (e) => e.type === "voice.state" && e.channelId === vkCh.id && e.members.length === 2).catch(() => null);
+  const [sv2] = await api("POST", `/api/channels/${vkCh.id}/votekick`, { targetId: g3.userId }, g1.token);
+  const [sv3] = await api("POST", `/api/channels/${vkCh.id}/votekick/vote`, { yes: true }, g2.token);
+  const evDone = await g1.ws.waitFor((e) => e.type === "votekick.result" && e.result.targetId === g3.userId).catch(() => null);
+  const evMoved = await g3.ws.waitFor((e) => e.type === "voice.moved" && e.channelId === null).catch(() => null);
+  check("votekick: everybody voting ends it at once; two yes of three in the channel pass",
+    sv2 === 200 && sv3 === 200 && evDone?.result?.outcome === "passed" && evDone.result.yes === 2 && evDone.result.no === 0 && !!evDone.result.blockedUntil && evMoved !== null,
+    JSON.stringify(evDone?.result));
+  await sleep(200);
+  const [stkBlocked] = await api("POST", "/api/rtc-token", { channelId: vkCh.id }, g3.token);
+  const [stkOther] = await api("POST", "/api/rtc-token", { channelId: voiceCh.id }, g3.token);
+  check("votekick: the member voted out gets no token for that channel and keeps every other one", stkBlocked === 403 && stkOther === 200, `${stkBlocked} ${stkOther}`);
+  const evLeft = await pLeft;
+  check("votekick: two left in the channel, so no vote is offered any more", evLeft?.voteKick === false, JSON.stringify({ n: evLeft?.members.length, offer: evLeft?.voteKick }));
+  const [svFew] = await api("POST", `/api/channels/${vkCh.id}/votekick`, { targetId: g2.userId }, g1.token);
+  check("votekick: fewer than three in the channel: refused", svFew === 409, `${svFew}`);
+
+  // ---- Somebody who may throw people out is in the channel, and the channel's switch.
+  const pMod = waitNew(g1.ws, (e) => e.type === "voice.state" && e.channelId === vkCh.id && e.members.length === 3).catch(() => null);
+  wsA.send({ type: "voice.join", channelId: vkCh.id });
+  const evMod = await pMod;
+  const [svMod] = await api("POST", `/api/channels/${vkCh.id}/votekick`, { targetId: g2.userId }, g1.token);
+  check("votekick: nothing to vote about while somebody present may remove members", evMod?.voteKick === false && svMod === 403, `${svMod} offer=${evMod?.voteKick}`);
+  wsA.send({ type: "voice.leave" });
+  const [svOff, chOff] = await api("PATCH", `/api/channels/${vkCh.id}`, { allowVoteKick: false }, owner.token);
+  await sleep(200);
+  const [svDisabled] = await api("POST", `/api/channels/${vkCh.id}/votekick`, { targetId: g2.userId }, g1.token);
+  check("votekick: the channel's switch turns it off", svOff === 200 && chOff.allowVoteKick === false && svDisabled === 403, `${svOff} ${svDisabled}`);
+
+  for (const g of guests) { g.ws.send({ type: "voice.leave" }); await g.ws.close(); }
+  await api("DELETE", `/api/channels/${vkCh.id}`, undefined, owner.token);
+  for (const g of guests) await api("DELETE", `/api/members/${g.userId}`, undefined, owner.token);
+  await api("DELETE", `/api/invites/${invV.code}`, undefined, owner.token);
 }
 
 // ---------- Protocol version

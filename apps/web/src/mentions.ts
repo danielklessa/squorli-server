@@ -1,4 +1,5 @@
 import { mentionToken, mentionedUserIds } from "@squorli/protocol";
+import { rankMatch } from "./pickerEntries";
 import { parseMarkdown, type Block, type Inline } from "./markdown";
 
 /**
@@ -105,15 +106,9 @@ export function mentionQueryAt(text: string, caret: number): { start: number; qu
   return m ? { start: caret - m[1]!.length - 1, query: m[1]! } : null;
 }
 
-/** Members for a query: names or handles starting with it first, then those containing it; alphabetical inside both. */
+/** Members for a query: names or handles starting with it first, then those containing it; alphabetical inside both (the rule is rankMatch of entityPicker.ts, shared with the channel dialog's picker). */
 export function suggestMembers<T extends Mentionable>(members: readonly T[], query: string, limit = 8): T[] {
-  const q = query.toLowerCase();
-  const rank = (m: T) => {
-    const label = mentionLabel(m).toLowerCase(), handle = m.handle?.toLowerCase() ?? "";
-    if (label.startsWith(q) || handle.startsWith(q)) return 0;
-    if (label.split(/\s+/).some((w) => w.startsWith(q))) return 1;
-    return label.includes(q) || handle.includes(q) ? 2 : -1;
-  };
+  const rank = (m: T) => rankMatch(mentionLabel(m), m.handle ?? null, query);
   return members.map((m) => ({ m, r: rank(m) })).filter((x) => x.r >= 0)
     .sort((a, b) => a.r - b.r || mentionLabel(a.m).localeCompare(mentionLabel(b.m))).slice(0, limit).map((x) => x.m);
 }

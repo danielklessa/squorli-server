@@ -5,8 +5,7 @@ import {
   directoryRegisterMessage, directorySoundSettingsPayload, openBackup, type AccountSettings, type SealedSettings, type SoundSettings,
   MuteState, ReadStateResponse, StatusApiKeyResponse, type Attachment, type Category, type Channel, type RadioStation, type Role, type StatusApiMode,
   type DiscordImportRequest, type DiscordImportResult, type ImportPlan,
-  DmBlobPutResponse, LinkLookupResponse, directoryDmBlobUrl, directoryLinkLookupPayload,
-} from "@squorli/protocol";
+  DmBlobPutResponse, LinkLookupResponse, directoryDmBlobUrl, directoryLinkLookupPayload, OverwritesResponse, type PermissionOverwrite, type ChannelNotification } from "@squorli/protocol";
 import { z } from "zod";
 import { toBase64, type AvatarImage } from "./avatarImage";
 import { type Identity, identityFromPrivateKey, sign } from "./identity";
@@ -23,6 +22,12 @@ export class ApiError extends Error {
  * otherwise the origin of a foreign server (multi-server client: the server rail switches between servers without leaving
  * the page; foreign servers answer thanks to CORS with a bearer token). Each instance has its own session token.
  */
+/** PATCH /api/channels/:id: everything the channel dialog edits (the channel settings since 23 September 2026). */
+export type ChannelPatch = {
+  name?: string; topic?: string | null; categoryId?: string | null; position?: number; audioBitrate?: number; audioStereo?: boolean;
+  sticky?: boolean; stickyPersist?: boolean; stickyHideVoice?: boolean; userLimit?: number | null; slowmodeSeconds?: number; defaultNotify?: ChannelNotification; allowRadio?: boolean; allowVideo?: boolean; allowVoteKick?: boolean;
+};
+
 export class ServerApi {
   private token: string | null = null;
   /** Called when the server rejects a set token with a 401 (expired, or signed out from another device, M6c). */
@@ -97,7 +102,7 @@ export class ServerApi {
   rtcToken(channelId: string) { return this.request<RtcTokenResponse>("POST", "/api/rtc-token", { channelId }).then((r) => RtcTokenResponse.parse(r)); }
 
   // ---------- Admin
-  updateSettings(patch: { name?: string; openJoin?: boolean; requireAccount?: boolean; listed?: boolean; description?: string | null; radioAutoStop?: boolean; afkChannelId?: string | null; statusApi?: StatusApiMode }) { return this.request("PATCH", "/api/settings", patch); }
+  updateSettings(patch: { name?: string; openJoin?: boolean; requireAccount?: boolean; listed?: boolean; description?: string | null; radioAutoStop?: boolean; afkChannelId?: string | null; statusApi?: StatusApiMode; statusApiRoleId?: string | null }) { return this.request("PATCH", "/api/settings", patch); }
   /** Status API (docs/features/status-api.md): the key for mode "key" (MANAGE_SERVER), and a fresh one that replaces it. */
   getStatusApiKey() { return this.request<StatusApiKeyResponse>("GET", "/api/settings/status-api-key").then((r) => StatusApiKeyResponse.parse(r)); }
   regenerateStatusApiKey() { return this.request<StatusApiKeyResponse>("POST", "/api/settings/status-api-key").then((r) => StatusApiKeyResponse.parse(r)); }
@@ -114,8 +119,11 @@ export class ServerApi {
   updateCategory(id: string, patch: { name?: string; position?: number }) { return this.request("PATCH", `/api/categories/${id}`, patch); }
   deleteCategory(id: string) { return this.request("DELETE", `/api/categories/${id}`); }
   createChannel(data: { kind: "text" | "voice"; name: string; topic?: string | null; categoryId?: string | null }) { return this.request<Channel>("POST", "/api/channels", data); }
-  updateChannel(id: string, patch: { name?: string; topic?: string | null; categoryId?: string | null; position?: number; audioBitrate?: number; audioStereo?: boolean }) { return this.request("PATCH", `/api/channels/${id}`, patch); }
+  updateChannel(id: string, patch: ChannelPatch) { return this.request("PATCH", `/api/channels/${id}`, patch); }
   deleteChannel(id: string) { return this.request("DELETE", `/api/channels/${id}`); }
+  // ---------- Channel permissions (docs/features/channel-permissions.md): the whole list per channel or category, MANAGE_CHANNELS there.
+  getOverwrites(scope: "channels" | "categories", id: string) { return this.request<OverwritesResponse>("GET", `/api/${scope}/${id}/overwrites`).then((r) => OverwritesResponse.parse(r)); }
+  setOverwrites(scope: "channels" | "categories", id: string, overwrites: PermissionOverwrite[]) { return this.request<OverwritesResponse>("PUT", `/api/${scope}/${id}/overwrites`, { overwrites }).then((r) => OverwritesResponse.parse(r)); }
   // ---------- Web radio (stations: MANAGE_SERVER; a channel's radio: CONTROL_RADIO). The result arrives via the structure event.
   /** Import of a Discord server template (docs/features/import.md): the plan for a typed link or code, then the import of the chosen entries. */
   discordImportPreview(code: string) { return this.request<ImportPlan>("POST", "/api/import/discord/preview", { code }); }
@@ -142,6 +150,9 @@ export class ServerApi {
   moveMember(userId: string, channelId: string | null) { return this.request("POST", `/api/members/${userId}/move`, { channelId }); }
   stopMemberStreams(userId: string, what: { camera: boolean; screen: boolean }) { return this.request("POST", `/api/members/${userId}/stream/stop`, what); }
   setStreamBlocked(userId: string, blocked: boolean) { return this.request("PUT", `/api/members/${userId}/stream`, { blocked }); }
+  /** Vote kick (docs/features/votekick.md): start a vote about somebody in the voice channel one sits in; the result arrives over the WebSocket. */
+  startVoteKick(channelId: string, targetId: string) { return this.request("POST", `/api/channels/${channelId}/votekick`, { targetId }); }
+  castVoteKick(channelId: string, yes: boolean) { return this.request("POST", `/api/channels/${channelId}/votekick/vote`, { yes }); }
   banMember(userId: string, reason: string | null) { return this.request("POST", "/api/bans", { userId, reason }); }
   unban(userId: string) { return this.request("DELETE", `/api/bans/${userId}`); }
   listBans() { return this.request<Ban[]>("GET", "/api/bans").then((b) => z.array(Ban).parse(b)); }

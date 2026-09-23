@@ -18,12 +18,14 @@
 .ic-copy::before { content: "\e09e"; }
 .ic-crown::before { content: "\e1d6"; }
 .ic-download::before { content: "\e0b2"; }
+.ic-ellipsis-vertical::before { content: "\e0b7"; }
 .ic-external-link::before { content: "\e0b9"; }
 .ic-eye::before { content: "\e0ba"; }
 .ic-eye-off::before { content: "\e0bb"; }
 .ic-flag::before { content: "\e0d1"; }
 .ic-folder::before { content: "\e0d7"; }
 .ic-gamepad-2::before { content: "\e0df"; }
+.ic-gavel::before { content: "\e0e0"; }
 .ic-grip-vertical::before { content: "\e0eb"; }
 .ic-hand::before { content: "\e1d7"; }
 .ic-hash::before { content: "\e0ef"; }
@@ -40,6 +42,7 @@
 .ic-link::before { content: "\e102"; }
 .ic-lock::before { content: "\e10b"; }
 .ic-maximize::before { content: "\e112"; }
+.ic-megaphone::before { content: "\e235"; }
 .ic-message-circle::before { content: "\e116"; }
 .ic-mic::before { content: "\e118"; }
 .ic-mic-off::before { content: "\e119"; }
@@ -68,6 +71,9 @@
 .ic-skip-forward::before { content: "\e160"; }
 .ic-smile::before { content: "\e164"; }
 .ic-square::before { content: "\e167"; }
+.ic-thumbs-down::before { content: "\e189"; }
+.ic-thumbs-up::before { content: "\e18a"; }
+.ic-timer::before { content: "\e1e0"; }
 .ic-trash-2::before { content: "\e18e"; }
 .ic-trophy::before { content: "\e377"; }
 .ic-undo-2::before { content: "\e2a1"; }

@@ -5,7 +5,11 @@ import { Permission, hasPermission } from "@squorli/protocol";
  * Hierarchy: the owner outranks everything. Otherwise the highest role position counts;
  * you may only act on roles and members below your own highest position.
  */
-export type Actor = { userId: string; isOwner: boolean; permissions: number; topPosition: number };
+export type Actor = {
+  userId: string; isOwner: boolean; permissions: number; topPosition: number;
+  /** Every role the member holds, the default role included (channelPermissions.ts resolves overwrites by them). */
+  roleIds: readonly string[];
+};
 export type Target = { userId: string; isOwner: boolean; topPosition: number };
 
 export const can = (a: Actor, perm: number) => hasPermission(a.permissions, perm);

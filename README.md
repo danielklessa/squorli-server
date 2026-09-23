@@ -94,9 +94,13 @@ All variables are documented in [.env.example](.env.example). The most relevant 
 
 Voice quality (Opus bitrate, stereo) is configured per voice channel in the admin panel.
 
+### Channel permissions
+
+Channels and categories can carry permissions per role or member (private channels, read-only channels, who may enter a voice channel), and a voice channel can hold its members until a moderator moves them. Right-click a channel in the sidebar to edit it. The status API shows only what the default role sees. Details: `docs/features/channel-permissions.md`.
+
 ### Status API
 
-`GET https://PUBLIC_DOMAIN/api/status` returns the server name, its icon address, all categories and channels in the order the client shows them, and the members who sit in a voice channel right now with that channel, whether they are away and whether their microphone is muted, their sound is off or their camera or screen share is on, as JSON, for a widget on your website, a bot or a stream overlay. Members outside every voice channel are not listed. It is off by default (404). In the admin panel under Server you choose whether it needs the server's key (`Authorization: Bearer <key>` or `?key=<key>`; the panel shows the key and can replace it) or is public. Avatars are the directory account pictures (public there anyway); public keys, roles, permissions and messages are never included.
+`GET https://PUBLIC_DOMAIN/api/status` returns the server name, its icon address, all categories and channels in the order the client shows them, and the members who sit in a voice channel right now with that channel, whether they are away and whether their microphone is muted, their sound is off or their camera or screen share is on, as JSON, for a widget on your website, a bot or a stream overlay. Members outside every voice channel are not listed. It is off by default (404). In the admin panel under Server you choose whether it needs the server's key (`Authorization: Bearer <key>` or `?key=<key>`; the panel shows the key and can replace it) or is public. There you also choose whose view it answers with: the default role, i.e. what an ordinary visitor sees and what private channels leave out, or another role, which then shows what a member with that role sees (a role with Administrator shows everything). Avatars are the directory account pictures (public there anyway); public keys, roles, permissions and messages are never included.
 
 ## Reverse proxy
 

@@ -1,10 +1,12 @@
-import { PERMISSION_GROUPS, Permission, hasPermission, type Ban, type Invite, type PermissionName, type ServerState, type StatusApiMode } from "@squorli/protocol";
+import { PERMISSION_GROUPS, Permission, hasPermission, type Ban, type Invite, type PermissionName, type Role, type ServerState, type StatusApiMode } from "@squorli/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { ServerApi } from "./api";
 import { askConfirm } from "./dialogs";
 import { roleOrder } from "./roleOrder";
 import { ChannelsTab } from "./ChannelsTab";
+import type { ChannelDialogTarget } from "./ChannelDialog";
 import { CopyButton } from "./CopyButton";
+import { SaveButton } from "./SaveButton";
 import { formatDeepLink, parseDeepLink } from "./platform/deepLink";
 import { RadioTab } from "./RadioTab";
 import { ImportTab } from "./ImportTab";
@@ -14,7 +16,7 @@ import { fmtDateTime, t } from "./i18n";
 type Tab = "server" | "channels" | "radio" | "roles" | "invites" | "bans" | "import";
 
 /** Admin area: server, categories/channels, radio stations, roles, invites, bans. Changes come back via the structure event. */
-export function AdminPanel({ api, server, myUserId, directoryUrl, onClose }: { api: ServerApi; server: ServerState; myUserId: string; directoryUrl: string | null; onClose: () => void }) {
+export function AdminPanel({ api, server, myUserId, directoryUrl, onClose, onEditChannel }: { api: ServerApi; server: ServerState; myUserId: string; directoryUrl: string | null; onClose: () => void; onEditChannel: (target: ChannelDialogTarget) => void }) {
   const p = server.myPermissions;
   const [mobileFocus] = useState(() => window.matchMedia("(max-width: 700px), (pointer: coarse)").matches);
   const allTabs: { id: Tab; label: string; icon: string; ok: boolean }[] = [
@@ -31,7 +33,10 @@ export function AdminPanel({ api, server, myUserId, directoryUrl, onClose }: { a
   const tabs = allTabs.filter((t) => t.ok);
   const [tab, setTab] = useState<Tab>(tabs[0]?.id ?? "invites");
   const [err, setErr] = useState<string | null>(null);
+  // The error goes to the panel's line, and on to the caller (SaveButton says "Nicht gespeichert" then); other callers ignore the rejection.
   const run = async (fn: () => Promise<unknown>) => { setErr(null); try { await fn(); } catch (e) { setErr(String(e)); } };
+  /** Like run(), but the caller learns about the failure too (SaveButton says "Nicht gespeichert" then). */
+  const save = async (fn: () => Promise<unknown>) => { setErr(null); try { await fn(); } catch (e) { setErr(String(e)); throw e; } };
 
   return (
     <div className="modal-backdrop admin-backdrop" onClick={onClose}>
@@ -47,10 +52,10 @@ export function AdminPanel({ api, server, myUserId, directoryUrl, onClose }: { a
           </nav>
           <div className="settings-body">
             {err && <p className="error">{err}</p>}
-            {tab === "server" && <ServerTab api={api} server={server} directoryUrl={directoryUrl} run={run} />}
-            {tab === "channels" && <ChannelsTab api={api} server={server} run={run} />}
+            {tab === "server" && <ServerTab api={api} server={server} directoryUrl={directoryUrl} run={run} save={save} />}
+            {tab === "channels" && <ChannelsTab api={api} server={server} run={run} onEdit={onEditChannel} />}
             {tab === "radio" && <RadioTab api={api} server={server} run={run} />}
-            {tab === "roles" && <RolesTab api={api} server={server} myUserId={myUserId} run={run} />}
+            {tab === "roles" && <RolesTab api={api} server={server} myUserId={myUserId} run={run} save={save} />}
             {tab === "invites" && <InvitesTab api={api} run={run} canManage={hasPermission(p, Permission.MANAGE_SERVER)} />}
             {tab === "bans" && <BansTab api={api} run={run} />}
             {tab === "import" && <ImportTab api={api} server={server} run={run} />}
@@ -63,7 +68,7 @@ export function AdminPanel({ api, server, myUserId, directoryUrl, onClose }: { a
 
 type RunFn = (fn: () => Promise<unknown>) => Promise<void>;
 
-function ServerTab({ api, server, directoryUrl, run }: { api: ServerApi; server: ServerState; directoryUrl: string | null; run: RunFn }) {
+function ServerTab({ api, server, directoryUrl, run, save }: { api: ServerApi; server: ServerState; directoryUrl: string | null; run: RunFn; save: RunFn }) {
   const [name, setName] = useState(server.settings.name);
   const [description, setDescription] = useState(server.settings.description ?? "");
   const owners = server.members.filter((m) => m.isOwner);
@@ -71,7 +76,7 @@ function ServerTab({ api, server, directoryUrl, run }: { api: ServerApi; server:
   return (
     <div className="stack">
       <label className="stack">{t("admin.serverName")}<input value={name} maxLength={64} onChange={(e) => setName(e.target.value)} /></label>
-      <button disabled={name.trim() === server.settings.name || !name.trim()} onClick={() => run(() => api.updateSettings({ name: name.trim() }))}>{t("common.save")}</button>
+      <SaveButton disabled={name.trim() === server.settings.name || !name.trim()} onSave={() => save(() => api.updateSettings({ name: name.trim() }))} />
       <label className="check">
         <input type="checkbox" checked={server.settings.openJoin} onChange={(e) => run(() => api.updateSettings({ openJoin: e.target.checked }))} />
         {t("admin.openJoin")}
@@ -88,7 +93,7 @@ function ServerTab({ api, server, directoryUrl, run }: { api: ServerApi; server:
         {t("admin.listed")}
       </label>
       <label className="stack">{t("admin.description")}<textarea value={description} maxLength={200} rows={3} disabled={!directoryUrl} placeholder={t("admin.descriptionPlaceholder")} onChange={(e) => setDescription(e.target.value)} /></label>
-      <button disabled={!directoryUrl || (description.trim() || null) === server.settings.description} onClick={() => run(() => api.updateSettings({ description: description.trim() || null }))}>{t("admin.saveDescription")}</button>
+      <SaveButton disabled={!directoryUrl || (description.trim() || null) === server.settings.description} onSave={() => save(() => api.updateSettings({ description: description.trim() || null }))} label={t("admin.saveDescription")} />
       {!directoryUrl && <span className="muted small">{t("admin.noDirectoryListing")}</span>}
       <h3>{t("admin.iconHeading")}</h3>
       <div className="row">
@@ -99,7 +104,7 @@ function ServerTab({ api, server, directoryUrl, run }: { api: ServerApi; server:
         {server.settings.iconUrl && <button className="secondary" onClick={() => run(() => api.deleteServerIcon())}>{t("common.remove")}</button>}
       </div>
       <span className="muted small">{t("admin.iconHint")}</span>
-      {server.settings.statusApi !== undefined && <StatusApiSection api={api} mode={server.settings.statusApi} run={run} />}
+      {server.settings.statusApi !== undefined && <StatusApiSection api={api} mode={server.settings.statusApi} roleId={server.settings.statusApiRoleId ?? null} roles={server.roles} run={run} />}
       <h3>{t("admin.ownersHeading")}</h3>
       <p className="muted small">{owners.map((o) => o.displayName).join(", ") || "–"}. {t("admin.ownersHint")}</p>
     </div>
@@ -110,11 +115,17 @@ function ServerTab({ api, server, directoryUrl, run }: { api: ServerApi; server:
  * Status API (docs/features/status-api.md): off, with the server's key, or public. The key is fetched only here (never part
  * of the settings every member gets) and shown with a copy button; "Neu erzeugen" replaces it at once.
  */
-function StatusApiSection({ api, mode, run }: { api: ServerApi; mode: StatusApiMode; run: RunFn }) {
+function StatusApiSection({ api, mode, roleId, roles, run }: { api: ServerApi; mode: StatusApiMode; roleId: string | null; roles: Role[]; run: RunFn }) {
   const [key, setKey] = useState<string | null>(null);
   useEffect(() => { if (mode === "key") void api.getStatusApiKey().then((r) => setKey(r.key)).catch(() => setKey(null)); }, [api, mode]);
   const url = `${api.base || window.location.origin}/api/status`;
   const modes: StatusApiMode[] = ["off", "key", "public"];
+  // Whose view the answer carries: the default role ("Gast") is a plain visitor, any other role sees what that role sees.
+  // A role with ADMINISTRATOR would expose every private channel, so it is said out loud instead of being hidden.
+  const defaultRole = roles.find((r) => r.isDefault) ?? null;
+  const chosen = roleId ? roles.find((r) => r.id === roleId) ?? null : defaultRole;
+  const showsEverything = !!chosen && hasPermission(chosen.permissions, Permission.ADMINISTRATOR);
+  const byRank = [...roles].sort((a, b) => a.position - b.position);
   return (
     <>
       <h3>{t("admin.statusApiHeading")}</h3>
@@ -143,12 +154,23 @@ function StatusApiSection({ api, mode, run }: { api: ServerApi; mode: StatusApiM
           <span className="muted small">{t("admin.statusApiKeyHint")}</span>
         </>
       )}
+      {mode !== "off" && (
+        <>
+          <label>{t("admin.statusApiRole")}
+            <select value={roleId ?? ""} onChange={(e) => run(() => api.updateSettings({ statusApiRoleId: e.target.value || null }))}>
+              <option value="">{defaultRole ? t("admin.statusApiRoleDefault", { name: defaultRole.name }) : t("admin.statusApiRoleDefaultPlain")}</option>
+              {byRank.filter((r) => !r.isDefault).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select></label>
+          <span className="muted small">{t("admin.statusApiRoleHint")}</span>
+          {showsEverything && <span className="warn-box small" role="status">{t("admin.statusApiRoleAdmin", { name: chosen?.name ?? "" })}</span>}
+        </>
+      )}
       {mode === "public" && <span className="muted small">{t("admin.statusApiPublicHint")}</span>}
     </>
   );
 }
 
-function RolesTab({ api, server, myUserId, run }: { api: ServerApi; server: ServerState; myUserId: string; run: RunFn }) {
+function RolesTab({ api, server, myUserId, run, save }: { api: ServerApi; server: ServerState; myUserId: string; run: RunFn; save: RunFn }) {
   const [sel, setSel] = useState<string | null>(server.roles.find((r) => !r.isDefault)?.id ?? server.roles[0]?.id ?? null);
   const [newName, setNewName] = useState("");
   const role = server.roles.find((r) => r.id === sel) ?? null;
@@ -239,7 +261,7 @@ function RolesTab({ api, server, myUserId, run }: { api: ServerApi; server: Serv
           ))}
           <p className="muted small">{t("admin.activePerms", { list: active.join(", ") || t("admin.none") })}</p>
           <div className="row">
-            <button onClick={() => run(() => api.updateRole(role.id, { name: name.trim() || role.name, color, permissions: perms }))}>{t("common.save")}</button>
+            <SaveButton onSave={() => save(() => api.updateRole(role.id, { name: name.trim() || role.name, color, permissions: perms }))} />
             {!role.isDefault && <button className="danger" onClick={() => run(async () => { if (await askConfirm({ title: t("admin.deleteRoleTitle", { name: role.name }), text: t("admin.deleteRoleText"), confirmLabel: t("common.delete"), danger: true })) { await api.deleteRole(role.id); setSel(null); } })}>{t("common.delete")}</button>}
           </div>
           <p className="muted small">{t("admin.roleHint")}</p>

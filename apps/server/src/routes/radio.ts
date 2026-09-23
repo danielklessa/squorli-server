@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { requireMember } from "../auth/session";
 import { can } from "../authz";
+import { canIn, channelActor, resolveChannel } from "../channelGuard";
 import type { Db } from "../db";
 import { channels, radioStations } from "../db/schema";
 import type { Hub } from "../hub";
@@ -73,9 +74,10 @@ export async function registerRadioRoutes(app: FastifyInstance, db: Db, hub: Hub
 
   // ---- Radio of a voice channel
   app.put<{ Params: { id: string } }>("/api/channels/:id/radio", { schema: { params: Params } }, async (req, reply) => {
-    const m = await requireMember(db, req, reply);
+    const m = await channelActor(db, req, reply, req.params.id, "voice");
     if (!m) return;
-    if (!can(m.actor, Permission.CONTROL_RADIO)) return reply.code(403).send({ error: "forbidden" });
+    if (!canIn(m.perms, Permission.CONTROL_RADIO)) return reply.code(403).send({ error: "forbidden" });
+    if (!m.channel.allowRadio) return reply.code(409).send({ error: "radio_disabled" });
     const body = SetChannelRadioRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
     // Nobody hears anything in the AFK channel, so it has no radio.
@@ -133,9 +135,9 @@ export async function registerRadioRoutes(app: FastifyInstance, db: Db, hub: Hub
    * progress bar sends several of these, and stays on the channel for whoever connects later.
    */
   app.put<{ Params: { id: string } }>("/api/channels/:id/radio/playback", { schema: { params: Params } }, async (req, reply) => {
-    const m = await requireMember(db, req, reply);
+    const m = await channelActor(db, req, reply, req.params.id, "voice");
     if (!m) return;
-    if (!can(m.actor, Permission.CONTROL_RADIO)) return reply.code(403).send({ error: "forbidden" });
+    if (!canIn(m.perms, Permission.CONTROL_RADIO)) return reply.code(403).send({ error: "forbidden" });
     const body = SetRadioPlaybackRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
     const [channel] = await db.select({ url: channels.radioStreamUrl }).from(channels).where(and(eq(channels.id, req.params.id), eq(channels.kind, "voice"))).limit(1);
@@ -145,7 +147,7 @@ export async function registerRadioRoutes(app: FastifyInstance, db: Db, hub: Hub
     // Only while it is still the same source: a radio changed in the meantime keeps its own state.
     const [row] = await db.update(channels).set({ radioPlayback: playback }).where(and(eq(channels.id, req.params.id), eq(channels.radioStreamUrl, channel.url))).returning({ id: channels.id });
     if (!row) return reply.code(409).send({ error: "no_playback" });
-    hub.broadcast({ type: "radio.playback", channelId: row.id, playback });
+    hub.broadcastToChannel(row.id, { type: "radio.playback", channelId: row.id, playback });
     return { ok: true, playback };
   });
 
@@ -162,7 +164,9 @@ export async function registerRadioRoutes(app: FastifyInstance, db: Db, hub: Hub
     const body = AdvanceRadioRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
     const { from, step, ended } = body.data;
-    const allowed = ended ? step === 1 && presence.channelOfUser(m.actor.userId) === req.params.id : can(m.actor, Permission.CONTROL_RADIO);
+    const r = await resolveChannel(db, m.userId, req.params.id, "voice");
+    if (!r) return reply.code(404).send({ error: "not_found" });
+    const allowed = ended ? step === 1 && presence.channelOfUser(m.actor.userId) === req.params.id : canIn(r.perms, Permission.CONTROL_RADIO);
     if (!allowed) return reply.code(403).send({ error: "forbidden" });
     const [channel] = await db.select({ url: channels.radioStreamUrl, queue: channels.radioQueue, stationId: channels.radioStationId }).from(channels).where(and(eq(channels.id, req.params.id), eq(channels.kind, "voice"))).limit(1);
     if (!channel) return reply.code(404).send({ error: "not_found" });
@@ -207,7 +211,9 @@ export async function registerRadioRoutes(app: FastifyInstance, db: Db, hub: Hub
     if (!m) return;
     const body = RadioOfflineRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
-    if (presence.channelOfUser(m.actor.userId) !== req.params.id && !can(m.actor, Permission.CONTROL_RADIO)) return reply.code(403).send({ error: "forbidden" });
+    const r = await resolveChannel(db, m.userId, req.params.id, "voice");
+    if (!r) return reply.code(404).send({ error: "not_found" });
+    if (presence.channelOfUser(m.actor.userId) !== req.params.id && !canIn(r.perms, Permission.CONTROL_RADIO)) return reply.code(403).send({ error: "forbidden" });
     const [channel] = await db.select({ url: channels.radioStreamUrl }).from(channels).where(and(eq(channels.id, req.params.id), eq(channels.kind, "voice"))).limit(1);
     if (!channel) return reply.code(404).send({ error: "not_found" });
     if (!channel.url || twitchChannelOf(channel.url)?.toLowerCase() !== body.data.channel.toLowerCase()) return { ok: true, stopped: false };
@@ -215,9 +221,9 @@ export async function registerRadioRoutes(app: FastifyInstance, db: Db, hub: Hub
   });
 
   app.delete<{ Params: { id: string } }>("/api/channels/:id/radio", { schema: { params: Params } }, async (req, reply) => {
-    const m = await requireMember(db, req, reply);
+    const m = await channelActor(db, req, reply, req.params.id, "voice");
     if (!m) return;
-    if (!can(m.actor, Permission.CONTROL_RADIO)) return reply.code(403).send({ error: "forbidden" });
+    if (!canIn(m.perms, Permission.CONTROL_RADIO)) return reply.code(403).send({ error: "forbidden" });
     const [row] = await db.update(channels).set(RADIO_OFF).where(and(eq(channels.id, req.params.id), eq(channels.kind, "voice"))).returning({ id: channels.id });
     if (!row) return reply.code(404).send({ error: "not_found" });
     await broadcastStructure(db, hub, ["channels"]);

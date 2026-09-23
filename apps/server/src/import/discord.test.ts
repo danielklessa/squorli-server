@@ -1,10 +1,10 @@
 import { Permission } from "@squorli/protocol";
 import { describe, expect, it } from "vitest";
 import type { Actor } from "../authz";
-import { DiscordTemplate, mapBitrate, mapColor, mapDiscordPermissions, planDiscordImport, type ExistingStructure } from "./discord";
+import { DiscordTemplate, mapBitrate, mapColor, mapDiscordPermissions, mapOverwrites, planDiscordImport, type ExistingStructure } from "./discord";
 
-const owner: Actor = { userId: "o", isOwner: true, permissions: Permission.ADMINISTRATOR, topPosition: 0 };
-const mod: Actor = { userId: "m", isOwner: false, permissions: Permission.MANAGE_CHANNELS | Permission.MANAGE_ROLES | Permission.KICK_MEMBERS, topPosition: 5 };
+const owner: Actor = { userId: "o", isOwner: true, permissions: Permission.ADMINISTRATOR, roleIds: [], topPosition: 0 };
+const mod: Actor = { userId: "m", isOwner: false, permissions: Permission.MANAGE_CHANNELS | Permission.MANAGE_ROLES | Permission.KICK_MEMBERS, roleIds: [], topPosition: 5 };
 const empty: ExistingStructure = { categories: [], channels: [], roles: [{ name: "Gast", isDefault: true }, { name: "Admin", isDefault: false }], afkChannelId: null };
 
 /** Roughly what Discord serves for a small template (ids are placeholders, permissions decimal strings). */
@@ -20,8 +20,8 @@ const template = DiscordTemplate.parse({
     ],
     channels: [
       { id: 4, type: 4, name: "Allgemein", position: 1 },
-      { id: 5, type: 4, name: "Spiele", position: 0 },
-      { id: 6, type: 0, name: "regeln", position: 0, parent_id: null, topic: "Lies das", permission_overwrites: [{ id: 0, type: 0, allow: "0", deny: "2048" }] },
+      { id: 5, type: 4, name: "Spiele", position: 0, permission_overwrites: [{ id: 0, type: 0, allow: "0", deny: "1024" }, { id: 2, type: 0, allow: "1024", deny: "0" }] },
+      { id: 6, type: 0, name: "regeln", position: 0, parent_id: null, topic: "Lies das", permission_overwrites: [{ id: 0, type: 0, allow: "0", deny: "2048" }, { id: 1, type: 0, allow: "2048", deny: "0" }, { id: 77, type: 1, allow: "1024", deny: "0" }] },
       { id: 7, type: 2, name: "Lobby", position: 0, parent_id: 4, bitrate: 96000 },
       { id: 8, type: 0, name: "chat", position: 5, parent_id: 4 },
       { id: 9, type: 2, name: "AFK", position: 1, parent_id: 4, bitrate: 8000 },
@@ -38,6 +38,7 @@ describe("Discord permission mapping", () => {
     expect(mapDiscordPermissions("8")).toBe(Permission.ADMINISTRATOR);
     expect(mapDiscordPermissions(String((1n << 20n) | (1n << 9n)))).toBe(Permission.CONNECT_VOICE | Permission.VIEW_VIDEO | Permission.STREAM_VIDEO);
     expect(mapDiscordPermissions(String((1n << 22n) | (1n << 23n)))).toBe(Permission.MODERATE_VOICE);
+    expect(mapDiscordPermissions(String(1n << 24n))).toBe(Permission.MOVE_MEMBERS);
     expect(mapDiscordPermissions(String((1n << 6n) | (1n << 16n) | (1n << 34n)))).toBe(0); // reactions, history, threads
     expect(mapDiscordPermissions(String((1n << 5n) | (1n << 0n) | (1n << 15n)))).toBe(Permission.MANAGE_SERVER | Permission.CREATE_INVITES | Permission.ATTACH_FILES);
     expect(mapDiscordPermissions("nonsense")).toBe(0);
@@ -69,7 +70,15 @@ describe("planDiscordImport", () => {
     ]);
     const regeln = plan.channels.find((c) => c.name === "regeln")!;
     expect(regeln.topic).toBe("Lies das");
-    expect(regeln.overwrites).toBe(1);
+    // Discord's SEND_MESSAGES (bit 11 = 2048) denied for @everyone and allowed for "Mod"; the member overwrite is counted and dropped.
+    expect(regeln.overwrites).toEqual([{ roleKey: "everyone", allow: 0, deny: Permission.SEND_MESSAGES }, { roleKey: "1", allow: Permission.SEND_MESSAGES, deny: 0 }]);
+    expect(regeln.memberOverwrites).toBe(1);
+    expect(regeln.private).toBe(false);
+    // A private category (VIEW_CHANNEL = bit 10 denied for @everyone, allowed for "Admin"): its channels count as private.
+    const spiele = plan.categories.find((c) => c.name === "Spiele")!;
+    expect(spiele.overwrites).toEqual([{ roleKey: "everyone", allow: 0, deny: Permission.VIEW_CHANNELS }, { roleKey: "2", allow: Permission.VIEW_CHANNELS, deny: 0 }]);
+    expect(plan.channels.find((c) => c.name === "forum")!.private).toBe(true);
+    expect(plan.channels.find((c) => c.name === "chat")!.private).toBe(false);
     expect(plan.channels.find((c) => c.name === "Lobby")!.audioBitrate).toBe(96);
     expect(plan.channels.find((c) => c.name === "Bühne")!.audioBitrate).toBe(256);
     expect(plan.dropped).toContainEqual({ name: "verzeichnis", kind: "channel", reason: "unsupported" });
@@ -79,13 +88,13 @@ describe("planDiscordImport", () => {
   it("orders roles most powerful first, drops @everyone and blank names, marks duplicates", () => {
     const plan = planDiscordImport(template, empty, owner);
     expect(plan.roles.map((r) => [r.name, r.exists, r.blocked])).toEqual([["Admin", true, null], ["Mod", false, null]]);
-    expect(plan.roles[1]).toMatchObject({ color: "#ff0000", permissions: Permission.KICK_MEMBERS | Permission.BAN_MEMBERS | Permission.MODERATE_VOICE | Permission.VIEW_CHANNELS });
+    expect(plan.roles[1]).toMatchObject({ color: "#ff0000", permissions: Permission.KICK_MEMBERS | Permission.BAN_MEMBERS | Permission.MOVE_MEMBERS | Permission.VIEW_CHANNELS });
     expect(plan.dropped).toContainEqual({ name: "@everyone", kind: "role", reason: "default_role" });
   });
 
   it("blocks roles whose permissions the actor may not grant", () => {
     const plan = planDiscordImport(template, empty, mod);
-    expect(plan.roles.find((r) => r.name === "Mod")!.blocked).toBe("cannot_grant"); // BAN_MEMBERS and MODERATE_VOICE are not the mod's
+    expect(plan.roles.find((r) => r.name === "Mod")!.blocked).toBe("cannot_grant"); // BAN_MEMBERS and MOVE_MEMBERS are not the mod's
     expect(plan.roles.find((r) => r.name === "Admin")!.blocked).toBe("cannot_grant");
   });
 
@@ -106,5 +115,20 @@ describe("planDiscordImport", () => {
   it("does not offer the AFK channel when it exists already or is not a voice channel", () => {
     const t = DiscordTemplate.parse({ ...template, serialized_source_guild: { ...template.serialized_source_guild, afk_channel_id: 8 } });
     expect(planDiscordImport(t, empty, owner).afkChannelKey).toBeNull();
+  });
+});
+
+describe("mapOverwrites", () => {
+  it("keeps only channel-overridable bits, drops empty and member entries, names @everyone", () => {
+    const everyone = new Set(["0"]);
+    // Discord's MANAGE_ROLES (bit 28) is not a channel right here; VIEW_CHANNEL (bit 10) is.
+    const r = mapOverwrites([
+      { id: "0", type: 0, allow: "0", deny: String(1n << 10n) },
+      { id: "5", type: 0, allow: String((1n << 28n) | (1n << 10n)), deny: "0" },
+      { id: "6", type: 0, allow: String(1n << 28n), deny: "0" },
+      { id: "9", type: 1, allow: String(1n << 10n), deny: "0" },
+    ], everyone);
+    expect(r.overwrites).toEqual([{ roleKey: "everyone", allow: 0, deny: Permission.VIEW_CHANNELS }, { roleKey: "5", allow: Permission.VIEW_CHANNELS, deny: 0 }]);
+    expect(r.memberOverwrites).toBe(1);
   });
 });
