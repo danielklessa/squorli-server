@@ -96,7 +96,7 @@ Voice quality (Opus bitrate, stereo) is configured per voice channel in the admi
 
 ### Status API
 
-`GET https://PUBLIC_DOMAIN/api/status` returns the server name, its icon address, all categories and channels in the order the client shows them, and all members with whether they are online or away and which voice channel they sit in, including whether their microphone is muted or their sound is off, as JSON, for a widget on your website, a bot or a stream overlay. It is off by default (404). In the admin panel under Server you choose whether it needs the server's key (`Authorization: Bearer <key>` or `?key=<key>`; the panel shows the key and can replace it) or is public. `?online=1` lists only the members who are signed in. Avatars are the directory account pictures (public there anyway); public keys, roles, permissions and messages are never included.
+`GET https://PUBLIC_DOMAIN/api/status` returns the server name, its icon address, all categories and channels in the order the client shows them, and the members who sit in a voice channel right now with that channel, whether they are away and whether their microphone is muted, their sound is off or their camera or screen share is on, as JSON, for a widget on your website, a bot or a stream overlay. Members outside every voice channel are not listed. It is off by default (404). In the admin panel under Server you choose whether it needs the server's key (`Authorization: Bearer <key>` or `?key=<key>`; the panel shows the key and can replace it) or is public. Avatars are the directory account pictures (public there anyway); public keys, roles, permissions and messages are never included.
 
 ## Reverse proxy
 

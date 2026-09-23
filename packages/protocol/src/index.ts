@@ -483,11 +483,12 @@ export const StatusChannel = z.object({
   /** Order inside the category (ascending), as in the client. */
   position: z.number().int(),
 });
+/** A member sitting in a voice channel; members outside every voice channel are not part of the status (user's decision). */
 export const StatusMember = z.object({
   userId: Uuid, displayName: z.string(), handle: z.string().nullable(), avatarUrl: z.string().url().nullable(),
-  online: z.boolean(), afk: z.boolean(), isOwner: z.boolean(),
-  /** The voice channel the member sits in with their mute state, null = in none. */
-  voice: VoiceStatus.extend({ channelId: Uuid }).nullable(),
+  afk: z.boolean(), isOwner: z.boolean(),
+  /** The voice channel the member sits in with their mute state. */
+  voice: VoiceStatus.extend({ channelId: Uuid }),
 });
 export const ServerStatus = z.object({
   name: z.string(), iconUrl: z.string().url().nullable(), time: Iso,

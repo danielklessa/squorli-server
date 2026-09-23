@@ -46,9 +46,11 @@ describe("protocol", () => {
     expect(StatusApiMode.options).toEqual(["off", "key", "public"]);
     const statusApi = ServerStatus.safeParse({
       name: "S", iconUrl: null, time: "2026-09-23T00:00:00.000Z", categories: [], channels: [{ id: U1, kind: "voice", name: "Lobby", topic: null, categoryId: null, position: 0 }],
-      members: [{ userId: U1, displayName: "A", handle: null, avatarUrl: null, online: true, afk: false, isOwner: false, voice: { channelId: U1, micMuted: true, deafened: false } }],
+      members: [{ userId: U1, displayName: "A", handle: null, avatarUrl: null, afk: false, isOwner: false, voice: { channelId: U1, micMuted: true, deafened: false } }],
     });
     expect(statusApi.success).toBe(true);
+    // Only members in a voice channel are listed, so a member without a seat is not a status member.
+    expect(ServerStatus.shape.members.element.safeParse({ userId: U1, displayName: "A", handle: null, avatarUrl: null, afk: false, isOwner: false, voice: null }).success).toBe(false);
   });
   it("binds the challenge to a domain", () => {
     expect(challengeMessage("a.example", "00")).not.toBe(challengeMessage("b.example", "00"));
