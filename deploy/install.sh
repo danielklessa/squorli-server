@@ -1,0 +1,570 @@
+#!/usr/bin/env bash
+# Squorli Server: interactive installer for a Linux host (Docker Compose with the published image, no source checkout).
+#
+#   curl -fsSL https://raw.githubusercontent.com/danielklessa/squorli-server/main/deploy/install.sh -o install.sh
+#   sudo bash install.sh
+#
+# Asks for domain, proxy setup, directory and owner, installs Docker if it is missing (get.docker.com, after asking),
+# downloads the deploy files, writes .env with fresh secrets, starts the stack and checks it. Running it again on an
+# existing installation updates it or changes its settings; secrets and data are kept.
+# It also writes <dir>/squorli, a small wrapper around docker compose with the right profile and overlays
+# (squorli update | status | logs | backup | restart | down | <any compose command>).
+#
+# Environment: SQUORLI_DIR (installation directory, default /opt/squorli), SQUORLI_LANG (de/en),
+# SQUORLI_REF (git ref of the deploy files, default main), SQUORLI_RAW_BASE (base URL of the files; tests use file://).
+# Details: deploy/AGENTS.md, README.md.
+
+set -Eeuo pipefail
+
+REF="${SQUORLI_REF:-main}"
+RAW_BASE="${SQUORLI_RAW_BASE:-https://raw.githubusercontent.com/danielklessa/squorli-server/$REF}"
+DEFAULT_IMAGE="ghcr.io/danielklessa/squorli-server:latest"
+DEFAULT_DIRECTORY="https://directory.squorli.com"
+DEFAULT_TRUSTED="172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,127.0.0.1"
+DEPLOY_FILES=(deploy/compose.yml deploy/caddy/Caddyfile deploy/livekit/livekit.yaml deploy/proxies/nginx.ports.yml
+  deploy/proxies/remote-proxy.ports.yml deploy/proxies/nginx.conf deploy/proxies/README.md)
+
+if [ -t 1 ]; then B=$'\e[1m'; D=$'\e[2m'; RED=$'\e[31m'; GRN=$'\e[32m'; YEL=$'\e[33m'; R=$'\e[0m'; else B=; D=; RED=; GRN=; YEL=; R=; fi
+L=en
+# t "German" "English"
+t() { if [ "$L" = de ]; then printf '%s' "$1"; else printf '%s' "$2"; fi; }
+step() { printf '\n%s==> %s%s\n' "$B" "$1" "$R"; }
+ok() { printf '%s  ok%s %s\n' "$GRN" "$R" "$1"; }
+warn() { printf '%s  !  %s%s\n' "$YEL" "$1" "$R"; }
+die() { printf '\n%sx %s%s\n' "$RED" "$1" "$R" >&2; exit 1; }
+trap 'printf "\n%sx %s (line %s): %s%s\n" "$RED" "$(t "Abgebrochen" "Aborted")" "$LINENO" "$BASH_COMMAND" "$R" >&2' ERR
+
+# ---- Input: with "curl ... | sudo bash" stdin is the script itself, so questions read from the terminal.
+IN=0
+setup_input() {
+  if [ -t 0 ]; then IN=0
+  elif [ -r /dev/tty ] && (: </dev/tty) 2>/dev/null; then exec 3</dev/tty; IN=3
+  else IN=0; fi
+}
+trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; printf '%s' "${s%"${s##*[![:space:]]}"}"; }
+# ask VAR "question" ["default"]
+ask() {
+  local __ask_in __ask_def="${3-}"
+  if [ -n "$__ask_def" ]; then printf '%s%s%s %s[%s]%s: ' "$B" "$2" "$R" "$D" "$__ask_def" "$R"; else printf '%s%s%s: ' "$B" "$2" "$R"; fi
+  IFS= read -r -u "$IN" __ask_in || die "$(t "Keine Eingabe mehr (stdin geschlossen)" "No more input (stdin closed)")"
+  __ask_in="$(trim "$__ask_in")"
+  printf -v "$1" '%s' "${__ask_in:-$__ask_def}"
+}
+# confirm "question" y|n  -> exit code
+confirm() {
+  local a def="$2" hint
+  if [ "$def" = y ]; then hint="$(t "J/n" "Y/n")"; else hint="$(t "j/N" "y/N")"; fi
+  while :; do
+    ask a "$1 ($hint)"
+    a="$(printf '%s' "${a:-$def}" | tr '[:upper:]' '[:lower:]')"
+    case "$a" in y|yes|j|ja) return 0 ;; n|no|nein) return 1 ;; esac
+  done
+}
+# choose VAR "question" default "option 1" "option 2" ...  -> VAR = number of the option
+choose() {
+  local __var="$1" __q="$2" __def="$3" __i=1 __a; shift 3
+  printf '%s%s%s\n' "$B" "$__q" "$R"
+  for o in "$@"; do printf '  %s) %s\n' "$__i" "$o"; __i=$((__i + 1)); done
+  while :; do
+    ask __a "$(t "Auswahl" "Choice")" "$__def"
+    if [[ "$__a" =~ ^[0-9]+$ ]] && [ "$__a" -ge 1 ] && [ "$__a" -le $# ]; then printf -v "$__var" '%s' "$__a"; return; fi
+  done
+}
+
+# ---- .env helpers (no sourcing: the file is data)
+# env_get FILE KEY -> value of the last active KEY= line, surrounding quotes removed
+env_get() {
+  [ -f "$1" ] || return 0
+  K="$2" awk 'BEGIN { k = ENVIRON["K"]; q = sprintf("%c", 39) }
+    index($0, k "=") == 1 { v = substr($0, length(k) + 2) }
+    END { n = length(v); if (n >= 2 && ((substr(v,1,1) == q && substr(v,n,1) == q) || (substr(v,1,1) == "\"" && substr(v,n,1) == "\""))) v = substr(v, 2, n - 2); printf "%s", v }' "$1"
+}
+# env_set FILE KEY VALUE: replaces the first active KEY= line (drops further ones), else the first "#KEY=" line, else appends.
+# Values outside a safe character set are single-quoted, which Compose reads literally (no $ interpolation).
+env_set() {
+  local v="$3"
+  if [[ ! "$v" =~ ^[A-Za-z0-9._:/@+,=-]*$ ]]; then v="'$v'"; fi
+  K="$2" V="$v" awk 'BEGIN { k = ENVIRON["K"]; v = ENVIRON["V"] }
+    NR == FNR { if (index($0, k "=") == 1) active = 1; next }
+    !done && index($0, k "=") == 1 { print k "=" v; done = 1; next }
+    active && index($0, k "=") == 1 { next }
+    !active && !done && (index($0, "#" k "=") == 1 || index($0, "# " k "=") == 1) { print k "=" v; done = 1; next }
+    { print }
+    END { if (!done) print k "=" v }' "$1" "$1" > "$1.tmp"
+  cat "$1.tmp" > "$1" && rm -f "$1.tmp"
+}
+
+secret() { if command -v openssl >/dev/null 2>&1; then openssl rand -hex 32; else head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'; fi; }
+is_ipv4() { [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; }
+# probe URL CODE: waits up to 30 s until URL answers with the HTTP status CODE
+probe() {
+  for _ in $(seq 1 15); do
+    [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$1" 2>/dev/null || true)" = "$2" ] && return 0
+    sleep 2
+  done
+  return 1
+}
+port_busy() { # port_busy tcp|udp PORT
+  command -v ss >/dev/null 2>&1 || return 1
+  if [ "$1" = tcp ]; then ss -ltnH "sport = :$2" 2>/dev/null | grep -q .; else ss -lunH "sport = :$2" 2>/dev/null | grep -q .; fi
+}
+
+# ---- Steps
+choose_language() {
+  case "${SQUORLI_LANG:-}" in de|en) L="$SQUORLI_LANG"; return ;; esac
+  local def=en a
+  case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in de*) def=de ;; esac
+  while :; do
+    ask a "Sprache / Language (de/en)" "$def"
+    case "$a" in de|DE|d) L=de; return ;; en|EN|e) L=en; return ;; esac
+  done
+}
+
+preflight() {
+  step "$(t "Voraussetzungen" "Requirements")"
+  [ "$(uname -s)" = Linux ] || die "$(t "Dieses Skript läuft nur unter Linux." "This script only runs on Linux.")"
+  [ "$(id -u)" -eq 0 ] || die "$(t "Bitte als root starten: sudo bash install.sh" "Please run as root: sudo bash install.sh")"
+  command -v curl >/dev/null 2>&1 || die "$(t "curl fehlt (z. B. apt install curl)." "curl is missing (e.g. apt install curl).")"
+  local arch; arch="$(uname -m)"
+  if [ "$arch" != x86_64 ] && [ "$arch" != amd64 ]; then
+    warn "$(t "Das veröffentlichte Image gibt es nur für x86_64 (amd64), dieser Rechner ist $arch. Auf ARM muss das Image aus dem Quellcode gebaut werden (README, \"Building from source\")." \
+      "The published image exists for x86_64 (amd64) only, this machine is $arch. On ARM the image has to be built from source (README, \"Building from source\").")"
+    confirm "$(t "Trotzdem fortfahren?" "Continue anyway?")" n || exit 1
+  fi
+  local os; os="$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"' || true)"
+  ok "${os:-Linux} ($arch)"
+}
+
+ensure_docker() {
+  step "Docker"
+  if ! command -v docker >/dev/null 2>&1; then
+    warn "$(t "Docker ist nicht installiert." "Docker is not installed.")"
+    confirm "$(t "Docker jetzt mit dem offiziellen Skript von get.docker.com installieren?" "Install Docker now with the official script from get.docker.com?")" y \
+      || die "$(t "Ohne Docker geht es nicht: https://docs.docker.com/engine/install/" "Docker is required: https://docs.docker.com/engine/install/")"
+    local tmp; tmp="$(mktemp)"
+    curl -fsSL https://get.docker.com -o "$tmp"
+    sh "$tmp"; rm -f "$tmp"
+    if command -v systemctl >/dev/null 2>&1; then systemctl enable --now docker >/dev/null 2>&1 || true; fi
+  fi
+  docker info >/dev/null 2>&1 || die "$(t "Der Docker-Dienst antwortet nicht (systemctl start docker?)." "The Docker daemon does not answer (systemctl start docker?).")"
+  docker compose version >/dev/null 2>&1 || die "$(t "Das Compose-Plugin fehlt (Paket docker-compose-plugin)." "The Compose plugin is missing (package docker-compose-plugin).")"
+  ok "$(docker --version | head -n1); $(docker compose version | head -n1)"
+}
+
+# Sets DIR, MODE (fresh|update|reconfigure), OLD_SETUP
+choose_dir() {
+  step "$(t "Installationsverzeichnis" "Installation directory")"
+  local def="${SQUORLI_DIR:-/opt/squorli}" running=""
+  # A stack of the Compose project "squorli" that runs from elsewhere (e.g. installed by hand following the README)
+  running="$(docker ps -q --filter label=com.docker.compose.project=squorli | head -n1)"
+  if [ -n "$running" ] && [ -z "${SQUORLI_DIR:-}" ]; then
+    local wd; wd="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "$running" 2>/dev/null || true)"
+    if [ -n "$wd" ] && [ -f "$(dirname "$wd")/.env" ]; then
+      def="$(dirname "$wd")"
+      warn "$(t "Hier läuft schon ein Squorli-Server aus $def." "A Squorli server already runs here from $def.")"
+    fi
+  fi
+  while :; do
+    ask DIR "$(t "Verzeichnis" "Directory")" "$def"
+    [[ "$DIR" = /* ]] && break
+    warn "$(t "Bitte einen absoluten Pfad angeben." "Please give an absolute path.")"
+  done
+  DIR="${DIR%/}"
+  OLD_SETUP=""
+  if [ -f "$DIR/.env" ]; then
+    OLD_SETUP="$(sed -n 's/^# setup: \([a-z]*\)$/\1/p' "$DIR/squorli" 2>/dev/null | head -n1 || true)"
+    if [ -z "$OLD_SETUP" ]; then
+      if [ "$(env_get "$DIR/.env" PROXY_MODE)" = bundled ]; then OLD_SETUP=bundled; else OLD_SETUP=local; fi
+    fi
+    local c
+    choose c "$(t "In $DIR gibt es schon eine Installation. Was soll passieren?" "$DIR already holds an installation. What should happen?")" 1 \
+      "$(t "Aktualisieren (neues Image und Deploy-Dateien, Einstellungen bleiben)" "Update (new image and deploy files, settings stay)")" \
+      "$(t "Einstellungen ändern (Geheimnisse und Daten bleiben)" "Change settings (secrets and data stay)")" \
+      "$(t "Abbrechen" "Abort")"
+    case "$c" in 1) MODE=update ;; 2) MODE=reconfigure ;; *) exit 0 ;; esac
+  else
+    MODE=fresh
+  fi
+}
+
+# Sets DOMAIN SERVER_NAME SETUP IMAGE DIRECTORY OWNER NODE_IP BIND_IP PROXY_IP PG_PASSWORD
+configure() {
+  local envf="$DIR/.env" c
+  step "$(t "Einstellungen" "Settings")"
+
+  local d_domain d_name d_image d_dir d_owner d_node
+  d_domain="$(env_get "$envf" PUBLIC_DOMAIN)"; [ "$d_domain" = chat.example.org ] && d_domain=""
+  d_name="$(env_get "$envf" SERVER_NAME)"; d_name="${d_name:-Community}"
+  d_image="$(env_get "$envf" APP_IMAGE)"; d_image="${d_image:-$DEFAULT_IMAGE}"
+  d_dir="$DEFAULT_DIRECTORY"; [ "$MODE" = reconfigure ] && d_dir="$(env_get "$envf" DIRECTORY_URL)"
+  d_owner="$(env_get "$envf" OWNER_PUBLIC_KEY)"
+  d_node="$(env_get "$envf" LIVEKIT_NODE_IP)"
+
+  while :; do
+    ask DOMAIN "$(t "Domain, unter der der Server erreichbar ist (z. B. chat.example.org)" "Domain the server is reached under (e.g. chat.example.org)")" "$d_domain"
+    DOMAIN="$(printf '%s' "$DOMAIN" | tr '[:upper:]' '[:lower:]')"; DOMAIN="${DOMAIN#https://}"; DOMAIN="${DOMAIN#http://}"; DOMAIN="${DOMAIN%%/*}"
+    [ "$DOMAIN" = localhost ] && break
+    [[ "$DOMAIN" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$ ]] && break
+    warn "$(t "Das ist kein gültiger Hostname." "That is not a valid hostname.")"
+  done
+  check_dns
+
+  # SERVER_NAME only names a new database; afterwards the name lives in the admin panel
+  SERVER_NAME="$d_name"
+  if [ "$MODE" = fresh ]; then
+    while :; do
+      ask SERVER_NAME "$(t "Name des Servers (später im Adminbereich änderbar)" "Name of the server (can be changed later in the admin panel)")" "$d_name"
+      if [ "${#SERVER_NAME}" -le 64 ] && [[ "$SERVER_NAME" != *"'"* ]]; then break; fi
+      warn "$(t "Höchstens 64 Zeichen, kein Apostroph." "At most 64 characters, no apostrophe.")"
+    done
+  fi
+
+  local d_setup=1
+  case "$OLD_SETUP" in local) d_setup=2 ;; remote) d_setup=3 ;; esac
+  [ "$DOMAIN" = localhost ] && [ -z "$OLD_SETUP" ] && d_setup=2
+  choose c "$(t "Wer kümmert sich um HTTPS?" "Who takes care of HTTPS?")" "$d_setup" \
+    "$(t "Squorli selbst: mitgelieferter Caddy mit Let's-Encrypt-Zertifikat (belegt Port 80 und 443)" "Squorli itself: bundled Caddy with a Let's Encrypt certificate (uses ports 80 and 443)")" \
+    "$(t "Ein Reverse Proxy auf diesem Rechner (nginx, Apache, Plesk ...): 3000 und 7880 nur auf 127.0.0.1" "A reverse proxy on this machine (nginx, Apache, Plesk ...): 3000 and 7880 on 127.0.0.1 only")" \
+    "$(t "Ein Reverse Proxy auf einem anderen Rechner (z. B. Nginx Proxy Manager): 3000 und 7880 im LAN/VPN" "A reverse proxy on another machine (e.g. Nginx Proxy Manager): 3000 and 7880 in the LAN/VPN")"
+  case "$c" in 1) SETUP=bundled ;; 2) SETUP=local ;; 3) SETUP=remote ;; esac
+  if [ "$SETUP" = bundled ] && [ "$DOMAIN" = localhost ]; then
+    die "$(t "Für localhost gibt es kein Let's-Encrypt-Zertifikat; bitte einen Reverse Proxy wählen." "Let's Encrypt issues no certificate for localhost; please choose a reverse proxy.")"
+  fi
+
+  BIND_IP=""; PROXY_IP=""
+  if [ "$SETUP" = remote ]; then
+    local d_bind; d_bind="$(env_get "$envf" PROXY_BIND_IP)"
+    [ -z "$d_bind" ] && d_bind="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|100\.)' | head -n1 || true)"
+    warn "$(t "Docker umgeht ufw/firewalld für veröffentlichte Ports. Binde 3000 und 7880 deshalb an eine LAN- oder VPN-Adresse, nicht an 0.0.0.0." \
+      "Docker bypasses ufw/firewalld for published ports. Bind 3000 and 7880 to a LAN or VPN address, not to 0.0.0.0.")"
+    while :; do
+      ask BIND_IP "$(t "Adresse dieses Rechners, auf der 3000 und 7880 lauschen" "Address of this machine on which 3000 and 7880 listen")" "$d_bind"
+      is_ipv4 "$BIND_IP" && break
+      warn "$(t "Bitte eine IPv4-Adresse angeben." "Please give an IPv4 address.")"
+    done
+    while :; do
+      ask PROXY_IP "$(t "IP-Adresse des Proxy-Rechners (für TRUSTED_PROXIES)" "IP address of the proxy machine (for TRUSTED_PROXIES)")"
+      is_ipv4 "$PROXY_IP" && break
+      warn "$(t "Bitte eine IPv4-Adresse angeben." "Please give an IPv4 address.")"
+    done
+  fi
+
+  local dd=1
+  if [ "$MODE" = reconfigure ]; then
+    if [ -z "$d_dir" ]; then dd=2; elif [ "$d_dir" != "$DEFAULT_DIRECTORY" ]; then dd=3; fi
+  fi
+  choose c "$(t "Squorli Directory (globale Handles, Freunde, verschlüsselte Direktnachrichten)?" "Squorli Directory (global handles, friends, encrypted direct messages)?")" "$dd" \
+    "$(t "Ja, $DEFAULT_DIRECTORY" "Yes, $DEFAULT_DIRECTORY")" \
+    "$(t "Nein, der Server arbeitet für sich allein" "No, the server works on its own")" \
+    "$(t "Ein anderes Directory" "Another directory")"
+  case "$c" in
+    1) DIRECTORY="$DEFAULT_DIRECTORY" ;;
+    2) DIRECTORY="" ;;
+    3) while :; do
+         ask DIRECTORY "$(t "Adresse des Directory" "Address of the directory")" "$([ "$dd" = 3 ] && printf '%s' "$d_dir")"
+         [[ "$DIRECTORY" =~ ^https?://[^[:space:]\'\"]+$ ]] && break
+         warn "$(t "Bitte eine Adresse mit https:// angeben." "Please give an address with https://.")"
+       done; DIRECTORY="${DIRECTORY%/}" ;;
+  esac
+  if [ -n "$DIRECTORY" ] && [ "$DOMAIN" = localhost ]; then
+    warn "$(t "Ein Server auf localhost kann sich beim Directory nicht ausweisen; die Anmeldung mit Handle klappt dann nicht." \
+      "A server on localhost cannot prove its host to the directory; signing in with a handle will not work.")"
+  fi
+
+  say_owner_hint
+  while :; do
+    ask OWNER "$(t "Öffentlicher Schlüssel des Besitzers (64 Hex-Zeichen, leer = wer sich zuerst anmeldet)" "Owner's public key (64 hex characters, empty = whoever signs in first)")" "$d_owner"
+    OWNER="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
+    [ -z "$OWNER" ] && break
+    [[ "$OWNER" =~ ^[0-9a-f]{64}$ ]] && break
+    warn "$(t "Genau 64 Zeichen 0-9 und a-f." "Exactly 64 characters 0-9 and a-f.")"
+  done
+
+  while :; do
+    ask NODE_IP "$(t "Öffentliche IP für Sprache und Video (leer = LiveKit ermittelt sie selbst)" "Public IP for voice and video (empty = LiveKit detects it itself)")" "$d_node"
+    [ -z "$NODE_IP" ] && break
+    is_ipv4 "$NODE_IP" && break
+    warn "$(t "Bitte eine IPv4-Adresse angeben oder leer lassen." "Please give an IPv4 address or leave it empty.")"
+  done
+
+  ask IMAGE "$(t "Container-Image (für Produktion am besten eine feste Version)" "Container image (for production preferably a fixed version)")" "$d_image"
+
+  # The database password must match an existing data volume: Postgres only reads POSTGRES_PASSWORD on its first start.
+  PG_PASSWORD="$(env_get "$envf" POSTGRES_PASSWORD)"
+  if [ "$MODE" = fresh ] && docker volume inspect squorli_pgdata >/dev/null 2>&1; then
+    warn "$(t "Es gibt schon eine Squorli-Datenbank (Docker-Volume squorli_pgdata). Sie behält ihr altes Passwort." \
+      "A Squorli database already exists (Docker volume squorli_pgdata). It keeps its old password.")"
+    ask PG_PASSWORD "$(t "Bisheriges POSTGRES_PASSWORD (leer = abbrechen)" "Previous POSTGRES_PASSWORD (empty = abort)")"
+    [ -n "$PG_PASSWORD" ] || exit 1
+  fi
+}
+
+say_owner_hint() {
+  printf '%s%s%s\n' "$D" "$(t "Wer sich als Erster anmeldet, wird Besitzer. Den eigenen Schlüssel zeigt der Client unter Einstellungen > Konto; ohne ihn bitte direkt nach dem Start selbst als Erster anmelden." \
+    "Whoever signs in first becomes the owner. The client shows your own key under Settings > Account; without it, sign in yourself first right after the start.")" "$R"
+}
+
+check_dns() {
+  [ "$DOMAIN" = localhost ] && return
+  local ips; ips="$(getent ahosts "$DOMAIN" 2>/dev/null | awk '{ print $1 }' | sort -u | tr '\n' ' ' || true)"
+  if [ -z "$ips" ]; then
+    warn "$(t "$DOMAIN löst (noch) nicht auf. Der DNS-Eintrag muss auf diesen Rechner zeigen, bevor ein Zertifikat ausgestellt werden kann." \
+      "$DOMAIN does not resolve (yet). The DNS record has to point to this machine before a certificate can be issued.")"
+  else
+    ok "$DOMAIN -> $ips"
+  fi
+}
+
+check_ports() {
+  # Only ports the previous setup of this installation did not already hold itself
+  local busy=()
+  if [ "$SETUP" = bundled ] && [ "$OLD_SETUP" != bundled ]; then
+    port_busy tcp 80 && busy+=("80/tcp"); port_busy tcp 443 && busy+=("443/tcp")
+  fi
+  if [ "$SETUP" != bundled ] && [ "$OLD_SETUP" != local ] && [ "$OLD_SETUP" != remote ]; then
+    port_busy tcp 3000 && busy+=("3000/tcp"); port_busy tcp 7880 && busy+=("7880/tcp")
+  fi
+  if [ -z "$OLD_SETUP" ]; then port_busy tcp 7881 && busy+=("7881/tcp"); port_busy udp 7882 && busy+=("7882/udp"); fi
+  if [ "${#busy[@]}" -gt 0 ]; then
+    warn "$(t "Diese Ports sind schon belegt: ${busy[*]}. Der Start wird daran scheitern." "These ports are already in use: ${busy[*]}. The start will fail on them.")"
+    confirm "$(t "Trotzdem fortfahren?" "Continue anyway?")" n || exit 1
+  fi
+}
+
+summary() {
+  step "$(t "Zusammenfassung" "Summary")"
+  local how
+  case "$SETUP" in
+    bundled) how="$(t "mitgelieferter Caddy (Let's Encrypt)" "bundled Caddy (Let's Encrypt)")" ;;
+    local) how="$(t "eigener Proxy auf diesem Rechner -> 127.0.0.1:3000 und 127.0.0.1:7880" "own proxy on this machine -> 127.0.0.1:3000 and 127.0.0.1:7880")" ;;
+    remote) how="$(t "Proxy $PROXY_IP -> $BIND_IP:3000 und $BIND_IP:7880" "proxy $PROXY_IP -> $BIND_IP:3000 and $BIND_IP:7880")" ;;
+  esac
+  printf '  %-18s %s\n' "$(t "Verzeichnis" "Folder")" "$DIR" "Domain" "$DOMAIN" "$(t "Servername" "Server name")" "$SERVER_NAME" \
+    "HTTPS" "$how" "Directory" "${DIRECTORY:-$(t "keins" "none")}" "$(t "Besitzer" "Owner")" "${OWNER:-$(t "wer sich zuerst anmeldet" "whoever signs in first")}" \
+    "LiveKit IP" "${NODE_IP:-$(t "automatisch" "automatic")}" "Image" "$IMAGE"
+  printf '  %-18s %s\n' "$(t "Offene Ports" "Open ports")" "$([ "$SETUP" = bundled ] && printf '80/tcp 443/tcp ')7881/tcp 7882/udp"
+  echo
+  confirm "$(t "So installieren?" "Install like this?")" y || exit 0
+}
+
+firewall() {
+  local ports=(7881/tcp 7882/udp)
+  [ "$SETUP" = bundled ] && ports=(80/tcp 443/tcp "${ports[@]}")
+  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+    if confirm "$(t "ufw ist aktiv. ${ports[*]} freigeben?" "ufw is active. Open ${ports[*]}?")" y; then
+      for p in "${ports[@]}"; do ufw allow "$p" >/dev/null; done; ok "ufw: ${ports[*]}"
+    fi
+  elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    if confirm "$(t "firewalld ist aktiv. ${ports[*]} freigeben?" "firewalld is active. Open ${ports[*]}?")" y; then
+      for p in "${ports[@]}"; do firewall-cmd --permanent --add-port="$p" >/dev/null; done
+      firewall-cmd --reload >/dev/null; ok "firewalld: ${ports[*]}"
+    fi
+  fi
+  printf '%s%s%s\n' "$D" "$(t "Eine Firewall beim Hoster oder ein Router davor muss dieselben Ports durchlassen (bzw. weiterleiten)." \
+    "A firewall at the hosting provider or a router in front has to let the same ports through (or forward them).")" "$R"
+}
+
+download_files() {
+  step "$(t "Deploy-Dateien laden" "Downloading deploy files")"
+  mkdir -p "$DIR/deploy/caddy" "$DIR/deploy/livekit" "$DIR/deploy/proxies"
+  local f tmp
+  for f in "${DEPLOY_FILES[@]}"; do
+    tmp="$(mktemp)"
+    curl -fsSL "$RAW_BASE/$f" -o "$tmp" || { rm -f "$tmp"; die "$(t "Download fehlgeschlagen" "Download failed"): $RAW_BASE/$f"; }
+    # Keep a copy of local edits (e.g. a changed Caddyfile) before replacing a file
+    if [ -f "$DIR/$f" ] && ! cmp -s "$tmp" "$DIR/$f"; then cp "$DIR/$f" "$DIR/$f.bak"; warn "$(t "$f geändert, alte Fassung: $f.bak" "$f changed, old version: $f.bak")"; fi
+    cat "$tmp" > "$DIR/$f"; rm -f "$tmp"
+  done
+  ok "$RAW_BASE"
+}
+
+write_env() {
+  step "$(t ".env schreiben" "Writing .env")"
+  local envf="$DIR/.env"
+  umask 077
+  if [ ! -f "$envf" ]; then
+    curl -fsSL "$RAW_BASE/.env.example" -o "$envf" || die "$(t "Download fehlgeschlagen" "Download failed"): $RAW_BASE/.env.example"
+  else
+    cp "$envf" "$envf.bak.$(date +%Y%m%d-%H%M%S)"
+  fi
+  chmod 600 "$envf"
+
+  env_set "$envf" PUBLIC_DOMAIN "$DOMAIN"
+  env_set "$envf" SERVER_NAME "$SERVER_NAME"
+  env_set "$envf" APP_IMAGE "$IMAGE"
+  env_set "$envf" PROXY_MODE "$([ "$SETUP" = bundled ] && printf bundled || printf external)"
+  env_set "$envf" DIRECTORY_URL "$DIRECTORY"
+  env_set "$envf" OWNER_PUBLIC_KEY "$OWNER"
+  env_set "$envf" LIVEKIT_NODE_IP "$NODE_IP"
+
+  # Secrets: kept when present, generated when missing or still the template's placeholder
+  local v
+  v="$PG_PASSWORD"; if [ -z "$v" ] || [ "$v" = change-me ]; then v="$(secret)"; fi
+  env_set "$envf" POSTGRES_PASSWORD "$v"
+  v="$(env_get "$envf" LIVEKIT_API_KEY)"; if [ -z "$v" ] || [ "$v" = devkey ]; then env_set "$envf" LIVEKIT_API_KEY squorli; fi
+  v="$(env_get "$envf" LIVEKIT_API_SECRET)"
+  if [ "${#v}" -lt 32 ] || [ "$v" = change-me-to-at-least-32-random-characters ]; then env_set "$envf" LIVEKIT_API_SECRET "$(secret)"; fi
+
+  if [ "$SETUP" = remote ]; then
+    env_set "$envf" PROXY_BIND_IP "$BIND_IP"
+    v="$(env_get "$envf" TRUSTED_PROXIES)"; v="${v:-$DEFAULT_TRUSTED}"
+    case ",$v," in *",$PROXY_IP,"*) ;; *) v="$v,$PROXY_IP" ;; esac
+    env_set "$envf" TRUSTED_PROXIES "$v"
+  fi
+  umask 022
+  ok "$envf ($(t "nur für root lesbar" "readable by root only"))"
+}
+
+compose_args() {
+  CARGS=(--env-file ../.env -f compose.yml)
+  case "$SETUP" in local) CARGS+=(-f proxies/nginx.ports.yml) ;; remote) CARGS+=(-f proxies/remote-proxy.ports.yml) ;; esac
+  CARGS+=(--profile "$([ "$SETUP" = bundled ] && printf bundled || printf external)")
+}
+dc() { (cd "$DIR/deploy" && docker compose "${CARGS[@]}" "$@"); }
+
+write_helper() {
+  local h="$DIR/squorli"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf '# Written by the Squorli installer (deploy/install.sh); running the installer again rewrites it.\n'
+    printf '# Runs docker compose for this installation with the right profile and overlays.\n'
+    printf '# setup: %s\n' "$SETUP"
+    printf 'ARGS=(%s)\n' "${CARGS[*]}"
+    cat <<'EOF'
+set -euo pipefail
+cd "$(dirname "$(readlink -f "$0")")/deploy"
+dc() { docker compose "${ARGS[@]}" "$@"; }
+case "${1:-help}" in
+  update)  dc pull && dc up -d --no-build --remove-orphans && dc ps ;;
+  status)  dc ps ;;
+  logs)    shift; dc logs --tail=200 -f "$@" ;;
+  restart) shift; dc restart "$@" ;;
+  down)    dc down ;;
+  backup)
+    dest="${2:-../backups}/$(date +%Y%m%d-%H%M%S)"; mkdir -p "$dest"; chmod 700 "$(dirname "$dest")" "$dest"
+    dc exec -T postgres pg_dump -U chat -d chat > "$dest/squorli-database.sql"
+    dc exec -T app tar czf - -C /app/data . > "$dest/squorli-files.tar.gz"
+    cp ../.env "$dest/env"; chmod 600 "$dest"/*
+    echo "Backup: $(readlink -f "$dest")" ;;
+  help|-h|--help)
+    echo "squorli update | status | logs [service] | restart [service] | down | backup [dir] | <docker compose command>" ;;
+  *) dc "$@" ;;
+esac
+EOF
+  } > "$h"
+  chmod 755 "$h"
+  if [ ! -e /usr/local/bin/squorli ] || [ "$(readlink -f /usr/local/bin/squorli 2>/dev/null)" = "$(readlink -f "$h")" ]; then
+    ln -sf "$h" /usr/local/bin/squorli 2>/dev/null && HELPER=squorli || HELPER="$h"
+  else
+    HELPER="$h"
+  fi
+}
+
+start_stack() {
+  step "$(t "Container starten" "Starting containers")"
+  # Leaving the bundled mode: Caddy belongs to the profile "bundled" only and would keep holding 80/443
+  if [ "$OLD_SETUP" = bundled ] && [ "$SETUP" != bundled ]; then
+    (cd "$DIR/deploy" && docker compose --env-file ../.env -f compose.yml --profile bundled rm -sf caddy) || true
+  fi
+  dc pull
+  dc up -d --no-build --remove-orphans
+}
+
+verify() {
+  step "$(t "Prüfen" "Checking")"
+  local up=0
+  for _ in $(seq 1 60); do
+    if dc exec -T app node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))" >/dev/null 2>&1; then up=1; break; fi
+    sleep 2
+  done
+  if [ "$up" != 1 ]; then
+    dc ps || true; dc logs --tail=40 app || true
+    die "$(t "Der App-Server antwortet nicht. Logs: $HELPER logs app" "The app server does not answer. Logs: $HELPER logs app")"
+  fi
+  ok "$(t "App-Server läuft" "App server is running")"
+
+  case "$SETUP" in
+    bundled)
+      local health="" code=""
+      for _ in $(seq 1 12); do
+        health="$(curl -fsS --max-time 10 "https://$DOMAIN/api/health" 2>/dev/null || true)"
+        [ -n "$health" ] && break; sleep 5
+      done
+      if [ -n "$health" ]; then
+        ok "https://$DOMAIN/api/health"
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://$DOMAIN/rtc/validate" || true)"
+        if [ "$code" = 401 ]; then ok "https://$DOMAIN/rtc/validate -> 401"; else warn "https://$DOMAIN/rtc/validate -> $code ($(t "erwartet 401" "expected 401"))"; fi
+      else
+        dc logs --no-log-prefix --tail=50 caddy 2>/dev/null | grep '"level":"error"' | tail -n 3 || true
+        warn "$(t "https://$DOMAIN antwortet noch nicht. Meist fehlt der DNS-Eintrag oder Port 80/443 ist von außen nicht erreichbar; Caddy versucht es weiter ($HELPER logs caddy)." \
+          "https://$DOMAIN does not answer yet. Usually the DNS record is missing or port 80/443 is not reachable from outside; Caddy keeps trying ($HELPER logs caddy).")"
+      fi ;;
+    local|remote)
+      local host=127.0.0.1; [ "$SETUP" = remote ] && host="$BIND_IP"
+      if probe "http://$host:3000/api/health" 200; then ok "http://$host:3000/api/health"; else warn "http://$host:3000 $(t "nicht erreichbar" "not reachable")"; fi
+      if probe "http://$host:7880/rtc/validate" 401; then ok "http://$host:7880/rtc/validate -> 401"; else warn "http://$host:7880 $(t "nicht erreichbar" "not reachable")"; fi ;;
+  esac
+}
+
+finish() {
+  step "$(t "Fertig" "Done")"
+  case "$SETUP" in
+    local|remote)
+      local host=127.0.0.1; [ "$SETUP" = remote ] && host="$BIND_IP"
+      printf '%s\n' "$(t "Jetzt den Reverse Proxy einrichten (TLS für $DOMAIN, WebSockets an):" "Now set up the reverse proxy (TLS for $DOMAIN, WebSockets on):")" \
+        "  https://$DOMAIN/      -> http://$host:3000" "  https://$DOMAIN/rtc*  -> http://$host:7880" \
+        "$(t "Vorlagen und Anleitung: $DIR/deploy/proxies/ (README.md, nginx.conf)" "Templates and guide: $DIR/deploy/proxies/ (README.md, nginx.conf)")"
+      [ "$SETUP" = remote ] && [ -n "$PROXY_IP" ] && printf '%s\n' "$(t "Ports 3000 und 7880 nur für $PROXY_IP öffnen." "Open ports 3000 and 7880 to $PROXY_IP only.")"
+      echo ;;
+  esac
+  [ "$DOMAIN" = localhost ] || printf '%s %shttps://%s%s\n' "$(t "Adresse:" "Address:")" "$B" "$DOMAIN" "$R"
+  if [ -z "$OWNER" ] && [ "$MODE" = fresh ]; then
+    printf '%s%s%s\n' "$YEL" "$(t "Wer sich als Erster anmeldet, wird Besitzer: jetzt gleich selbst anmelden." "Whoever signs in first becomes the owner: sign in yourself right now.")" "$R"
+  fi
+  printf '%s\n' "$(t "Verwalten:" "Manage:")" \
+    "  $HELPER status      $(t "Container anzeigen" "show containers")" \
+    "  $HELPER logs app    $(t "Logs verfolgen" "follow logs")" \
+    "  $HELPER update      $(t "neues Image holen und neu starten (vorher Backup)" "pull the new image and restart (back up first)")" \
+    "  $HELPER backup      $(t "Datenbank, Dateien und .env nach $DIR/backups sichern" "back up database, files and .env to $DIR/backups")" \
+    "$(t "Einstellungen ändern: dieses Skript erneut ausführen, oder $DIR/.env bearbeiten und $HELPER up -d" \
+      "Change settings: run this script again, or edit $DIR/.env and run $HELPER up -d")"
+}
+
+main() {
+  setup_input
+  choose_language
+  printf '\n%sSquorli Server%s – %s\n' "$B" "$R" "$(t "Installation für Linux" "installation for Linux")"
+  preflight
+  ensure_docker
+  choose_dir
+  HELPER="$DIR/squorli"
+
+  if [ "$MODE" = update ]; then
+    local envf="$DIR/.env"
+    SETUP="$OLD_SETUP"; DOMAIN="$(env_get "$envf" PUBLIC_DOMAIN)"; OWNER="$(env_get "$envf" OWNER_PUBLIC_KEY)"
+    BIND_IP="$(env_get "$envf" PROXY_BIND_IP)"; PROXY_IP=""
+    compose_args
+    printf '%s%s%s\n' "$D" "$(t "Vorher sichern: $HELPER backup" "Back up first: $HELPER backup")" "$R"
+    confirm "$(t "Jetzt aktualisieren?" "Update now?")" y || exit 0
+    download_files
+    write_helper
+    start_stack
+    verify
+    finish
+    return
+  fi
+
+  configure
+  check_ports
+  summary
+  firewall
+  compose_args
+  download_files
+  write_env
+  write_helper
+  start_stack
+  verify
+  finish
+}
+
+main "$@"

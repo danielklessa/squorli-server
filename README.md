@@ -32,6 +32,19 @@ Third-party software, fonts and data inside the client are listed with their lic
 
 The stack consists of the app server (this repository, including the web client), Postgres and [LiveKit](https://livekit.io) as media server. Everything runs from `deploy/compose.yml`.
 
+## Interactive installer
+
+On a Linux host (x86_64) with root access, `deploy/install.sh` does the steps of the quick start below by asking questions, in German or English:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/danielklessa/squorli-server/main/deploy/install.sh -o install.sh
+sudo bash install.sh
+```
+
+It asks for the domain, the server name, who terminates HTTPS (the bundled Caddy, a reverse proxy on the same host, or one on another host), the directory, the owner's public key and the public IP for media; installs Docker through get.docker.com if it is missing (after asking); downloads the deploy files into `/opt/squorli` (`SQUORLI_DIR` changes that); writes `.env` with fresh secrets (readable by root only); offers to open the ports in an active ufw or firewalld; pulls, starts and checks the stack. It also writes `/opt/squorli/squorli` (linked as `squorli` into `/usr/local/bin`), which runs Docker Compose with the right profile and overlays: `squorli update`, `squorli status`, `squorli logs app`, `squorli backup` (database dump, attachments and `.env` into `/opt/squorli/backups`), and any other Compose command.
+
+Running the installer again on an existing installation updates it (new image and deploy files; changed files are kept as `.bak`) or changes its settings; the secrets, the database and the files stay. The published image exists for x86_64 only; on ARM build from source.
+
 ## Quick start with the published image
 
 The public image is **`ghcr.io/danielklessa/squorli-server:latest`** (tags and digests: [container package](https://github.com/danielklessa/squorli-server/pkgs/container/squorli-server)). You still need a checkout of this repository for the Compose files and the mounted LiveKit and Caddy configuration; no local build is required.
@@ -126,7 +139,7 @@ TURN for clients in networks that block UDP and direct TCP is prepared but off b
 
 1. Back up the database, attachments and configuration.
 2. Review the release notes.
-3. Repeat `pull` and `up -d --no-build` with the same profile and overlays.
+3. Repeat `pull` and `up -d --no-build` with the same profile and overlays (after the interactive installer: `squorli backup`, then `squorli update`).
 
 `latest` is mutable; for reproducible deployments set `APP_IMAGE` to a version tag or `ghcr.io/danielklessa/squorli-server@sha256:<digest>` and keep the repository checkout aligned with that release. Startup runs database migrations; an image rollback does not reverse them.
 
@@ -153,7 +166,9 @@ Squorli Server is licensed under the [Apache License, Version 2.0](LICENSE) (Cop
 
 The legal notice (Impressum) and the privacy policy for this repository, its releases, the website and the Squorli Directory are published on the website: [Impressum](https://squorli.com/de/impressum/) / [Legal notice](https://squorli.com/en/impressum/) and [Datenschutzerklärung](https://squorli.com/de/datenschutz/) / [Privacy policy](https://squorli.com/en/datenschutz/). Their source is the Markdown under `legal/` in the website repository; this repository carries no copy.
 
-If you run your own Squorli Server, you are the operator of that instance: publish your own legal notice and privacy policy for it. The privacy policy above describes what the software sends to the Directory and to squorli.com (update checks of the desktop app), which you can reuse for that.## Production (standard: published Docker image, no Git clone)
+If you run your own Squorli Server, you are the operator of that instance: publish your own legal notice and privacy policy for it. The privacy policy above describes what the software sends to the Directory and to squorli.com (update checks of the desktop app), which you can reuse for that.
+
+## Production (standard: published Docker image, no Git clone)
 
 Requirements: Docker Engine with the Compose plugin, curl and OpenSSL on a Linux host. You do not need Git, Node.js or a local application build. Point your domain to the host and open 80/tcp, 443/tcp, 7881/tcp and 7882/udp. Follow the complete guide in [English](https://squorli.com/en/docs/install/) or [German](https://squorli.com/de/docs/install/).
 
