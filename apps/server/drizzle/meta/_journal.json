@@ -218,6 +218,13 @@
       "when": 1790174005627,
       "tag": "0030_panoramic_brood",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1790248655005,
+      "tag": "0031_unknown_wolf_cub",
+      "breakpoints": true
     }
   ]
 }

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { checkHotkey, controlLink, formatHotkey, hotkeyAccelerator, hotkeyFromKey, keyLabel, normalizeHotkeys, parseControlAction, sameHotkeys } from "./hotkeys";
+import { checkHotkey, controlLink, formatHotkey, hotkeyAccelerator, hotkeyFromKey, keyLabel, keyName, normalizeHotkeys, parseControlAction, sameHotkeys } from "./hotkeys";
 
 const names = { ctrl: "Strg", alt: "Alt", shift: "Umschalt", meta: "Win" };
-const key = (code: string, mods: Partial<{ ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }> = {}) => ({ code, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods });
+const key = (code: string, mods: Partial<{ keyCode: number; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }> = {}) => ({ code, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods });
+// A German keyboard (Windows virtual keys as Chromium reports them in keyCode): Ö on the US semicolon, Y and Z swapped.
+const german: Record<string, string> = { Semicolon: "ö", Quote: "ä", BracketLeft: "ü", Minus: "ß", KeyZ: "y", KeyY: "z", Digit1: "1" };
 
 describe("hotkeyFromKey", () => {
   it("takes the key with the modifiers held, and waits while only a modifier is down", () => {
@@ -10,6 +12,11 @@ describe("hotkeyFromKey", () => {
     for (const code of ["ControlLeft", "ShiftRight", "AltLeft", "MetaRight", "AltGraph", "OSLeft"]) expect(hotkeyFromKey(key(code, { ctrlKey: true })), code).toBeNull();
     expect(hotkeyFromKey(key(""))).toBeNull();
     expect(hotkeyFromKey(key("Key M"))).toBeNull();
+  });
+  it("keeps the layout's virtual key of a letter, digit or punctuation key when asked (Windows)", () => {
+    expect(hotkeyFromKey(key("Semicolon", { keyCode: 192, ctrlKey: true }), true)).toEqual({ code: "Semicolon", vk: 192, ctrl: true, alt: false, shift: false, meta: false });
+    expect(hotkeyFromKey(key("Semicolon", { keyCode: 192, ctrlKey: true }))).toEqual({ code: "Semicolon", ctrl: true, alt: false, shift: false, meta: false });
+    expect(hotkeyFromKey(key("F13", { keyCode: 124 }), true)).toEqual({ code: "F13", ctrl: false, alt: false, shift: false, meta: false });
   });
 });
 
@@ -24,6 +31,13 @@ describe("hotkeyAccelerator", () => {
     expect(hotkeyAccelerator({ code: "ArrowUp", ctrl: true, alt: false, shift: false, meta: true })).toBe("Control+Super+Up");
     expect(hotkeyAccelerator({ code: "Space", ctrl: true, alt: false, shift: false, meta: false })).toBe("Control+Space");
     expect(hotkeyAccelerator({ code: "Backquote", ctrl: false, alt: true, shift: false, meta: false })).toBe("Alt+`");
+  });
+  it("names a layout key by its virtual key, which is what Windows registers (checked with Electron on a German keyboard)", () => {
+    expect(hotkeyAccelerator({ code: "Semicolon", vk: 192, ctrl: true, alt: false, shift: false, meta: false })).toBe("Control+`");
+    expect(hotkeyAccelerator({ code: "KeyZ", vk: 0x59, ctrl: true, alt: false, shift: false, meta: false })).toBe("Control+Y");
+    expect(hotkeyAccelerator({ code: "Minus", vk: 219, ctrl: true, alt: false, shift: false, meta: false })).toBe("Control+[");
+    expect(hotkeyAccelerator({ code: "Digit1", vk: 0x31, ctrl: false, alt: true, shift: false, meta: false })).toBe("Alt+1");
+    expect(checkHotkey({ code: "IntlBackslash", vk: 226, ctrl: true, alt: false, shift: false, meta: false })).toBe("unknownKey");
   });
   it("refuses a key nobody could type without, and keys it cannot name", () => {
     expect(checkHotkey({ code: "KeyM", ctrl: false, alt: false, shift: false, meta: false })).toBe("needsModifier");
@@ -41,6 +55,9 @@ describe("normalizeHotkeys", () => {
     expect(normalizeHotkeys({ micToggle: { code: "KeyM", ctrl: true }, deafenToggle: { code: "Control Left", ctrl: "yes" } })).toEqual({ micToggle: { code: "KeyM", ctrl: true, alt: false, shift: false, meta: false }, deafenToggle: null });
     expect(normalizeHotkeys({ micToggle: { code: "ShiftLeft", ctrl: true } })).toEqual({ micToggle: null, deafenToggle: null });
     expect(sameHotkeys(normalizeHotkeys({ micToggle: { code: "F13" } }), { micToggle: { code: "F13", ctrl: false, alt: false, shift: false, meta: false }, deafenToggle: null })).toBe(true);
+    expect(normalizeHotkeys({ micToggle: { code: "Semicolon", vk: 192, ctrl: true }, deafenToggle: { code: "F13", vk: 124 } })).toEqual({ micToggle: { code: "Semicolon", vk: 192, ctrl: true, alt: false, shift: false, meta: false }, deafenToggle: { code: "F13", ctrl: false, alt: false, shift: false, meta: false } });
+    expect(normalizeHotkeys({ micToggle: { code: "KeyM", vk: 999, ctrl: true } }).micToggle).toEqual({ code: "KeyM", ctrl: true, alt: false, shift: false, meta: false });
+    expect(sameHotkeys(normalizeHotkeys({ micToggle: { code: "KeyZ", vk: 0x59, ctrl: true } }), normalizeHotkeys({ micToggle: { code: "KeyZ", vk: 0x5A, ctrl: true } }))).toBe(false);
   });
 });
 
@@ -53,6 +70,15 @@ describe("formatHotkey and keyLabel", () => {
     expect(keyLabel("ArrowLeft")).toBe("Left");
     expect(keyLabel("PageDown")).toBe("Page Down");
     expect(keyLabel("AudioVolumeMute")).toBe("Volume Mute");
+  });
+  it("shows a layout key as the user's keyboard writes it", () => {
+    const layout = (code: string) => german[code];
+    expect(formatHotkey({ code: "Semicolon", vk: 192, ctrl: true, alt: false, shift: false, meta: false }, names, layout)).toBe("Strg+Ö");
+    expect(keyName("KeyZ", layout)).toBe("Y");
+    expect(keyName("Minus", layout)).toBe("ß");
+    expect(keyName("Semicolon")).toBe("Semicolon");
+    expect(keyName("Space", () => " ")).toBe("Space");
+    expect(keyName("F13", layout)).toBe("F13");
   });
 });
 

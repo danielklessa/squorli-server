@@ -1,6 +1,6 @@
 import type { AccountServer } from "@squorli/protocol";
 import { describe, expect, it } from "vitest";
-import { buildRailServers } from "./railServers";
+import { buildRailServers, voiceActivity } from "./railServers";
 
 const srv = (host: string, lastSeenAt: string, displayName: string | null = null): AccountServer =>
   ({ host, name: `Name of ${host}`, displayName, lastSeenAt, verified: true, iconUpdatedAt: null, leaveRequestedAt: null });
@@ -31,4 +31,16 @@ describe("buildRailServers", () => {
     const list = buildRailServers({ ...base, home, order: ["old.example", "home.example"], accountServers: [srv("old.example", "2026-09-01T00:00:00.000Z"), srv("new.example", "2026-09-10T00:00:00.000Z")], localHosts: [{ host: "added.example", name: null }] });
     expect(list.map((s) => s.host)).toEqual(["old.example", "home.example", "new.example", "added.example"]);
   });
+});
+
+describe("voiceActivity", () => {
+  const m = (userId: string) => ({ userId, displayName: userId, micMuted: false, deafened: false, cameraOn: false, screenOn: false });
+  it("counts every member once across channels", () => {
+    expect(voiceActivity({ a: [m("u1"), m("u2")], b: [m("u3"), m("u1")], c: [] }, null)).toBe(3);
+  });
+  it("leaves the AFK channel out", () => {
+    expect(voiceActivity({ a: [m("u1")], afk: [m("u2"), m("u3")] }, "afk")).toBe(1);
+    expect(voiceActivity({ afk: [m("u2")] }, "afk")).toBe(0);
+  });
+  it("is zero without a roster", () => { expect(voiceActivity({}, null)).toBe(0); });
 });

@@ -1,7 +1,9 @@
-import { AUDIO_BITRATES, CHANNEL_PERMISSION_GROUPS, Permission, hasPermission, type Channel, type ChannelNotification, type PermissionName, type PermissionOverwrite, type ServerState } from "@squorli/protocol";
+import { AUDIO_BITRATES, CHANNEL_PERMISSION_GROUPS, Permission, hasPermission, type Channel, type ChannelNotification, type PermissionName, type PermissionOverwrite, type ServerState, type ChannelBlock } from "@squorli/protocol";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, type ChannelPatch, type ServerApi } from "./api";
 import { Avatar } from "./Avatar";
+import { blockErrorText } from "./apiErrorText";
+import { blockMinutes } from "./voteKick";
 import { SHORTCUTS, SLOWMODE_STEPS, baseOf, emptyOverwrite, everyoneDenies, grantableIn, inheritedFrom, overwriteState, permissionsFor, resolveIn, setOverwriteState, slowmodeLabel, withEveryoneDeny, type OverwriteState } from "./channelPerms";
 import { askConfirm, showNotice } from "./dialogs";
 import { EntityPicker } from "./EntityPicker";
@@ -19,7 +21,7 @@ import { TriState } from "./TriState";
  * is looked up on every render, never frozen: when it vanishes or the right to manage it goes, the dialog closes.
  */
 export type ChannelDialogTarget = { kind: "channel" | "category"; id: string };
-type Tab = "general" | "permissions" | "voice" | "text" | "notify";
+type Tab = "general" | "permissions" | "voice" | "blocks" | "text" | "notify";
 
 export function ChannelDialog({ api, server, target, myUserId, onClose }: { api: ServerApi; server: ServerState; target: ChannelDialogTarget; myUserId: string; onClose: () => void }) {
   const channel = target.kind === "channel" ? server.channels.find((c) => c.id === target.id) ?? null : null;
@@ -42,6 +44,8 @@ export function ChannelDialog({ api, server, target, myUserId, onClose }: { api:
     { id: "general", icon: kind === "text" ? "hash" : kind === "voice" ? "volume-2" : "folder", label: t("chan.tab.general") },
     { id: "permissions", icon: "shield", label: t("chan.tab.permissions") },
     ...(kind === "voice" ? [{ id: "voice" as const, icon: "audio-lines", label: t("chan.tab.voice") }] : []),
+    // Channel blocks (docs/features/channel-blocks.md): whoever may move members here sees and lifts them.
+    ...(kind === "voice" && hasPermission(myPerms, Permission.MOVE_MEMBERS) ? [{ id: "blocks" as const, icon: "ban", label: t("chan.tab.blocks") }] : []),
     ...(kind === "text" ? [{ id: "text" as const, icon: "timer", label: t("chan.tab.text") }, { id: "notify" as const, icon: "bell", label: t("chan.tab.notify") }] : []),
   ];
   const run = async (fn: () => Promise<unknown>) => { setErr(null); try { await fn(); } catch (e) { setErr(explain(e)); } };
@@ -61,6 +65,7 @@ export function ChannelDialog({ api, server, target, myUserId, onClose }: { api:
             {tab === "general" && (channel ? <GeneralTab api={api} server={server} channel={channel} run={run} onClose={onClose} /> : <CategoryGeneralTab api={api} category={category!} run={run} onClose={onClose} />)}
             {tab === "permissions" && <PermissionsTab api={api} server={server} target={target} kind={kind} myUserId={myUserId} myPerms={myPerms} categoryId={channel?.categoryId ?? null} />}
             {tab === "voice" && channel && <VoiceTab api={api} server={server} channel={channel} run={run} />}
+            {tab === "blocks" && channel && <BlocksTab api={api} server={server} channel={channel} />}
             {tab === "text" && channel && <TextTab api={api} channel={channel} run={run} />}
             {tab === "notify" && channel && <NotifyTab api={api} channel={channel} run={run} />}
           </div>
@@ -172,6 +177,38 @@ function VoiceTab({ api, server, channel, run }: { api: ServerApi; server: Serve
   );
 }
 
+/** The channel's running blocks (a moderator's or a vote kick's), each with a button that lifts it. */
+function BlocksTab({ api, server, channel }: { api: ServerApi; server: ServerState; channel: Channel }) {
+  const [blocks, setBlocks] = useState<ChannelBlock[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const load = () => { api.channelBlocks().then((all) => setBlocks(all.filter((b) => b.channelId === channel.id)), (e: unknown) => { setErr(blockErrorText(e)); setBlocks([]); }); };
+  useEffect(load, [api, channel.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const lift = (b: ChannelBlock) => { setErr(null); api.liftChannelBlock(b.channelId, b.userId).then(load, (e: unknown) => { setErr(blockErrorText(e)); load(); }); };
+  return (
+    <div className="stack chan-tab">
+      <h3>{t("chan.blocks")}</h3>
+      <p className="muted small">{t("chan.blocksHint")}</p>
+      {err && <p className="error small">{err}</p>}
+      {blocks === null ? <p className="muted small">{t("chan.loading")}</p> : blocks.length === 0 ? <p className="muted small">{t("chan.blocksNone")}</p> : (
+        <ul className="chan-blocks">
+          {blocks.map((b) => {
+            const member = server.members.find((m) => m.userId === b.userId);
+            return (
+              <li key={b.userId} className="row">
+                <Avatar name={member?.displayName ?? "?"} src={member?.avatarUrl ?? null} />
+                <span className="chan-block-who"><strong>{member?.displayName ?? "?"}</strong>
+                  <small className="muted">{b.until ? t("members.blockLeft", { minutes: blockMinutes(b.until, Date.now()) }) : t("members.blockForever")}{b.source === "votekick" ? ` · ${t("members.blockVoteKick")}` : b.blockedBy ? ` · ${b.blockedBy}` : ""}</small></span>
+                <span className="spacer" />
+                <button className="secondary small" onClick={() => lift(b)}><Icon name="lock-open" /> {t("chan.blockLift")}</button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function TextTab({ api, channel, run }: { api: ServerApi; channel: Channel; run: RunFn }) {
   const [seconds, setSeconds] = useState(channel.slowmodeSeconds);
   const dirty = seconds !== channel.slowmodeSeconds;
@@ -263,8 +300,13 @@ function PermissionsTab({ api, server, target, kind, myUserId, myPerms, category
     const da = defaultRole && a.targetType === "role" && a.targetId === defaultRole.id ? 0 : 1, db = defaultRole && b.targetType === "role" && b.targetId === defaultRole.id ? 0 : 1;
     if (da !== db) return da - db;
     if (a.targetType !== b.targetType) return a.targetType === "role" ? -1 : 1;
+    // Roles in the owner's order (highest first), members by name.
+    if (a.targetType === "role") return positionOf(b) - positionOf(a) || labelOf(a).localeCompare(labelOf(b));
     return labelOf(a).localeCompare(labelOf(b));
   });
+  function positionOf(o: PermissionOverwrite): number {
+    return server.roles.find((r) => r.id === o.targetId)?.position ?? -1;
+  }
   function labelOf(o: PermissionOverwrite): string {
     return o.targetType === "role" ? server.roles.find((r) => r.id === o.targetId)?.name ?? "?" : server.members.find((m) => m.userId === o.targetId)?.displayName ?? "?";
   }

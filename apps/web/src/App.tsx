@@ -26,7 +26,7 @@ import { SettingsDialog, type SettingsTab } from "./SettingsDialog";
 import { applyBranding, applyHomeScreenName } from "./branding";
 import { ServerBrowser } from "./ServerBrowser";
 import { ServerRail } from "./ServerRail";
-import { buildRailServers } from "./railServers";
+import { buildRailServers, voiceActivity } from "./railServers";
 import { ColumnHandle } from "./ColumnHandle";
 import { loadLayout, saveLayout, type ColumnId, type Layout } from "./layout";
 import { NoServers } from "./NoServers";
@@ -55,6 +55,7 @@ import { platform, type ControlEvent, type HotkeyStatus, type ScreenPick, type S
 import { formatDeepLink } from "./platform/deepLink";
 import { setSquorliLinkHandler } from "./squorliLinks";
 import { isTypingTarget } from "./usePushToTalk";
+import { askRemoveFriend } from "./friendActions";
 
 /**
  * A command from outside the window (docs/features/hotkeys.md): a global shortcut, the push-to-talk key watched by the
@@ -209,6 +210,9 @@ export function App() {
   const [voiceHost, setVoiceHost] = useState<string | null>(null);
   const voiceHostRef = useRef<string | null>(null);
   voiceHostRef.current = voiceHost;
+  /** The server the last voice connection belonged to: its removal notice may come after the connection is already gone. */
+  const lastVoiceHostRef = useRef<string | null>(null);
+  if (voiceHost) lastVoiceHostRef.current = voiceHost;
   /** The join under way, if any (joinVoice): the same host and channel asked again waits for it instead of starting over. */
   const joinInFlight = useRef<{ host: string; channelId: string; promise: Promise<void> } | null>(null);
   /** Moved to the AFK channel for inactivity: the voice channel the dock offers the way back to (user's decision: never automatically). */
@@ -336,8 +340,11 @@ export function App() {
     if (!joinsNow) return;
     const promise = (async () => {
       try {
-        if (voiceHostRef.current && voiceHostRef.current !== host) await leaveVoice();
         const { url, token } = await conn.api.rtcToken(channelId);
+        // Voice on another server: withdraw the presence there; the room itself is switched by client.join(), never left
+        // through leaveVoice(), whose "disconnected" would close the stage just opened (the effect on voice.status above).
+        const previous = voiceHostRef.current;
+        if (previous && previous !== host) { store.connection(previous)?.send({ type: "voice.leave" }); setVoiceHost(null); }
         const ice = new URLSearchParams(window.location.search).get("ice");
         await client.join(channelId, url, token, settings, {
           ...(ice === "relay" ? { iceTransportPolicy: "relay" as const } : {}),
@@ -449,8 +456,10 @@ export function App() {
 
   // Moderation (M3): carry out a moderator's move or stop and tell the user what happened.
   useEffect(() => {
-    store.onVoiceMoved = (host, channelId, by, reason) => {
-      if (host !== voiceHostRef.current) return;
+    store.onVoiceMoved = (host, channelId, by, reason, until) => {
+      // A removal (channelId null) may arrive after LiveKit already dropped us (PARTICIPANT_REMOVED): it still explains why.
+      const late = channelId === null && host === lastVoiceHostRef.current && client.state.status === "disconnected";
+      if (host !== voiceHostRef.current && !late) return;
       if (channelId && reason === "afk") {
         // Inactivity: into the AFK channel; the dock explains it and offers the way back to where the user was.
         const from = client.state.channelId;
@@ -464,6 +473,10 @@ export function App() {
       } else if (reason === "elsewhere") {
         // The same account joined a voice channel of this server from another device or tab: that one takes over.
         client.setNotice(t("app.voiceElsewhereNotice"));
+        void leaveVoice();
+      } else if (reason === "blocked") {
+        // A moderator removed and blocked us (docs/features/channel-blocks.md); `until` null = for good.
+        client.setNotice(until ? t("app.blockedNotice", { by, minutes: blockMinutes(until, Date.now()) }) : t("app.blockedForeverNotice", { by }));
         void leaveVoice();
       } else if (reason === "votekick") {
         // Voted out (docs/features/votekick.md): the result came just before this event and carries how long the channel stays closed.
@@ -600,7 +613,8 @@ export function App() {
   const reportJoinError = (err: unknown) => { if (!client.state.error) void showNotice({ title: t("voice.errorTitle"), text: joinErrorText(err) }); };
   const stage = (detached: boolean) => voiceChannel && voiceServer?.server && voiceApi ? (
     <VoiceStage client={client} voice={voice} channel={voiceChannel} members={voiceServer.server.members} myPermissions={permsIn(voiceServer.server, voiceChannel.id)} locked={!!voiceLock}
-      voteKick={voiceHost && voiceServer.voteKickAllowed[voiceChannel.id] ? { onStart: (userId: string) => startVoteKick(voiceHost, voiceChannel.id, userId) } : null}
+      myUserId={voiceServer.userId ?? ""} roster={voiceServer.voice} channels={voiceServer.server.channels} channelPermissions={(id) => permsIn(voiceServer.server!, id)}
+      voteKickAllowed={voiceServer.voteKickAllowed} onVoteKick={(userId, channelId) => { if (voiceHost) startVoteKick(voiceHost, channelId, userId); }}
       api={voiceApi} radio={radio} radioStations={voiceServer.server.radioStations} radioTitle={voiceServer.radioTitles[voiceChannel.id] ?? null} playerTile={embedKeyOf(embedSource)} playerOff={playerOff} onDismissPlayerOff={() => setPlayerOffDismissed(videoKey)} playerPopped={playerWindow.win !== null} onRestorePlayer={playerWindow.restore}
       onToggleCamera={toggleCamera} onToggleBlur={toggleBlur} onLeave={hangUp} onPopout={videoWindows.open} poppedIds={videoWindows.poppedIds} onRestore={videoWindows.restore}
       detached={detached} onToggleWindow={detached ? stageWindow.close : stageWindow.open} />
@@ -612,6 +626,10 @@ export function App() {
     stateOf: (pk: string) => store.friendState(pk) ?? null,
     onRequest: (pk: string) => { store.requestFriend(pk); store.openHome(true); },
     onMessage: (pk: string) => { const st = store.friendState(pk); if (st === "accepted") { store.selectPeer(pk); setMobileContent(true); } else store.openHome(true); },
+    onRemove: (pk: string, name: string) => askRemoveFriend(store, pk, name),
+    onAccept: (pk: string) => store.acceptFriend(pk),
+    // The member list's small profile: send, then show the conversation in the friends view (user's wish, 24 September 2026).
+    onSend: async (pk: string, text: string) => { await store.sendDm(pk, text); store.selectPeer(pk); setMobileContent(true); },
   } : null;
 
   // Server rail: own server first, then the account's servers from the directory (without duplicating our own).
@@ -638,6 +656,7 @@ export function App() {
   const railState = Object.fromEntries(Object.entries(state.servers).map(([k, s]) => [k, {
     // Muted channels and a muted server give no unread mark; mentions always count.
     unread: !s.serverMuted && Object.entries(s.unread).some(([id, u]) => u && !s.muted[id]), muted: s.serverMuted, canMute: s.readSync && s.connection === "connected", mentions: Object.values(s.mentions).reduce((n, c) => n + c, 0), voice: k === voiceHost && voice.status !== "disconnected", connection: s.connection,
+    people: voiceActivity(s.voice, s.server?.settings.afkChannelId ?? null),
   }]));
   // Rail context menu: delete your account on that server, requested through the directory (own confirmation dialog, no browser dialogs).
   const leaveServer = async (host: string, name: string) => {
@@ -737,8 +756,8 @@ export function App() {
           setStageOpen(true); setMobileContent(true); setVoicePreview(null);
         }} />}
       {voteKick && votePerson && voteKick.canVote && voteAsked !== voteKick.vote.id && <VoteKickModal state={voteKick} person={votePerson} onVote={castVote} onClose={() => setVoteAsked(voteKick.vote.id)} />}
-      {!homeOpen && view && <MemberList api={view.conn.api} members={view.server.members} roles={view.server.roles} myUserId={view.active.userId!} myPermissions={view.server.myPermissions} ownerId={view.server.settings.ownerId}
-        voice={view.active.voice} channels={view.server.channels} friends={friendsMenu} client={client} onClose={mobile ? () => setMobileMembers(false) : null}
+      {!homeOpen && view && <MemberList api={view.conn.api} members={view.server.members} roles={view.server.roles} myUserId={view.active.userId!} myPermissions={view.server.myPermissions} channelPermissions={view.server.myChannelPermissions} ownerId={view.server.settings.ownerId}
+        voice={view.active.voice} channels={view.server.channels} friends={friendsMenu} onClose={mobile ? () => setMobileMembers(false) : null}
         voteKickAllowed={view.active.voteKickAllowed} onVoteKick={(userId, channelId) => startVoteKick(view.active.host, channelId, userId)}
         voteKickBox={voiceHost === activeHost ? <VoteKickPanel state={voteKick} result={voteKickResult} person={votePerson} onVote={castVote} /> : null} />}
 

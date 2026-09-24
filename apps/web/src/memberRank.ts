@@ -7,6 +7,14 @@ import type { Member, Role } from "@squorli/protocol";
  */
 
 /**
+ * Roles in the order the server's owner arranged them (Verwaltung > Rollen: the highest position on top). Every list of roles
+ * the user sees takes this order (user's rule, 24 September 2026); the server sends them in no promised order.
+ */
+export function rolesByRank<R extends Pick<Role, "position">>(roles: readonly R[]): R[] {
+  return [...roles].sort((a, b) => b.position - a.position);
+}
+
+/**
  * The member's highest role, for the colour of their name and the grouping of the member list; the default role is not one
  * of `roleIds`, so it never colours anybody. undefined = only the default role.
  */
@@ -29,8 +37,8 @@ export function canSetRolesOf(me: Pick<Member, "userId" | "roleIds" | "isOwner">
   return me.isOwner || topPositionOf(me, roles) > topPositionOf(target, roles);
 }
 
-/** The roles `me` may give or take: never the default role, and only roles below the own highest one (owners: all). */
+/** The roles `me` may give or take: never the default role, and only roles below the own highest one (owners: all); in the owner's order. */
 export function assignableRoles(me: Pick<Member, "roleIds" | "isOwner">, roles: readonly Role[]): Role[] {
   const top = topPositionOf(me, roles);
-  return roles.filter((r) => !r.isDefault && (me.isOwner || r.position < top));
+  return rolesByRank(roles).filter((r) => !r.isDefault && (me.isOwner || r.position < top));
 }

@@ -18,18 +18,19 @@ export function rankMatch(label: string, handle: string | null, query: string): 
 
 export function suggestEntities(roles: readonly Role[], members: readonly Member[], query: string, opts: { exclude?: ReadonlySet<string>; limit?: number } = {}): PickerEntry[] {
   const exclude = opts.exclude ?? new Set<string>(), limit = opts.limit ?? 12;
-  const ranked: { e: PickerEntry; r: number; label: string; order: number }[] = [];
+  // Roles among themselves in the owner's order (highest first), members by name.
+  const ranked: { e: PickerEntry; r: number; label: string; order: number; rank: number }[] = [];
   for (const role of roles) {
     if (role.isDefault || exclude.has(`role:${role.id}`)) continue;
     const r = rankMatch(role.name, null, query);
-    if (r >= 0) ranked.push({ e: { kind: "role", role }, r, label: role.name, order: 0 });
+    if (r >= 0) ranked.push({ e: { kind: "role", role }, r, label: role.name, order: 0, rank: -role.position });
   }
   for (const member of members) {
     if (exclude.has(`member:${member.userId}`)) continue;
     const r = rankMatch(member.displayName, member.handle, query);
-    if (r >= 0) ranked.push({ e: { kind: "user", member }, r, label: member.displayName, order: 1 });
+    if (r >= 0) ranked.push({ e: { kind: "user", member }, r, label: member.displayName, order: 1, rank: 0 });
   }
-  return ranked.sort((a, b) => a.r - b.r || a.order - b.order || a.label.localeCompare(b.label)).slice(0, limit).map((x) => x.e);
+  return ranked.sort((a, b) => a.r - b.r || a.order - b.order || a.rank - b.rank || a.label.localeCompare(b.label)).slice(0, limit).map((x) => x.e);
 }
 
 export const entryKey = (e: PickerEntry) => (e.kind === "role" ? `role:${e.role.id}` : `member:${e.member.userId}`);

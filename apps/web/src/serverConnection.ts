@@ -82,7 +82,8 @@ export type ConnectionHooks = {
   /** First welcome of a session (not after a reconnect): e.g. refresh the server list at the directory. */
   onConnected: () => void;
   /** Moderation (M3): moving to another voice channel (null = out) and stopping camera/screen. `votekick` = voted out of the channel (docs/features/votekick.md). */
-  onVoiceMoved: (channelId: string | null, by: string, reason: "afk" | "elsewhere" | "votekick" | null) => void;
+  /** `until`: with reason "blocked", when the block ends (null = permanent). */
+  onVoiceMoved: (channelId: string | null, by: string, reason: "afk" | "elsewhere" | "votekick" | "blocked" | null, until?: string | null) => void;
   /** The voice channel this connection sits in vanished from the channel list (the access is gone): the client hangs up. */
   onVoiceGone: () => void;
   onVoiceStop: (what: { camera: boolean; screen: boolean }, by: string) => void;
@@ -411,7 +412,7 @@ export class ServerConnection {
         break;
       }
       case "voice.moved":
-        this.hooks.onVoiceMoved(e.channelId, e.by, e.reason ?? (e.channelId === null && Date.now() - this.voteKickedAt < 5000 ? "votekick" : null));
+        this.hooks.onVoiceMoved(e.channelId, e.by, e.reason ?? (e.channelId === null && Date.now() - this.voteKickedAt < 5000 ? "votekick" : null), e.until ?? null);
         break;
       case "voice.stop":
         this.hooks.onVoiceStop({ camera: e.camera, screen: e.screen }, e.by);

@@ -20,6 +20,10 @@ describe("suggestEntities", () => {
     expect(suggestEntities(roles, members, "", { exclude: new Set(["role:m", "member:u2"]) }).map(entryKey)).toEqual(["role:t", "member:u1", "member:u3"]);
     expect(suggestEntities(roles, members, "", { limit: 2 }).length).toBe(2);
   });
+  it("lists roles in the owner's order, not by name", () => {
+    const ranked = [{ ...roles[1]!, position: 2 }, { ...roles[2]!, position: 7 }];
+    expect(suggestEntities(ranked, [], "").map(entryKey)).toEqual(["role:t", "role:m"]);
+  });
   it("matches handles too", () => {
     expect(rankMatch("Anna Meier", "anna", "an")).toBe(0);
     expect(rankMatch("Anna Meier", null, "mei")).toBe(1);

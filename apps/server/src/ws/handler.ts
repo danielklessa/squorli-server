@@ -18,6 +18,7 @@ import { moveGrants } from "../voice/confine";
 import { holdOnJoin, refreshUserView, releaseOnLeave, stickyVerdict } from "../voice/sticky";
 import { voiceStateEvent } from "../voice/voiceState";
 import { voteKicks, voteOnWire } from "../voice/votekick";
+import { channelBlockStore } from "../voice/channelBlocks";
 
 /** Game display: how often one connection may change what its member plays (each change is a broadcast to everybody). */
 const GAME_CHANGE_MS = 5000;
@@ -129,8 +130,9 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
           if (!canIn(r.perms, Permission.CONNECT_VOICE)) return send({ type: "error", code: "forbidden", message: "no voice permission" });
           if ((await stickyVerdict(db, userId, actor, channel.id)) === "confined") return send({ type: "error", code: "forbidden", message: "confined" });
           const granted = moveGrants.grantOf(userId) === channel.id;
-          // Voted out of this channel (docs/features/votekick.md): no way back until the block is over.
-          if (!granted && voteKicks.blockedUntil(channel.id, userId)) return send({ type: "error", code: "forbidden", message: "votekicked" });
+          // Blocked from this channel (docs/features/channel-blocks.md, a passed vote kick included): no way back until it is over or lifted.
+          const blocked = granted ? null : channelBlockStore.of(channel.id, userId);
+          if (blocked) return send({ type: "error", code: "forbidden", message: blocked.source === "votekick" ? "votekicked" : "channel_blocked" });
           if (channel.userLimit !== null && !granted && presence.channelOfUser(userId) !== channel.id && presence.members(channel.id).length >= channel.userLimit) return send({ type: "error", code: "forbidden", message: "channel_full" });
           const [user] = await db.select({ publicKey: users.publicKey, displayName: users.displayName, handle: users.handle }).from(users).where(eq(users.id, userId)).limit(1);
           if (!user) return socket.close(4003, "unauthorized");

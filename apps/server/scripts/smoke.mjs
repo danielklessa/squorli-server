@@ -1169,6 +1169,13 @@ if (health0.directoryUrl) {
   const [stkBlocked] = await api("POST", "/api/rtc-token", { channelId: vkCh.id }, g3.token);
   const [stkOther] = await api("POST", "/api/rtc-token", { channelId: voiceCh.id }, g3.token);
   check("votekick: the member voted out gets no token for that channel and keeps every other one", stkBlocked === 403 && stkOther === 200, `${stkBlocked} ${stkOther}`);
+  // The vote's block is a channel block since 24 September 2026 (docs/features/channel-blocks.md): a moderator sees and lifts it.
+  const [sbl, vkBlocks] = await api("GET", "/api/channel-blocks", undefined, owner.token);
+  const vkBlock = Array.isArray(vkBlocks) ? vkBlocks.find((b) => b.channelId === vkCh.id && b.userId === g3.userId) : null;
+  const [sLift] = await api("DELETE", `/api/channels/${vkCh.id}/blocks/${g3.userId}`, undefined, owner.token);
+  const [stkLifted] = await api("POST", "/api/rtc-token", { channelId: vkCh.id }, g3.token);
+  check("votekick: the block shows in the moderator's list as a vote kick's, and lifting it opens the channel again",
+    sbl === 200 && vkBlock?.source === "votekick" && !!vkBlock.until && sLift === 200 && stkLifted === 200, `${sbl} ${vkBlock?.source} ${sLift} ${stkLifted}`);
   const evLeft = await pLeft;
   check("votekick: two left in the channel, so no vote is offered any more", evLeft?.voteKick === false, JSON.stringify({ n: evLeft?.members.length, offer: evLeft?.voteKick }));
   const [svFew] = await api("POST", `/api/channels/${vkCh.id}/votekick`, { targetId: g2.userId }, g1.token);
@@ -1190,6 +1197,66 @@ if (health0.directoryUrl) {
   await api("DELETE", `/api/channels/${vkCh.id}`, undefined, owner.token);
   for (const g of guests) await api("DELETE", `/api/members/${g.userId}`, undefined, owner.token);
   await api("DELETE", `/api/invites/${invV.code}`, undefined, owner.token);
+}
+
+// ---------- Channel blocks (docs/features/channel-blocks.md): remove somebody from a voice channel and keep them out of it.
+{
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const [, invK] = await api("POST", "/api/invites", {}, owner.token);
+  const g = await login(await newKey(), invK.code); g.ws = await connectWs(g.token);
+  const h = await login(await newKey(), invK.code); h.ws = await connectWs(h.token);
+  const [, blCh] = await api("POST", "/api/channels", { kind: "voice", name: "smoke-block", categoryId: cat.id }, owner.token);
+  const pIn = g.ws.waitFor((e) => e.type === "voice.state" && e.channelId === blCh.id && e.members.some((m) => m.userId === g.userId)).catch(() => null);
+  g.ws.send({ type: "voice.join", channelId: blCh.id });
+  await pIn;
+
+  const [sGuest] = await api("PUT", `/api/channels/${blCh.id}/blocks`, { userId: g.userId, minutes: 5 }, h.token);
+  const [sBad] = await api("PUT", `/api/channels/${blCh.id}/blocks`, { userId: g.userId, minutes: 7 }, owner.token);
+  const [sSelf] = await api("PUT", `/api/channels/${blCh.id}/blocks`, { userId: owner.userId, minutes: 5 }, owner.token);
+  check("channel block: only with MOVE_MEMBERS, only the offered durations, never oneself", sGuest === 403 && sBad === 400 && sSelf === 400, `${sGuest} ${sBad} ${sSelf}`);
+
+  const pMoved = g.ws.waitFor((e) => e.type === "voice.moved" && e.channelId === null).catch(() => null);
+  const pGone = waitNew(h.ws, (e) => e.type === "voice.state" && e.channelId === blCh.id && !e.members.some((m) => m.userId === g.userId)).catch(() => null);
+  const [s5, b5] = await api("PUT", `/api/channels/${blCh.id}/blocks`, { userId: g.userId, minutes: 5 }, owner.token);
+  const evMoved = await pMoved;
+  const left5 = b5?.until ? Date.parse(b5.until) - Date.now() : 0;
+  check("channel block: 5 minutes, and the member sitting in the channel is removed with the reason and the end",
+    s5 === 200 && b5.source === "moderator" && left5 > 4 * 60_000 && left5 <= 5 * 60_000 && evMoved?.reason === "blocked" && evMoved.until === b5.until,
+    `${s5} ${JSON.stringify(evMoved)}`);
+  check("channel block: the channel's presence drops the member", (await pGone) !== null);
+  await sleep(100);
+  const [stk5, tk5] = await api("POST", "/api/rtc-token", { channelId: blCh.id }, g.token);
+  const [stkOther] = await api("POST", "/api/rtc-token", { channelId: voiceCh.id }, g.token);
+  const pRefused = g.ws.waitFor((e) => e.type === "error" && e.message === "channel_blocked").catch(() => null);
+  g.ws.send({ type: "voice.join", channelId: blCh.id });
+  check("channel block: no token and no voice.join for that channel, every other channel stays open",
+    stk5 === 403 && tk5.error === "channel_blocked" && tk5.until === b5.until && stkOther === 200 && (await pRefused) !== null, `${stk5} ${JSON.stringify(tk5)} ${stkOther}`);
+
+  const [sList, list] = await api("GET", "/api/channel-blocks", undefined, owner.token);
+  const [sListG, listG] = await api("GET", "/api/channel-blocks", undefined, h.token);
+  check("channel block: listed for whoever may move members, with who set it; nothing for a guest",
+    sList === 200 && list.some((b) => b.channelId === blCh.id && b.userId === g.userId && typeof b.blockedBy === "string") && sListG === 200 && listG.length === 0,
+    `${sList} ${sListG} ${JSON.stringify(listG)}`);
+
+  const [sPerm, bPerm] = await api("PUT", `/api/channels/${blCh.id}/blocks`, { userId: g.userId, minutes: null }, owner.token);
+  const [stkPerm, tkPerm] = await api("POST", "/api/rtc-token", { channelId: blCh.id }, g.token);
+  check("channel block: permanent replaces the timed one", sPerm === 200 && bPerm.until === null && stkPerm === 403 && tkPerm.until === null, `${sPerm} ${JSON.stringify(tkPerm)}`);
+
+  const [sLiftG] = await api("DELETE", `/api/channels/${blCh.id}/blocks/${g.userId}`, undefined, h.token);
+  const [sLift] = await api("DELETE", `/api/channels/${blCh.id}/blocks/${g.userId}`, undefined, owner.token);
+  const [sLift2] = await api("DELETE", `/api/channels/${blCh.id}/blocks/${g.userId}`, undefined, owner.token);
+  const [stkBack] = await api("POST", "/api/rtc-token", { channelId: blCh.id }, g.token);
+  check("channel block: a moderator lifts it (a guest may not), then the channel is open again", sLiftG === 403 && sLift === 200 && sLift2 === 404 && stkBack === 200, `${sLiftG} ${sLift} ${sLift2} ${stkBack}`);
+
+  await api("PUT", `/api/channels/${blCh.id}/blocks`, { userId: h.userId, minutes: 15 }, owner.token);
+  await api("DELETE", `/api/members/${h.userId}`, undefined, owner.token);
+  const [, afterKick] = await api("GET", "/api/channel-blocks", undefined, owner.token);
+  check("channel block: a kick clears the member's blocks", !afterKick.some((b) => b.userId === h.userId));
+
+  await g.ws.close(); await h.ws.close();
+  await api("DELETE", `/api/channels/${blCh.id}`, undefined, owner.token);
+  await api("DELETE", `/api/members/${g.userId}`, undefined, owner.token);
+  await api("DELETE", `/api/invites/${invK.code}`, undefined, owner.token);
 }
 
 // ---------- Protocol version

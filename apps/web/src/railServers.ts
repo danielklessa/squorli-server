@@ -1,4 +1,4 @@
-import type { AccountServer } from "@squorli/protocol";
+import type { AccountServer, VoiceMember } from "@squorli/protocol";
 import type { RailServer } from "./ServerRail";
 import { sortByServerOrder } from "./serverOrder";
 
@@ -32,4 +32,17 @@ export function buildRailServers(o: {
     out.push({ key, host: l.host, name: l.name ?? l.host, sub: null, iconUrl: null });
   }
   return sortByServerOrder(out, o.order);
+}
+
+/**
+ * How many people sit in a server's voice channels, for the rail's activity mark (24 September 2026): every member counted
+ * once, the AFK channel left out (sitting there is not activity). `voice` = the connection's roster per channel.
+ */
+export function voiceActivity(voice: Readonly<Record<string, readonly VoiceMember[]>>, afkChannelId: string | null): number {
+  const people = new Set<string>();
+  for (const [channelId, members] of Object.entries(voice)) {
+    if (channelId === afkChannelId) continue;
+    for (const m of members) people.add(m.userId);
+  }
+  return people.size;
 }

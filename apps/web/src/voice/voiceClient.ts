@@ -466,7 +466,11 @@ export class VoiceClient {
       .on(RoomEvent.Disconnected, (reason) => {
         const why = explainDisconnect(reason);
         this.log(`getrennt: ${why.short}`);
-        void this.leave().then(() => { if (why.unexpected) this.patch({ error: why.long }); });
+        void this.leave().then(() => {
+          if (why.unexpected) this.patch({ error: why.long });
+          // Wait a moment for the reason from the chat server (App.tsx sets its own notice), else say it plainly.
+          if (why.removed) window.setTimeout(() => { if (!this.room && !this.state.notice) this.setNotice(t("voice.disc.removed")); }, 1500);
+        });
       });
 
     // A failing microphone is no connection problem: it must not come with the proxy hint of explainConnectError().
@@ -552,7 +556,9 @@ export class VoiceClient {
     this.videoWatch.clear();
     this.audioHost.replaceChildren();
     this.micMutedByUser = false;
-    this.patch({ status: "disconnected", channelId: null, afkRoom: false, participants: [], gateOpen: false, level: 0, micBoost: 1, micInput: 0, micSide: "stereo", micMuted: false, deafened: false, inputDeviceId: null, cameraOn: false, screenOn: false, screenAudio: null, tiles: [] });
+    // Switching rooms (join() while in one) never shows "disconnected": App.tsx takes that for the end of voice and closes
+    // the stage, so after the first join every further channel landed on the first text channel (user's report, 24 September 2026).
+    this.patch({ status: this.switchingRoom ? "connecting" : "disconnected", channelId: null, afkRoom: false, participants: [], gateOpen: false, level: 0, micBoost: 1, micInput: 0, micSide: "stereo", micMuted: false, deafened: false, inputDeviceId: null, cameraOn: false, screenOn: false, screenAudio: null, tiles: [] });
   }
 
   // ---------- Permission VIEW_VIDEO: who receives camera and screen
@@ -1303,11 +1309,14 @@ async function icePathOf(statsPromise: Promise<RTCStatsReport> | undefined): Pro
 }
 
 /** Explain LiveKit's disconnect reason; unexpected = show it to the user as an error. */
-function explainDisconnect(reason: DisconnectReason | undefined): { short: string; long: string; unexpected: boolean } {
+function explainDisconnect(reason: DisconnectReason | undefined): { short: string; long: string; unexpected: boolean; removed?: boolean } {
   const name = reason === undefined ? t("voice.disc.unknown") : DisconnectReason[reason] ?? String(reason);
   const media = t("voice.iceHint");
   switch (reason) {
     case DisconnectReason.CLIENT_INITIATED: return { short: name, long: "", unexpected: false };
+    // The server took us out of the room (a moderator's removal or block, a vote kick): no error. The chat server's
+    // `voice.moved` carries the reason and how long a block lasts; the plain sentence only stands when it never comes.
+    case DisconnectReason.PARTICIPANT_REMOVED: return { short: name, long: "", unexpected: false, removed: true };
     case DisconnectReason.DUPLICATE_IDENTITY: return { short: name, long: t("voice.disc.duplicate"), unexpected: true };
     case DisconnectReason.SIGNAL_CLOSE: return { short: name, long: t("voice.disc.signalClose"), unexpected: true };
     case DisconnectReason.CONNECTION_TIMEOUT:

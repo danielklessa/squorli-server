@@ -1,4 +1,4 @@
-import { CastVoteKickRequest, StartVoteKickRequest, VOTEKICK_MIN_MEMBERS, displayNameOf, type VoteKickResult } from "@squorli/protocol";
+import { CastVoteKickRequest, StartVoteKickRequest, VOTEKICK_BLOCK_MS, VOTEKICK_MIN_MEMBERS, displayNameOf, type VoteKickResult } from "@squorli/protocol";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { channelActor } from "../channelGuard";
@@ -9,7 +9,9 @@ import type { LivekitAdmin } from "../livekit/admin";
 import { loadSettings } from "../state";
 import { visibility } from "../visibility";
 import type { VoicePresence } from "../voice/presence";
+import { channelBlockStore } from "../voice/channelBlocks";
 import { releaseOnLeave } from "../voice/sticky";
+import { removeLater } from "../voice/removeLater";
 import { voiceStateEvent } from "../voice/voiceState";
 import { isVoiceModerator, outcomeOf, voteKicks, voteOnWire, type EndReason, type RunningVote } from "../voice/votekick";
 
@@ -47,7 +49,9 @@ export async function registerVoteKickRoutes(app: FastifyInstance, db: Db, hub: 
     const { outcome, yes, no } = outcomeOf(vote, reason);
     voteKicks.startCooldown(vote.channelId, vote.targetId);
     const passed = outcome === "passed";
-    const blockedUntil = passed ? new Date(voteKicks.block(vote.channelId, vote.targetId)).toISOString() : null;
+    // The block is a channel block (voice/channelBlocks.ts): kept in the database, and a moderator can lift it.
+    const block = passed ? await channelBlockStore.set({ channelId: vote.channelId, userId: vote.targetId, ms: VOTEKICK_BLOCK_MS, source: "votekick", blockedBy: null }) : null;
+    const blockedUntil = block?.until ? new Date(block.until).toISOString() : null;
     const result: VoteKickResult = { channelId: vote.channelId, targetId: vote.targetId, targetName: vote.targetName, outcome, yes, no, roomSize: vote.roomSize, blockedUntil };
     // Everybody who sat in the channel when the vote started, plus whoever sits there now: a member who joined later sees
     // the result of the box they were shown, and the member the vote was about learns it even after being removed.
@@ -61,7 +65,7 @@ export async function registerVoteKickRoutes(app: FastifyInstance, db: Db, hub: 
     const by = await loadSettings(db).then((s) => s.name).catch(() => "");
     hub.sendToUser(vote.targetId, { type: "voice.moved", channelId: null, by });
     presence.leaveUser(vote.targetId);
-    await lk.removeParticipant(vote.channelId, vote.targetId).catch((err: unknown) => app.log.warn({ err }, "votekick removeParticipant"));
+    removeLater(lk, presence, vote.channelId, vote.targetId, (err) => app.log.warn({ err }, "votekick removeParticipant"));
     await releaseOnLeave(db, hub, presence, vote.targetId).catch((err: unknown) => app.log.warn({ err }, "votekick release"));
     app.log.info({ channelId: vote.channelId, target: vote.targetId, yes, no, roomSize: vote.roomSize }, "Vote-Kick angenommen");
   };

@@ -175,6 +175,8 @@ h4 { font-size: 0.875rem; font-weight: 600; color: var(--muted); padding: 0 0.5r
 button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; position: relative; }
 /* Multi-server client: green speaker = the voice connection runs here, white dot = unread messages */
 .rail-voice { position: absolute; right: -4px; bottom: -4px; width: 1.1rem; height: 1.1rem; border-radius: 50%; background: var(--ok); color: var(--bg); font-size: 0.7rem; display: inline-flex; align-items: center; justify-content: center; border: 2px solid var(--bg); }
+/* People in the server's voice channels (24 September 2026): a green speaker on a dark ground at the bottom left (the filled green one at the right = my own voice connection) */
+.rail-people { position: absolute; left: -4px; bottom: -4px; width: 1.1rem; height: 1.1rem; border-radius: 50%; background: var(--bg4); color: var(--ok); font-size: 0.7rem; display: inline-flex; align-items: center; justify-content: center; border: 2px solid var(--bg); }
 .rail-unread { position: absolute; left: -0.55rem; top: 50%; width: 0.35rem; height: 0.7rem; margin-top: -0.35rem; border-radius: 0 4px 4px 0; background: var(--text); }
 .server-status .stack { max-width: 32rem; margin: auto; padding: 1rem; }
 .server-status h2 { margin: 0; }
@@ -909,6 +911,14 @@ button.icon.on { color: var(--brand); }
 .user-context-menu button.danger:hover, .user-context-menu button.danger:focus-visible { background: var(--danger); color: var(--on-light); }
 .context-submenu > button { justify-content: space-between; }
 .context-submenu > button > .ic { flex: none; }
+.context-submenu > button > .submenu-arrow { flex: none; display: inline-flex; padding: 0.15rem 0.2rem; margin: -0.15rem -0.2rem; border-radius: 6px; }
+.context-submenu > button > .submenu-arrow:hover { background: var(--bg2); }
+.user-context-menu .menu-section-title { margin-top: 0.35rem; padding-top: 0.45rem; border-top: 1px solid var(--line); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.chan-blocks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.chan-blocks > li { align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem; border: 1px solid var(--line); border-radius: var(--r); }
+.chan-block-who { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.user-context-menu .menu-note { display: block; padding: 0.25rem 0.5rem; }
+.user-context-menu .block-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
 .context-submenu-panel { z-index: 9; }
 .context-submenu-panel button[role="menuitemcheckbox"] { justify-content: space-between; }
 .user-context-menu .mod-voice > span, .user-context-menu .friend-row > span { padding: 0.5rem 0.75rem; }
@@ -921,6 +931,12 @@ button.icon.on { color: var(--brand); }
 .user-context-menu .user-volume-row button.icon { flex: none; width: auto; min-width: 2rem; min-height: 2rem; padding: 0.25rem; justify-content: center; }
 .user-context-menu .user-volume-row button.icon:disabled { opacity: 0.4; background: transparent; }
 .user-context-menu .context-identity > div { display: flex; flex-direction: column; min-width: 0; }
+.user-context-menu .member-profile-action { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.5rem; border-top: 1px solid var(--line); }
+.user-context-menu .member-profile-compose { display: flex; align-items: flex-end; gap: 0.25rem; }
+.user-context-menu .member-profile-compose textarea { flex: 1; min-width: 0; max-height: 8rem; resize: none; }
+.user-context-menu .member-profile-compose button { flex: none; width: 2.5rem; min-height: 2.5rem; height: 2.5rem; padding: 0; justify-content: center; font-size: 1.25rem; }
+.user-context-menu .member-profile-compose button:disabled { background: transparent; }
+.user-context-menu .member-profile-action .error { margin: 0; padding: 0; }
 .user-context-menu .mini-profile { gap: 0.5rem; margin: 0; padding: 0.5rem; border-top: 1px solid var(--line); }
 .user-context-menu .mini-profile .stack { gap: 0.25rem; margin: 0; }
 .user-context-menu .mini-profile input { width: 100%; }
@@ -1151,7 +1167,7 @@ button.link { background: transparent; color: var(--accent); padding: 0; font: i
 .channel-btn .count.full { color: var(--warn); }
 .channel.locked-out .channel-btn { opacity: 0.5; }
 .channel-menu-btn { display: inline-flex; padding: 0 0.2rem; color: var(--muted); }
-h3 > .category-btn { background: transparent; color: inherit; font: inherit; padding: 0; text-align: left; width: 100%; cursor: pointer; }
+h3 > .category-btn { background: transparent; color: inherit; font: inherit; padding: 0; text-align: left; width: 100%; cursor: default; }
 h3 > .category-btn:hover { color: var(--text); }
 .channel-title { display: flex; align-items: center; gap: 0.35rem; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .channel-title svg, .channel-title i { color: var(--muted); font-size: 0.85em; }

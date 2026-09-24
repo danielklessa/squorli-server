@@ -1,11 +1,12 @@
-import { Permission, VOTEKICK_BLOCK_MS, VOTEKICK_COOLDOWN_MS, VOTEKICK_MIN_MEMBERS, VOTEKICK_MS, hasPermission, type VoteKick, type VoteKickOutcome, voteKickOutcome } from "@squorli/protocol";
+import { Permission, VOTEKICK_COOLDOWN_MS, VOTEKICK_MIN_MEMBERS, VOTEKICK_MS, hasPermission, type VoteKick, type VoteKickOutcome, voteKickOutcome } from "@squorli/protocol";
 import { randomUUID } from "node:crypto";
 
 /**
  * Vote kick in a voice channel (docs/features/votekick.md, 23 September 2026). The rules live in the protocol package
- * (`voteKickQuorum`, `voteKickOutcome`), the running votes, the blocks and the cooldowns live here: in memory, single
- * node, like `VoicePresence` and `MoveGrants`. A restart forgets every running vote and every block, and the members
- * simply vote again.
+ * (`voteKickQuorum`, `voteKickOutcome`), the running votes and the cooldowns live here: in memory, single node, like
+ * `VoicePresence` and `MoveGrants`. A restart forgets every running vote, and the members simply vote again. The block a
+ * passed vote sets is a channel block since 24 September 2026 (voice/channelBlocks.ts, kept in the database), so a
+ * moderator can lift it.
  *
  * Who may vote is fixed when the vote starts (user's decision): everybody sitting in the channel then, except the member
  * the vote is about; the starter's yes is already in. Joining afterwards gives no vote and changes no quorum, leaving
@@ -46,8 +47,6 @@ const key = (channelId: string, userId: string) => `${channelId}:${userId}`;
 
 export class VoteKicks {
   private readonly byChannel = new Map<string, { vote: RunningVote; timer: NodeJS.Timeout; onEnd: (vote: RunningVote, reason: EndReason) => void }>();
-  /** channel:user -> until when the member voted out cannot enter that channel again (ms). */
-  private readonly blocks = new Map<string, number>();
   /** channel:user -> until when no new vote about that member may start there (ms). */
   private readonly cooldowns = new Map<string, number>();
 
@@ -108,35 +107,18 @@ export class VoteKicks {
     return until;
   }
 
-  /** The vote passed: the member cannot enter this one channel again for VOTEKICK_BLOCK_MS. */
-  block(channelId: string, userId: string, now = Date.now()): number {
-    const until = now + VOTEKICK_BLOCK_MS;
-    this.blocks.set(key(channelId, userId), until);
-    return until;
-  }
-
-  /** Until when the member is kept out of this channel (null = not at all). Asked at the token and at `voice.join`. */
-  blockedUntil(channelId: string, userId: string, now = Date.now()): number | null {
-    const until = this.blocks.get(key(channelId, userId));
-    if (until === undefined) return null;
-    if (until <= now) { this.blocks.delete(key(channelId, userId)); return null; }
-    return until;
-  }
-
-  /** A moderator may always put somebody back (the move grant wins), and a kick/ban clears what is left over. */
+  /** A kick/ban clears what is left over. */
   clearUser(userId: string): void {
-    for (const k of [...this.blocks.keys()]) if (k.endsWith(`:${userId}`)) this.blocks.delete(k);
     for (const k of [...this.cooldowns.keys()]) if (k.endsWith(`:${userId}`)) this.cooldowns.delete(k);
   }
 
   clearChannel(channelId: string): void {
     this.end(channelId, "gone");
-    for (const k of [...this.blocks.keys()]) if (k.startsWith(`${channelId}:`)) this.blocks.delete(k);
     for (const k of [...this.cooldowns.keys()]) if (k.startsWith(`${channelId}:`)) this.cooldowns.delete(k);
   }
 }
 
-/** The one instance; the routes give it its effects, the token route and the WS handler ask it about blocks. */
+/** The one instance; the routes give it its effects. */
 export const voteKicks = new VoteKicks();
 
 /**

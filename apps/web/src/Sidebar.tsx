@@ -1,3 +1,4 @@
+import { platform } from "./platform";
 import { Avatar } from "./Avatar";
 import { Permission, hasPermission, type Channel, type ServerState, type VoiceMember } from "@squorli/protocol";
 import { useState } from "react";
@@ -6,11 +7,10 @@ import { moveErrorText } from "./apiErrorText";
 import { ContextMenu, ContextSubmenu, type MenuAnchor } from "./ContextMenu";
 import { askConfirm, askInput } from "./dialogs";
 import type { ChannelDialogTarget } from "./ChannelDialog";
-import { UserVolumeControl } from "./UserVolumeControl";
 import type { VoiceClient, VoiceState } from "./voice/voiceClient";
 import { Icon } from "./Icon";
 import { t, tOr } from "./i18n";
-import { voteKickChannel } from "./voteKick";
+import { VoiceMemberMenu } from "./VoiceMemberMenu";
 
 type Props = {
   server: ServerState;
@@ -177,25 +177,20 @@ export function Sidebar({ server, api, currentChannelId, voice, voiceState, clie
             .then((ok) => { if (ok) return api.deleteCategory(menuCategory.id); }).catch((e: unknown) => setDragErr(e instanceof Error ? e.message : String(e))); }}><Icon name="trash-2" /> {t("sidebar.deleteCategory")}</button>
         </ContextMenu>
       )}
-      {menu && menuMember && (
-        <ContextMenu anchor={menu} label={menuMember.displayName} onClose={() => setMenu(null)}>
-          <div className="context-identity" role="presentation"><Avatar name={menuMember.displayName} src={menuMember.avatarUrl} online={menuMember.online} afk={menuMember.afk} /><strong>{menuMember.displayName}</strong></div>
-          <UserVolumeControl client={client} publicKey={menuMember.publicKey} />
-          {(() => {
-            const channelId = voteKickChannel({ voice, voteKickAllowed, myUserId, targetId: menuMember.userId });
-            return channelId && <button role="menuitem" className="secondary small" onClick={() => { setMenu(null); onVoteKick(menuMember.userId, channelId); }}><Icon name="gavel" /> {t("votekick.menu")}</button>;
-          })()}
-        </ContextMenu>
-      )}
+      {/* The same menu as on the stage's tiles (VoiceMemberMenu.tsx). */}
+      {menu && menuMember && <VoiceMemberMenu anchor={menu} member={menuMember} client={client} voiceState={voiceState} api={api} myUserId={myUserId}
+        permsIn={(id) => (id ? permsIn(id) : server.myPermissions)} voice={voice} channels={server.channels}
+        voteKickAllowed={voteKickAllowed} onVoteKick={onVoteKick} onClose={() => setMenu(null)} onError={setDragErr} />}
       {dragErr && <p className="error small" style={{ padding: "0 0.9rem" }}>{dragErr}</p>}
       <div className="channel-list">
         {groups.map((g) => (
           <section key={g.id ?? "none"}>
             {g.id !== null && (dialogOffered && canManage(g.id)
-              // A button inside the heading keeps its semantics and makes the category reachable by keyboard; a click or a right-click opens its menu.
+              // A button inside the heading keeps its semantics and makes the category reachable by keyboard (context menu key,
+              // Shift+F10). Context menus open on a right-click only (user's rule, 24 September 2026); a phone has none, a tap opens it there.
               ? <h3><button className="category-btn" aria-haspopup="menu" aria-label={t("sidebar.categoryMenu", { name: g.name })} title={t("sidebar.categoryMenu", { name: g.name })}
-                  onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setCategoryMenu({ categoryId: g.id!, trigger: e.currentTarget, x: r.left, y: r.bottom }); }}
-                  onContextMenu={(e) => { e.preventDefault(); setCategoryMenu({ categoryId: g.id!, trigger: e.currentTarget, x: e.clientX, y: e.clientY }); }}>{g.name}</button></h3>
+                  onClick={platform.mobile ? (e) => { const r = e.currentTarget.getBoundingClientRect(); setCategoryMenu({ categoryId: g.id!, trigger: e.currentTarget, x: r.left, y: r.bottom }); } : undefined}
+                  onContextMenu={(e) => { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); setCategoryMenu({ categoryId: g.id!, trigger: e.currentTarget, x: e.clientX || r.left, y: e.clientY || r.bottom }); }}>{g.name}</button></h3>
               : <h3>{g.name}</h3>)}
             <ul>{g.channels.map(renderChannel)}</ul>
           </section>

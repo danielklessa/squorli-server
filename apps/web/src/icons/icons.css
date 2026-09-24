@@ -41,6 +41,8 @@
 .ic-lightbulb::before { content: "\e1c2"; }
 .ic-link::before { content: "\e102"; }
 .ic-lock::before { content: "\e10b"; }
+.ic-lock-open::before { content: "\e10c"; }
+.ic-log-out::before { content: "\e10e"; }
 .ic-maximize::before { content: "\e112"; }
 .ic-megaphone::before { content: "\e235"; }
 .ic-message-circle::before { content: "\e116"; }
@@ -64,6 +66,7 @@
 .ic-screen-share::before { content: "\e14f"; }
 .ic-screen-share-off::before { content: "\e150"; }
 .ic-search::before { content: "\e151"; }
+.ic-send::before { content: "\e152"; }
 .ic-server::before { content: "\e153"; }
 .ic-settings::before { content: "\e154"; }
 .ic-shield::before { content: "\e158"; }
@@ -78,6 +81,7 @@
 .ic-trophy::before { content: "\e377"; }
 .ic-undo-2::before { content: "\e2a1"; }
 .ic-user::before { content: "\e19f"; }
+.ic-user-minus::before { content: "\e1a1"; }
 .ic-user-plus::before { content: "\e1a2"; }
 .ic-user-x::before { content: "\e1a3"; }
 .ic-users::before { content: "\e1a4"; }

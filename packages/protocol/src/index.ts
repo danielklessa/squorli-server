@@ -18,6 +18,7 @@ export * from "./links";
 export * from "./import";
 export * from "./channels";
 export * from "./votekick";
+export * from "./channelBlocks";
 export { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { DisplayName } from "./directory";
@@ -656,7 +657,9 @@ export const ServerRadioPlayback = z.object({ type: z.literal("radio.playback"),
  * `reason: "afk"` = moved by the server into the AFK channel for inactivity (`by` is then the server's name; older clients
  * ignore the field and show the usual notice).
  */
-export const ServerVoiceMoved = z.object({ type: z.literal("voice.moved"), channelId: Uuid.nullable(), by: z.string(), reason: z.enum(["afk", "elsewhere"]).optional() });
+export const ServerVoiceMoved = z.object({ type: z.literal("voice.moved"), channelId: Uuid.nullable(), by: z.string(), reason: z.enum(["afk", "elsewhere", "blocked"]).optional(), until: Iso.nullable().optional() });
+// reason "blocked" (24 September 2026, docs/features/channel-blocks.md): removed and kept out of the channel; `until` = when the
+// block ends, null = permanent. A client from before drops the event; LiveKit ends its media anyway (routes/channelBlocks.ts).
 // reason "elsewhere" (22 September 2026): the same account joined a voice channel of this server from another device or tab,
 // this connection ends (channelId null). A client from before drops the event; LiveKit ends its media anyway (ws/handler.ts).
 /** A moderator stops your camera and/or screen share (LiveKit has already muted the tracks). */

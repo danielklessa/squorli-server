@@ -11,7 +11,7 @@ import { visibility } from "../visibility";
 import { moveGrants } from "../voice/confine";
 import type { VoicePresence } from "../voice/presence";
 import { stickyVerdict } from "../voice/sticky";
-import { voteKicks } from "../voice/votekick";
+import { channelBlockStore } from "../voice/channelBlocks";
 
 /**
  * The app server decides who may enter which room and issues a
@@ -37,9 +37,10 @@ export async function registerLivekitRoutes(app: FastifyInstance, db: Db, config
     if (!canIn(r.perms, Permission.CONNECT_VOICE)) return reply.code(403).send({ error: "forbidden" });
     if ((await stickyVerdict(db, m.userId, m.actor, channel.id)) === "confined") return reply.code(403).send({ error: "confined", lock: visibility.voiceLockOf(m.userId) });
     const granted = moveGrants.grantOf(m.userId) === channel.id;
-    // Voted out of this channel (docs/features/votekick.md): no token until the block is over; a moderator's move wins.
-    const blocked = granted ? null : voteKicks.blockedUntil(channel.id, m.userId);
-    if (blocked) return reply.code(403).send({ error: "votekicked", until: new Date(blocked).toISOString() });
+    // Blocked from this channel (docs/features/channel-blocks.md; a passed vote kick is one too): no token until the block
+    // is over or lifted; a moderator's move wins. `until` null = permanent.
+    const blocked = granted ? null : channelBlockStore.of(channel.id, m.userId);
+    if (blocked) return reply.code(403).send({ error: blocked.source === "votekick" ? "votekicked" : "channel_blocked", until: blocked.until === null ? null : new Date(blocked.until).toISOString() });
     if (channel.userLimit !== null && !granted && presence.channelOfUser(m.userId) !== channel.id && presence.members(channel.id).length >= channel.userLimit) return reply.code(409).send({ error: "channel_full" });
 
     const at = new AccessToken(config.LIVEKIT_API_KEY, config.LIVEKIT_API_SECRET, {

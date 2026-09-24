@@ -1,4 +1,4 @@
-import { Permission, VOTEKICK_BLOCK_MS, VOTEKICK_COOLDOWN_MS, VOTEKICK_MS } from "@squorli/protocol";
+import { Permission, VOTEKICK_COOLDOWN_MS, VOTEKICK_MS } from "@squorli/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VoteKicks, isVoiceModerator, outcomeOf, tally, voteKickOffered, voteOnWire, type EndReason, type RunningVote } from "./votekick";
 
@@ -75,15 +75,6 @@ describe("VoteKicks", () => {
     expect(store.running("other")).toBeUndefined();
   });
 
-  it("keeps a member voted out of that one channel, and only until the block is over", () => {
-    const until = store.block("chan", "t");
-    expect(store.blockedUntil("chan", "t")).toBe(until);
-    expect(store.blockedUntil("other", "t")).toBeNull();
-    expect(store.blockedUntil("chan", "b")).toBeNull();
-    vi.advanceTimersByTime(VOTEKICK_BLOCK_MS + 1);
-    expect(store.blockedUntil("chan", "t")).toBeNull();
-  });
-
   it("holds a new vote about the same member back for a while", () => {
     store.startCooldown("chan", "t");
     expect(store.cooldownUntil("chan", "t")).not.toBeNull();
@@ -93,14 +84,13 @@ describe("VoteKicks", () => {
   });
 
   it("forgets everything about a member who was kicked and about a deleted channel", () => {
-    store.block("chan", "t"); store.startCooldown("chan", "t");
+    store.startCooldown("chan", "t");
     store.clearUser("t");
-    expect(store.blockedUntil("chan", "t")).toBeNull();
     expect(store.cooldownUntil("chan", "t")).toBeNull();
     start();
-    store.block("chan", "b");
+    store.startCooldown("chan", "b");
     store.clearChannel("chan");
     expect(ended[0]!.reason).toBe("gone");
-    expect(store.blockedUntil("chan", "b")).toBeNull();
+    expect(store.cooldownUntil("chan", "b")).toBeNull();
   });
 });

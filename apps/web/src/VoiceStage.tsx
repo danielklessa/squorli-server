@@ -2,10 +2,10 @@ import { VideoStatsButton, VideoStatsOverlay } from "./VideoStatsOverlay";
 import { FullscreenButton, TrackVideo } from "./VideoWindows";
 import { VideoAudioControls } from "./VideoAudioControls";
 import { Avatar } from "./Avatar";
-import { Permission, displayNameOf, hasPermission, type Channel, type Member, type RadioStation } from "@squorli/protocol";
+import { Permission, displayNameOf, hasPermission, type Channel, type Member, type RadioStation, type VoiceMember } from "@squorli/protocol";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { ContextMenu, type MenuAnchor } from "./ContextMenu";
-import { UserVolumeControl } from "./UserVolumeControl";
+import type { MenuAnchor } from "./ContextMenu";
+import { VoiceMemberMenu } from "./VoiceMemberMenu";
 import { RadioControl } from "./RadioControl";
 import { PushToTalkButton } from "./PushToTalkButton";
 import { EmbedSlot } from "./EmbedPlayer";
@@ -53,8 +53,14 @@ type Props = {
   detached: boolean;
   /** Move the whole stage into a window of its own, or back. May throw with a text for the user (window refused). */
   onToggleWindow: () => void;
-  /** Vote kick (docs/features/votekick.md): set while the server would take a vote in this channel right now; null = no entry. */
-  voteKick: { onStart: (userId: string) => void } | null;
+  /** For the tiles' context menu, the same as the sidebar's (VoiceMemberMenu.tsx): the voice server's rosters, channels, my
+   * permissions per channel (null = server-wide) and the vote kick (docs/features/votekick.md). */
+  myUserId: string;
+  roster: Record<string, VoiceMember[]>;
+  channels: Channel[];
+  channelPermissions: (channelId: string | null) => number;
+  voteKickAllowed: Record<string, boolean>;
+  onVoteKick: (userId: string, channelId: string) => void;
 };
 
 type Layout = "grid" | "focus";
@@ -73,7 +79,7 @@ type Item = { key: string; participant: StageParticipant; tile: VideoTile | null
  * The tile view can hide participants without video while any video is being sent; that choice is never stored.
  * Receive quality follows the tile size (adaptiveStream in the voice core); here the <video> only has to have the right size.
  */
-export function VoiceStage({ client, voice, channel, members, myPermissions, api, radio, radioStations, radioTitle, playerTile, playerOff, onDismissPlayerOff, playerPopped, onRestorePlayer, onToggleCamera, onToggleBlur, onLeave, locked = false, onPopout, poppedIds, onRestore, detached, onToggleWindow, voteKick }: Props) {
+export function VoiceStage({ client, voice, channel, members, myPermissions, api, radio, radioStations, radioTitle, playerTile, playerOff, onDismissPlayerOff, playerPopped, onRestorePlayer, onToggleCamera, onToggleBlur, onLeave, locked = false, onPopout, poppedIds, onRestore, detached, onToggleWindow, myUserId, roster, channels, channelPermissions, voteKickAllowed, onVoteKick }: Props) {
   // Names from the server's member list (arrives via WS immediately on every rename), not from the LiveKit token,
   // which is only created on joining. Unknown identities (bots, "external") keep the LiveKit name.
   const participants = voice.participants.map((p) => {
@@ -156,10 +162,9 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
   const focusOn = (key: string) => { setPinned(key); setLayout("focus"); };
   const unfocus = () => { setPinned(null); setLayout("grid"); };
 
-  // Right-click a tile of another member: how loud to play them back. Bots have no member entry and get no menu.
+  // Right-click a tile of another member: the sidebar's voice member menu. Bots have no member entry and get no menu.
   const [menu, setMenu] = useState<({ identity: string } & MenuAnchor) | null>(null);
   const menuMember = menu ? members.find((m) => m.userId === menu.identity) ?? null : null;
-  const menuParticipant = menu ? participants.find((p) => p.identity === menu.identity) ?? null : null;
   const openMenu = (item: Item, event: ReactMouseEvent<HTMLElement>) => {
     if (!item.participant || item.participant.isLocal || !members.some((m) => m.userId === item.participant.identity)) return;
     if (event.currentTarget.ownerDocument.fullscreenElement) return; // the menu lives in the body, behind a fullscreen tile
@@ -217,21 +222,10 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
         </div>
       )}
 
-      {menu && menuMember && (
-        <ContextMenu anchor={menu} label={displayNameOf(menuMember)} onClose={() => setMenu(null)}>
-          <div className="context-identity" role="presentation"><Avatar name={displayNameOf(menuMember)} src={menuMember.avatarUrl} /><strong>{displayNameOf(menuMember)}</strong></div>
-          <UserVolumeControl client={client} publicKey={menuMember.publicKey} />
-          {menuParticipant && mayView && (["camera", "screen"] as const).filter((source) => source === "camera" ? menuParticipant.cameraOn : menuParticipant.screenOn).map((source) => {
-            const id = feedId(menuParticipant.identity, source);
-            const on = client.isVideoWatching(id);
-            return <button key={source} role="menuitem" className="secondary small" onClick={() => { setMenu(null); client.setVideoWatching(id, !on); }}><Icon name={on ? "eye-off" : "eye"} /> {t(`stage.${source}${on ? "Off" : "On"}`)}</button>;
-          })}
-          {/* Vote kick (docs/features/votekick.md): offered while the server would take one here; never about oneself. */}
-          {voteKick && menuParticipant && !menuParticipant.isLocal && (
-            <button role="menuitem" className="secondary small" onClick={() => { setMenu(null); voteKick.onStart(menuParticipant.identity); }}><Icon name="gavel" /> {t("votekick.menu")}</button>
-          )}
-        </ContextMenu>
-      )}
+      {/* The same menu as on the sidebar's voice members (VoiceMemberMenu.tsx); a refusal comes back as a notice. */}
+      {menu && menuMember && <VoiceMemberMenu anchor={menu} member={menuMember} client={client} voiceState={voice} api={api} myUserId={myUserId}
+        permsIn={channelPermissions} voice={roster} channels={channels} voteKickAllowed={voteKickAllowed} onVoteKick={onVoteKick}
+        onClose={() => setMenu(null)} onError={(text) => { if (text) client.setNotice(text); }} />}
 
       {touchPtt && <div className="stage-ptt"><PushToTalkButton client={client} disabled={voice.afkRoom || voice.micMuted} /></div>}
       <footer className="stage-bar">

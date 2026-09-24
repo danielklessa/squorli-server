@@ -13,6 +13,7 @@ import { broadcastStructure, loadChannels, loadSettings } from "../state";
 import { visibility } from "../visibility";
 import type { VoicePresence } from "../voice/presence";
 import { voteKicks } from "../voice/votekick";
+import { channelBlockStore } from "../voice/channelBlocks";
 import { releaseAll } from "../voice/sticky";
 import { compact } from "../util";
 
@@ -119,6 +120,7 @@ export async function registerChannelRoutes(app: FastifyInstance, db: Db, hub: H
     if (!gone.length) return reply.code(404).send({ error: "not_found" });
     presence.clearChannel(req.params.id);
     voteKicks.clearChannel(req.params.id);
+    channelBlockStore.clearChannel(req.params.id); // the rows go by cascade
     // "settings" too: deleting the AFK channel clears server_settings.afk_channel_id (FK set null).
     await broadcastStructure(db, hub, ["channels", "settings"]);
     return { ok: true };

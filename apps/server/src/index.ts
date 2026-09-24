@@ -24,6 +24,8 @@ import { registerImportRoutes } from "./routes/import";
 import { registerInviteRoutes } from "./routes/invites";
 import { registerMemberRoutes } from "./routes/members";
 import { registerVoteKickRoutes } from "./routes/votekick";
+import { registerChannelBlockRoutes } from "./routes/channelBlocks";
+import { channelBlockStore, dbBlockStorage } from "./voice/channelBlocks";
 import { loadMessages, registerMessageRoutes } from "./routes/messages";
 import { registerOverwriteRoutes } from "./routes/overwrites";
 import { registerPreviewRoutes } from "./routes/previews";
@@ -204,6 +206,8 @@ async function main() {
   await registerRoleRoutes(app, db, hub, presence, lk);
   await registerMemberRoutes(app, db, hub, presence, lk);
   await registerVoteKickRoutes(app, db, hub, presence, lk);
+  await channelBlockStore.attach(dbBlockStorage(db)); // channel blocks survive a restart (docs/features/channel-blocks.md)
+  await registerChannelBlockRoutes(app, db, hub, presence, lk);
   await registerInviteRoutes(app, db);
   await registerImportRoutes(app, db, hub);
   // Link previews: looked up after a message is stored; the result goes out as the message itself, once more.

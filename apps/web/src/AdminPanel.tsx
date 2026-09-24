@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ServerApi } from "./api";
 import { askConfirm } from "./dialogs";
 import { roleOrder } from "./roleOrder";
+import { rolesByRank } from "./memberRank";
 import { ChannelsTab } from "./ChannelsTab";
 import type { ChannelDialogTarget } from "./ChannelDialog";
 import { CopyButton } from "./CopyButton";
@@ -125,7 +126,7 @@ function StatusApiSection({ api, mode, roleId, roles, run }: { api: ServerApi; m
   const defaultRole = roles.find((r) => r.isDefault) ?? null;
   const chosen = roleId ? roles.find((r) => r.id === roleId) ?? null : defaultRole;
   const showsEverything = !!chosen && hasPermission(chosen.permissions, Permission.ADMINISTRATOR);
-  const byRank = [...roles].sort((a, b) => a.position - b.position);
+  const byRank = rolesByRank(roles);
   return (
     <>
       <h3>{t("admin.statusApiHeading")}</h3>
@@ -181,7 +182,7 @@ function RolesTab({ api, server, myUserId, run, save }: { api: ServerApi; server
   useEffect(() => { setName(role?.name ?? ""); setColor(role?.color ?? "#888888"); setPerms(role?.permissions ?? 0); }, [role?.id, role?.name, role?.color, role?.permissions]);
   // Active permissions in the same order as the groups below.
   const active: PermissionName[] = PERMISSION_GROUPS.flatMap((g) => [...g.permissions]).filter((n) => (perms & Permission[n]) !== 0);
-  const sorted = [...server.roles].sort((a, b) => b.position - a.position);
+  const sorted = rolesByRank(server.roles);
   const me = server.members.find((m) => m.userId === myUserId);
   const ceiling = me?.isOwner || server.settings.ownerId === myUserId ? Infinity : Math.max(0, ...server.roles.filter((r) => me?.roleIds.includes(r.id)).map((r) => r.position));
   const editable = sorted.filter((r) => !r.isDefault && r.position < ceiling);

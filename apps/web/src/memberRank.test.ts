@@ -1,6 +1,6 @@
 import type { Role } from "@squorli/protocol";
 import { describe, expect, it } from "vitest";
-import { assignableRoles, canSetRolesOf, topPositionOf } from "./memberRank";
+import { assignableRoles, canSetRolesOf, rolesByRank, topPositionOf } from "./memberRank";
 
 const role = (id: string, position: number, isDefault = false): Role => ({ id, name: id, color: null, permissions: 0, position, isDefault });
 const roles = [role("guest", 0, true), role("member", 1), role("mod", 5), role("admin", 9)];
@@ -27,10 +27,13 @@ describe("member rank", () => {
     expect(canSetRolesOf(mod, m("mod2", ["mod"]), roles, "founder")).toBe(false);
     expect(canSetRolesOf(mod, guest, roles, "founder")).toBe(true);
   });
-  it("offers only roles below the own highest one, never the default role", () => {
+  it("offers only roles below the own highest one, never the default role, highest first", () => {
     expect(assignableRoles(mod, roles).map((r) => r.id)).toEqual(["member"]);
-    expect(assignableRoles(admin, roles).map((r) => r.id)).toEqual(["member", "mod"]);
-    expect(assignableRoles(founder, roles).map((r) => r.id)).toEqual(["member", "mod", "admin"]);
+    expect(assignableRoles(admin, roles).map((r) => r.id)).toEqual(["mod", "member"]);
+    expect(assignableRoles(founder, [...roles].reverse()).map((r) => r.id)).toEqual(["admin", "mod", "member"]);
     expect(assignableRoles(guest, roles)).toEqual([]);
+  });
+  it("lists roles in the owner's order whatever order they arrive in", () => {
+    expect(rolesByRank([roles[2]!, roles[0]!, roles[3]!, roles[1]!]).map((r) => r.id)).toEqual(["admin", "mod", "member", "guest"]);
   });
 });

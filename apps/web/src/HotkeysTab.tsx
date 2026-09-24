@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { t } from "./i18n";
 import { platform, type ControlAction, type HotkeyAction, type HotkeyBindings, type HotkeyStatus } from "./platform";
-import { CONTROL_ACTIONS, HOTKEY_ACTIONS, controlLink, formatHotkey, type HotkeyCheck } from "./platform/hotkeys";
+import { CONTROL_ACTIONS, HOTKEY_ACTIONS, controlLink, formatHotkey, keyName, type HotkeyCheck, type KeyLayout } from "./platform/hotkeys";
 import type { VoiceSettings } from "./voice/settings";
 
 /** Einstellungen > Tastenkürzel (desktop app only, docs/features/hotkeys.md): the global shortcuts, what the push-to-talk key does outside the window, and the commands for a Stream Deck, G Hub or any macro tool. */
@@ -15,8 +15,10 @@ const CONTROL_LABELS: Record<ControlAction, string> = {
 const MODIFIER_NAMES = { ctrl: t("hotkeys.mod.ctrl"), alt: t("hotkeys.mod.alt"), shift: t("hotkeys.mod.shift"), meta: t("hotkeys.mod.meta") };
 const CHECK_TEXTS: Record<Exclude<HotkeyCheck, "ok">, string> = { needsModifier: t("hotkeys.needsModifier"), unknownKey: t("hotkeys.unknownKey") };
 
-export function HotkeysTab({ settings, bindings, status, capturing, refused, onCapture, onRemove }: {
+export function HotkeysTab({ settings, bindings, layout, status, capturing, refused, onCapture, onRemove }: {
   settings: VoiceSettings; bindings: HotkeyBindings;
+  /** The keyboard layout for the key labels (keyboardLayout.ts); null = labels from the key codes. */
+  layout: KeyLayout | null;
   /** What the shell made of the bindings; null until it answered. */
   status: HotkeyStatus | null;
   /** The action whose key is being captured right now (the dialog owns the capture: it also quiets the shell meanwhile). */
@@ -35,6 +37,7 @@ export function HotkeysTab({ settings, bindings, status, capturing, refused, onC
     return state === "taken" ? t("hotkeys.taken") : state === "invalid" ? t("hotkeys.invalid") : state === "ok" ? t("hotkeys.active") : null;
   };
   const executable = shell?.executable ?? null;
+  const pttKey = keyName(settings.pttKey, layout);
   return (
     <div className="stack">
       <h3>{t("hotkeys.head")}</h3>
@@ -46,7 +49,7 @@ export function HotkeysTab({ settings, bindings, status, capturing, refused, onC
           <div className="stack hotkey-row" key={action}>
             <div className="row">
               <span className="hotkey-label">{ACTION_LABELS[action]}</span>
-              <kbd>{capturing === action ? t("hotkeys.pressKeys") : binding ? formatHotkey(binding, MODIFIER_NAMES) : t("hotkeys.none")}</kbd>
+              <kbd>{capturing === action ? t("hotkeys.pressKeys") : binding ? formatHotkey(binding, MODIFIER_NAMES, layout) : t("hotkeys.none")}</kbd>
               <button className="secondary small" onClick={() => onCapture(capturing === action ? null : action)}>{capturing === action ? t("common.cancel") : binding ? t("settings.change") : t("hotkeys.set")}</button>
               {binding && capturing !== action && <button className="secondary small" onClick={() => onRemove(action)}>{t("hotkeys.remove")}</button>}
             </div>
@@ -61,9 +64,9 @@ export function HotkeysTab({ settings, bindings, status, capturing, refused, onC
 
       <h3>{t("hotkeys.pttHead")}</h3>
       {settings.mode !== "ptt" ? <span className="muted small">{t("hotkeys.pttOff")}</span>
-        : shell?.globalPtt ? <span className="muted small">{t("hotkeys.pttGlobal", { key: settings.pttKey })}</span>
-        : <span className="muted small">{t("hotkeys.pttLocal", { key: settings.pttKey })}</span>}
-      {settings.mode === "ptt" && status?.ptt === "invalid" && <span className="small warn">{t("hotkeys.pttInvalid", { key: settings.pttKey })}</span>}
+        : shell?.globalPtt ? <span className="muted small">{t("hotkeys.pttGlobal", { key: pttKey })}</span>
+        : <span className="muted small">{t("hotkeys.pttLocal", { key: pttKey })}</span>}
+      {settings.mode === "ptt" && status?.ptt === "invalid" && <span className="small warn">{t("hotkeys.pttInvalid", { key: pttKey })}</span>}
 
       <h3>{t("hotkeys.externalHead")}</h3>
       <span className="muted small">{t("hotkeys.externalText")}</span>

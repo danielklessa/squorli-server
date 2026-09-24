@@ -75,9 +75,11 @@ export type GameWatchSettings = { enabled: boolean; custom: CustomProgram[] };
  * as `KeyboardEvent.code` (the same form as the push-to-talk key) plus the modifiers held with it; the shell turns it into
  * Electron's accelerator (platform/hotkeys.ts) and registers it system-wide, which keeps the combination from every other
  * program. Push-to-talk is not a binding: the shell's system watch helper watches the push-to-talk key itself (Windows),
- * without taking it from anyone, because a shortcut has no key-up.
+ * without taking it from anyone, because a shortcut has no key-up. `vk` (Windows, 24 September 2026): the virtual key the
+ * keyboard layout gave a letter, digit or punctuation key at the capture (`KeyboardEvent.keyCode`); Windows registers a
+ * shortcut by virtual key, so a German Ö (code `Semicolon`, VK_OEM_3) must become Electron's "`", not ";" (= Ü there).
  */
-export type HotkeyBinding = { code: string; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean };
+export type HotkeyBinding = { code: string; vk?: number; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean };
 export type HotkeyAction = "micToggle" | "deafenToggle";
 export type HotkeyBindings = Record<HotkeyAction, HotkeyBinding | null>;
 /** Per binding: none set, registered, refused by the system (another program holds it), or not a key the shell can register. */

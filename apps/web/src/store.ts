@@ -141,7 +141,7 @@ export class Store {
   onRemoved: ((host: string) => void) | null = null;
   /** Moderation (M3) on `host`: moving to another voice channel (null = out) and stopping camera/screen. */
   /** `votekick` = the channel voted the user out (docs/features/votekick.md). */
-  onVoiceMoved: ((host: string, channelId: string | null, by: string, reason: "afk" | "elsewhere" | "votekick" | null) => void) | null = null;
+  onVoiceMoved: ((host: string, channelId: string | null, by: string, reason: "afk" | "elsewhere" | "votekick" | "blocked" | null, until?: string | null) => void) | null = null;
   onVoiceStop: ((host: string, what: { camera: boolean; screen: boolean }, by: string) => void) | null = null;
   /** The voice channel one sits in vanished from the channel list (channel permissions): App.tsx hangs up. */
   onVoiceGone: ((host: string) => void) | null = null;
@@ -199,7 +199,7 @@ export class Store {
       // Your own server, or a server the rail does not list yet (first sign-in there): fetch the list again. Servers connected in the
       // background are already on it, asking the directory once per server would be pointless.
       onConnected: () => { this.noteJoined(host); if (host === this.homeHost || !(this.state.accountServers ?? []).some((s) => this.hostFor(s.host) === host)) void this.refreshAccountServers(); },
-      onVoiceMoved: (channelId, by, reason) => this.onVoiceMoved?.(host, channelId, by, reason),
+      onVoiceMoved: (channelId, by, reason, until) => this.onVoiceMoved?.(host, channelId, by, reason, until),
       onVoiceStop: (what, by) => this.onVoiceStop?.(host, what, by),
       onVoiceGone: () => this.onVoiceGone?.(host),
       onMention: (channelId) => this.incoming("mention", this.state.activeHost === host && !this.state.homeOpen && this.conns.get(host)?.state.currentChannelId === channelId),
@@ -607,8 +607,10 @@ export class Store {
   requestFriend(publicKey: string) { this.friendAction("friends.request", publicKey); }
   acceptFriend(publicKey: string) { this.friendAction("friends.accept", publicKey); }
   declineFriend(publicKey: string) { this.friendAction("friends.decline", publicKey); }
-  removeFriend(publicKey: string) { this.friendAction("friends.remove", publicKey); }
-  blockFriend(publicKey: string) { this.friendAction("friends.block", publicKey); }
+  removeFriend(publicKey: string) { this.leavePeer(publicKey); this.friendAction("friends.remove", publicKey); }
+  blockFriend(publicKey: string) { this.leavePeer(publicKey); this.friendAction("friends.block", publicKey); }
+  /** An open conversation with somebody who is no friend any more closes: the home view shows its start page. */
+  private leavePeer(publicKey: string) { if (this.state.currentPeer === publicKey) this.set({ currentPeer: null }); }
   unblockFriend(publicKey: string) { this.friendAction("friends.unblock", publicKey); }
   /**
    * Encrypt and send a direct message; it is displayed via the directory's echo (dm.message). Links get their previews

@@ -50,7 +50,8 @@ export function ContextMenu({ anchor, label, onClose, children }: {
   }, [anchor, win]);
   useEffect(() => {
     const close = () => closeRef.current();
-    const outside = (event: Event) => { if (!ref.current?.contains(event.target as Node)) close(); };
+    // The emoji picker (a portal of its own, opened from a line inside the menu) counts as inside.
+    const outside = (event: Event) => { const target = event.target as Node; if (!ref.current?.contains(target) && !(target instanceof Element && target.closest(".emoji-picker"))) close(); };
     const key = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); anchor.trigger.focus(); close(); }
       if (event.key === "Tab") { anchor.trigger.focus(); close(); }
@@ -73,8 +74,11 @@ export function ContextMenu({ anchor, label, onClose, children }: {
   );
 }
 
-/** Hover, click and ArrowRight all open the same submenu; it flips at the screen edge. */
-export function ContextSubmenu({ label, children }: { label: string; children: ReactNode }) {
+/**
+ * Hover, click and ArrowRight all open the same submenu; it flips at the screen edge. With `onActivate` the entry is an
+ * action of its own: a click runs it, and the submenu opens on hover, ArrowRight or a click on the arrow (touch).
+ */
+export function ContextSubmenu({ label, children, onActivate, className }: { label: string; children: ReactNode; onActivate?: () => void; className?: string }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ left: 0, top: 0 });
   const trigger = useRef<HTMLButtonElement>(null);
@@ -98,10 +102,14 @@ export function ContextSubmenu({ label, children }: { label: string; children: R
   return <div className="context-submenu" role="none" onPointerEnter={(e) => { if (e.pointerType === "mouse") setOpen(true); }}
     onPointerLeave={() => setOpen(false)}
     onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false); }}>
-    <button ref={trigger} role="menuitem" aria-haspopup="menu" aria-expanded={open}
-      onClick={() => { focusOnOpen.current = true; setOpen(true); if (open) panel.current?.querySelector<HTMLElement>('[role^="menuitem"]')?.focus(); }}
+    <button ref={trigger} role="menuitem" aria-haspopup="menu" aria-expanded={open} className={className}
+      onClick={(e) => {
+        const onArrow = (e.target as Element).closest?.(".submenu-arrow");
+        if (onActivate && !onArrow) { onActivate(); return; }
+        focusOnOpen.current = true; setOpen(true); if (open) panel.current?.querySelector<HTMLElement>('[role^="menuitem"]')?.focus();
+      }}
       onKeyDown={(e) => { if (e.key === "ArrowRight") { e.preventDefault(); focusOnOpen.current = true; setOpen(true); if (open) panel.current?.querySelector<HTMLElement>('[role^="menuitem"]')?.focus(); } }}>
-      <span>{label}</span><Icon name="chevron-down" rotate={270} />
+      <span>{label}</span><span className="submenu-arrow"><Icon name="chevron-down" rotate={270} /></span>
     </button>
     {open && <div ref={panel} className="user-context-menu context-submenu-panel" role="menu" aria-label={label} style={position}
       onKeyDown={(e) => { if (e.key === "ArrowLeft" || e.key === "Escape") { e.preventDefault(); e.stopPropagation(); trigger.current?.focus(); setOpen(false); } else navigate(e); }}>

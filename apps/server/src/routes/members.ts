@@ -12,6 +12,7 @@ import { actorOf, broadcastStructure, loadSettings, sendStructureTo } from "../s
 import { visibility } from "../visibility";
 import { moveGrants } from "../voice/confine";
 import { voteKicks } from "../voice/votekick";
+import { channelBlockStore } from "../voice/channelBlocks";
 import type { VoicePresence } from "../voice/presence";
 import { setHold } from "../voice/sticky";
 
@@ -31,6 +32,7 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     presence.leaveUser(userId);
     moveGrants.clear(userId);
     voteKicks.clearUser(userId);
+    await channelBlockStore.clearUser(userId);
     visibility.dropUser(userId);
     hub.disconnectUser(userId, { type: "removed", reason, message });
   }

@@ -12,7 +12,8 @@ import { LicensesTab } from "./LicensesTab";
 import { GamesTab } from "./GamesTab";
 import { HotkeysTab } from "./HotkeysTab";
 import type { HotkeyAction, HotkeyStatus } from "./platform";
-import { checkHotkey, hotkeyFromKey, type HotkeyCheck } from "./platform/hotkeys";
+import { checkHotkey, hotkeyFromKey, keyName, type HotkeyCheck } from "./platform/hotkeys";
+import { useKeyboardLayout } from "./keyboardLayout";
 import type { GameDetection } from "./gameDetection";
 import { LOCALES, fmtDateTime, localePreference, t, type LocalePreference } from "./i18n";
 import { activity } from "./activity";
@@ -98,6 +99,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
   // "App" (version, updates) exists in the desktop app only; profile and sessions belong to a server.
   const tabs = TABS.filter((entry) => (entry.id !== "app" || platform.app !== null) && (entry.id !== "games" || games !== null) && (entry.id !== "hotkeys" || platform.hotkeys !== null) && (onServer || (entry.id !== "profile" && entry.id !== "sessions")));
   const appUpdate = useUpdateState();
+  const keyLayout = useKeyboardLayout();
   const [tab, setTab] = useState<SettingsTab>(() => { const wanted = initialTab ?? "profile"; return tabs.some((entry) => entry.id === wanted) ? wanted : "view"; });
   const [name, setName] = useState(me?.displayName ?? "");
   const handle = me?.handle ?? directoryAccount?.handle ?? null;
@@ -170,7 +172,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
     const handler = (e: KeyboardEvent) => {
       e.preventDefault(); e.stopPropagation();
       if (e.code === "Escape") { setCapturingHotkey(null); return; }
-      const binding = hotkeyFromKey(e);
+      const binding = hotkeyFromKey(e, platform.os === "windows");
       if (!binding) return;
       const check = checkHotkey(binding);
       if (check === "ok") { setRefusedHotkey(null); update({ hotkeys: { ...settingsRef.current.hotkeys, [action]: binding } }); }
@@ -410,10 +412,10 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
                     </label>
                   </>
                 ) : platform.mobile ? (
-                  <span className="muted small">{t("settings.pttTouchHint", { key: settings.pttKey })}</span>
+                  <span className="muted small">{t("settings.pttTouchHint", { key: keyName(settings.pttKey, keyLayout) })}</span>
                 ) : (
                   <div className="stack">
-                    <span>{t("settings.key")} <kbd>{settings.pttKey}</kbd> <button className="secondary small" onClick={() => setCapturingKey(true)}>{capturingKey ? t("settings.pressKey") : t("settings.change")}</button></span>
+                    <span>{t("settings.key")} <kbd>{keyName(settings.pttKey, keyLayout)}</kbd> <button className="secondary small" onClick={() => setCapturingKey(true)}>{capturingKey ? t("settings.pressKey") : t("settings.change")}</button></span>
                     <span className="muted small">{platform.hotkeys?.globalPtt ? t("settings.pttHintGlobal") : t("settings.pttHint")}</span>
                   </div>
                 )}
@@ -577,7 +579,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
             )}
             {tab === "games" && games && <GamesTab games={games} hiddenInAccount={inAccount && sealed} />}
 
-            {tab === "hotkeys" && platform.hotkeys && <HotkeysTab settings={settings} bindings={settings.hotkeys} status={hotkeyStatus} capturing={capturingHotkey} refused={refusedHotkey}
+            {tab === "hotkeys" && platform.hotkeys && <HotkeysTab settings={settings} bindings={settings.hotkeys} layout={keyLayout} status={hotkeyStatus} capturing={capturingHotkey} refused={refusedHotkey}
               onCapture={(action) => { setRefusedHotkey(null); setCapturingHotkey(action); }} onRemove={(action) => { setRefusedHotkey(null); update({ hotkeys: { ...settingsRef.current.hotkeys, [action]: null } }); }} />}
 
             {tab === "licenses" && <LicensesTab version={clientVersion} />}

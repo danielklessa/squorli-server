@@ -165,6 +165,24 @@ export const channelOverwrites = pgTable(
 );
 
 /** The same for a category: its rows apply to every channel inside, a channel's own rows come on top (live inheritance). */
+/**
+ * Channel blocks (docs/features/channel-blocks.md, 24 September 2026): who may not enter a voice channel, until when
+ * (`until` null = permanent). Set by a moderator or by a passed vote kick (`source`); read into memory at start
+ * (voice/channelBlocks.ts), so the token route asks without a query. A deleted channel or user takes its rows along.
+ */
+export const channelBlocks = pgTable(
+  "channel_blocks",
+  {
+    channelId: uuid("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    until: ts("until"),
+    source: text("source", { enum: ["moderator", "votekick"] }).notNull(),
+    blockedBy: uuid("blocked_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: ts("created_at").notNull().defaultNow(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.channelId, t.userId] }) }),
+);
+
 export const categoryOverwrites = pgTable(
   "category_overwrites",
   {

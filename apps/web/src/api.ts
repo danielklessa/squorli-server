@@ -5,7 +5,7 @@ import {
   directoryRegisterMessage, directorySoundSettingsPayload, openBackup, type AccountSettings, type SealedSettings, type SoundSettings,
   MuteState, ReadStateResponse, StatusApiKeyResponse, type Attachment, type Category, type Channel, type RadioStation, type Role, type StatusApiMode,
   type DiscordImportRequest, type DiscordImportResult, type ImportPlan,
-  DmBlobPutResponse, LinkLookupResponse, directoryDmBlobUrl, directoryLinkLookupPayload, OverwritesResponse, type PermissionOverwrite, type ChannelNotification } from "@squorli/protocol";
+  DmBlobPutResponse, LinkLookupResponse, directoryDmBlobUrl, directoryLinkLookupPayload, OverwritesResponse, type PermissionOverwrite, type ChannelNotification, type ChannelBlock, type ChannelBlockMinutes } from "@squorli/protocol";
 import { z } from "zod";
 import { toBase64, type AvatarImage } from "./avatarImage";
 import { type Identity, identityFromPrivateKey, sign } from "./identity";
@@ -148,6 +148,10 @@ export class ServerApi {
   setMemberRoles(userId: string, roleIds: string[]) { return this.request("PUT", `/api/members/${userId}/roles`, { roleIds }); }
   kickMember(userId: string) { return this.request("DELETE", `/api/members/${userId}`); }
   moveMember(userId: string, channelId: string | null) { return this.request("POST", `/api/members/${userId}/move`, { channelId }); }
+  /** Channel blocks (docs/features/channel-blocks.md): the running ones where I may move members; set (minutes null = permanent) and lift. */
+  channelBlocks() { return this.request<ChannelBlock[]>("GET", "/api/channel-blocks"); }
+  setChannelBlock(channelId: string, userId: string, minutes: ChannelBlockMinutes | null) { return this.request<ChannelBlock>("PUT", `/api/channels/${channelId}/blocks`, { userId, minutes }); }
+  liftChannelBlock(channelId: string, userId: string) { return this.request("DELETE", `/api/channels/${channelId}/blocks/${userId}`); }
   stopMemberStreams(userId: string, what: { camera: boolean; screen: boolean }) { return this.request("POST", `/api/members/${userId}/stream/stop`, what); }
   setStreamBlocked(userId: string, blocked: boolean) { return this.request("PUT", `/api/members/${userId}/stream`, { blocked }); }
   /** Vote kick (docs/features/votekick.md): start a vote about somebody in the voice channel one sits in; the result arrives over the WebSocket. */

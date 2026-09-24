@@ -15,12 +15,23 @@ const shared: Record<string, Key> = {
 
 /** POST /api/rtc-token before the voice client had a say. */
 export function joinErrorText(err: unknown): string {
+  // A channel block (docs/features/channel-blocks.md) says how long it still lasts; `until` null = permanent.
+  if (err instanceof ApiError && err.code === "channel_blocked") {
+    const until = typeof err.body.until === "string" ? err.body.until : null;
+    if (until) return t("voice.joinErr.channelBlockedMinutes", { minutes: Math.max(1, Math.ceil((Date.parse(until) - Date.now()) / 60_000)) });
+    return t(err.body.until === null ? "voice.joinErr.channelBlockedForever" : "voice.joinErr.channelBlocked");
+  }
   return explain(err, { ...shared, forbidden: "voice.joinErr.forbidden", votekicked: "voice.joinErr.votekicked" }, "voice.joinErr.generic");
 }
 
 /** POST /api/members/:id/move (a drag in the sidebar, the member list's menu). */
 export function moveErrorText(err: unknown): string {
   return explain(err, { ...shared, confined: "members.moveErr.confined", forbidden: "members.moveErr.forbidden", not_found: "members.moveErr.gone", target_above_you: "members.moveErr.aboveYou", not_in_voice: "members.moveErr.notInVoice" }, "members.moveErr.generic");
+}
+
+/** PUT and DELETE /api/channels/:id/blocks (the member list's menu, the channel dialog). */
+export function blockErrorText(err: unknown): string {
+  return explain(err, { ...shared, forbidden: "members.blockErr.forbidden", target_above_you: "members.blockErr.aboveYou", not_found: "members.blockErr.gone" }, "members.blockErr.generic");
 }
 
 /** POST /api/channels/:id/votekick (the menu entry) and .../vote (the modal). */

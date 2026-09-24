@@ -1,6 +1,9 @@
 import { Avatar } from "./Avatar";
 import { directoryAvatarUrl, type Friend, type FriendSearchResult, type Member } from "@squorli/protocol";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { ContextMenu, type MenuAnchor } from "./ContextMenu";
+import { askBlockFriend, askRemoveFriend } from "./friendActions";
+import { platform } from "./platform";
 import { DmView } from "./DmView";
 import { GameLine } from "./GameLine";
 import { Icon } from "./Icon";
@@ -19,6 +22,13 @@ export const friendAvatar = (directoryUrl: string | null, f: { publicKey: string
 export function HomeSidebar({ state, store, members, onOpenChat }: { state: State; store: Store; members: Member[]; onOpenChat: () => void }) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<FriendSearchResult[]>([]);
+  // Right-click on a friend (a tap on the dots on a phone): write, remove, block (user's wish, 24 September 2026).
+  const [menu, setMenu] = useState<({ publicKey: string } & MenuAnchor) | null>(null);
+  const openMenu = (e: MouseEvent<HTMLElement>, publicKey: string) => {
+    e.preventDefault(); e.stopPropagation();
+    const r = e.currentTarget.getBoundingClientRect();
+    setMenu({ publicKey, trigger: e.currentTarget, x: e.clientX || r.left, y: e.clientY || r.bottom });
+  };
   const friends = state.friends ?? [];
   const byKey = useMemo(() => new Map(friends.map((f) => [f.publicKey, f])), [friends]);
   const incoming = friends.filter((f) => f.state === "pending_in");
@@ -86,16 +96,29 @@ export function HomeSidebar({ state, store, members, onOpenChat }: { state: Stat
             const unread = state.conversations[f.publicKey]?.unread ?? 0;
             return (
               <li key={f.publicKey} className={`channel friend ${state.currentPeer === f.publicKey ? "active" : ""} ${unread ? "unread" : ""} ${f.online ? "" : "offline"}`}>
-                <button className="channel-btn" onClick={() => { store.selectPeer(f.publicKey); onOpenChat(); }} title={`@${f.handle}`}>
+                <button className="channel-btn" onClick={() => { store.selectPeer(f.publicKey); onOpenChat(); }} onContextMenu={(e) => openMenu(e, f.publicKey)} title={`@${f.handle}`}>
                   <Avatar name={friendName(f)} src={friendAvatar(state.directoryUrl, f)} online={f.online} afk={f.afk} />
                   <span className="friend-identity"><span className="channel-name">{friendName(f)}</span><GameLine game={f.online ? f.game : null} /></span>
                   {f.online && f.afk && <Icon name="moon" className="afk" title={t("members.afk")} />}
                   {unread > 0 && <span className="count">{unread}</span>}
+                  {platform.mobile && <span className="channel-menu-btn" role="button" tabIndex={0} aria-label={t("friends.menu")} title={t("friends.menu")} onClick={(e) => openMenu(e, f.publicKey)}><Icon name="ellipsis-vertical" /></span>}
                 </button>
               </li>
             );
           })}</ul>
         </section>
+        {menu && (() => {
+          const f = byKey.get(menu.publicKey);
+          if (!f || f.state !== "accepted") return null;
+          const name = friendName(f);
+          return (
+            <ContextMenu anchor={menu} label={name} onClose={() => setMenu(null)}>
+              <button role="menuitem" onClick={() => { setMenu(null); store.selectPeer(f.publicKey); onOpenChat(); }}><Icon name="message-circle" /> {t("members.writeMessage")}</button>
+              <button role="menuitem" className="danger" onClick={() => { setMenu(null); askRemoveFriend(store, f.publicKey, name); }}><Icon name="user-minus" /> {t("friends.remove")}</button>
+              <button role="menuitem" className="danger" onClick={() => { setMenu(null); askBlockFriend(store, f.publicKey, name); }}><Icon name="ban" /> {t("friends.block")}</button>
+            </ContextMenu>
+          );
+        })()}
         {outgoing.length > 0 && (
           <section>
             <h3>{t("home.sentRequests")} · {outgoing.length}</h3>

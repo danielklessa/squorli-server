@@ -3,6 +3,8 @@ import { Avatar } from "./Avatar";
 import { DM_DELETE_BOTH_MS, type Friend } from "@squorli/protocol";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { askConfirm } from "./dialogs";
+import { ContextMenu, type MenuAnchor } from "./ContextMenu";
+import { askBlockFriend, askRemoveFriend } from "./friendActions";
 import { EmojiButton } from "./EmojiPicker";
 import { GameLine } from "./GameLine";
 import { friendName } from "./Home";
@@ -21,6 +23,7 @@ const GROUP_MS = 5 * 60_000;
 
 export function DmView({ friend, thread, myKey, store, avatarUrl, myAvatarUrl }: { friend: Friend; thread: DmThread; myKey: string; store: Store; avatarUrl: string | null; myAvatarUrl: string | null }) {
   const [draft, setDraft] = useState("");
+  const [menu, setMenu] = useState<MenuAnchor | null>(null);
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -72,6 +75,14 @@ export function DmView({ friend, thread, myKey, store, avatarUrl, myAvatarUrl }:
         <span className="muted topic">@{friend.handle}{friend.online ? ` · ${t(friend.afk ? "dm.afk" : "dm.online")}` : ""}</span>
         <GameLine game={friend.online ? friend.game : null} className="muted" />
         <span className="spacer" />
+        {/* Remove or block the friend (user's wish, 24 September 2026). */}
+        <button className="icon" title={t("friends.menu")} aria-label={t("friends.menu")} aria-haspopup="menu" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ trigger: e.currentTarget, x: r.left, y: r.bottom }); }}><Icon name="ellipsis-vertical" /></button>
+        {menu && (
+          <ContextMenu anchor={menu} label={name} onClose={() => setMenu(null)}>
+            <button role="menuitem" className="danger" onClick={() => { setMenu(null); askRemoveFriend(store, friend.publicKey, name); }}><Icon name="user-minus" /> {t("friends.remove")}</button>
+            <button role="menuitem" className="danger" onClick={() => { setMenu(null); askBlockFriend(store, friend.publicKey, name); }}><Icon name="ban" /> {t("friends.block")}</button>
+          </ContextMenu>
+        )}
         <button className="icon" title={t("dm.clearTitle")} onClick={() => { void askConfirm({ title: t("dm.clearConfirmTitle", { name }), text: t("dm.clearConfirmText"), confirmLabel: t("common.delete"), danger: true }).then((ok) => { if (ok) store.clearDm(friend.publicKey); }); }}><Icon name="trash-2" /></button>
       </header>
 
