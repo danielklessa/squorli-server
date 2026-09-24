@@ -1,5 +1,7 @@
 # Verified state
 
+- **Unselected shares and deafen survive LiveKit's `startAudio` (24 September 2026, found while looking into the user's report; `docs/features/voice-video.md`):** root typecheck, root tests (web 397, server 107, desktop 74, protocol 94, link-preview 8) and root build passed; the new test in `videoAudio.test.ts` fails without the fix. Not checked: in the desktop app with a real share (nobody to test with).
+
 - **The stage's tiles open the sidebar's voice member menu (24 September 2026, user's wish; `docs/features/channel-blocks.md`):** web typecheck, root tests (web 396, server 107, desktop 74, protocol 94, link-preview 8) and root build passed. Not checked: in a browser.
 
 - **Voice activity on the server rail (24 September 2026, user's wish; `docs/features/mentions-unread.md`):** web typecheck, root tests (web 396, server 107, desktop 74, protocol 94, link-preview 8) and root build passed; the rail as a static page with the built CSS in headless Chrome, screenshot looked at. Not checked: with real servers and people joining and leaving.

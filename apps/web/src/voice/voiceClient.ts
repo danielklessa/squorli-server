@@ -4,6 +4,7 @@ import {
   DisconnectReason,
   LocalAudioTrack,
   LocalVideoTrack,
+  ParticipantEvent,
   RemoteAudioTrack,
   RemoteVideoTrack,
   Room,
@@ -413,6 +414,11 @@ export class VoiceClient {
       },
     });
     this.room = room;
+    // LiveKit's room.startAudio() unmutes EVERY attached audio element, and LiveKit runs it by itself whenever a local audio
+    // track is published (the own screen share's audio too). That would play shares the user has not selected, and voices
+    // while deafened. The unmute happens synchronously in LiveKit's listener, so the rule is put back in a microtask after it,
+    // before any sound is rendered.
+    room.localParticipant.on(ParticipantEvent.AudioStreamAcquired, () => queueMicrotask(() => this.applyAudioMuted()));
     this.log(`verbinde mit ${url}${opts.iceTransportPolicy === "relay" ? " (nur TURN/relay)" : ""}`);
     room
       .on(RoomEvent.ParticipantConnected, (p) => { this.log(`teilnehmer da: ${p.identity.slice(0, 8)}`); this.peerCue("peerJoin"); this.applyVideoAccess(); this.refreshParticipants(); })
@@ -931,7 +937,10 @@ export class VoiceClient {
 
   /** Lift the browser's autoplay block; must be called from within a user action. */
   async startAudio(): Promise<void> {
-    await this.room?.startAudio();
+    // room.startAudio() unmutes every element synchronously before its first await; put deafen and "not listening" back at once.
+    const started = this.room?.startAudio();
+    this.applyAudioMuted();
+    await started;
     const playback = await Promise.allSettled([...this.remoteAudio.values()].map(({ element }) => element.play()));
     this.patch({ canPlayback: (this.room?.canPlaybackAudio ?? true) && playback.every((result) => result.status === "fulfilled") });
   }

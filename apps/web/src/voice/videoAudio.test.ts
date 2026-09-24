@@ -116,6 +116,21 @@ describe("pop-out audio routing", () => {
     await client.setDeafened(false);
     expect(mic.muted).toBe(false);
   });
+  it("keeps unselected shares and deafen silent when LiveKit's startAudio unmutes every element", async () => {
+    const { client, audio } = setup();
+    const mic = audio(Track.Source.Microphone), share = audio(Track.Source.ScreenShareAudio);
+    // LiveKit's room.startAudio() sets muted = false on all attached elements before its first await.
+    const room = { canPlaybackAudio: true, startAudio: () => { for (const el of [mic, share]) el.muted = false; return Promise.resolve(); } };
+    const withRoom = async () => { Reflect.set(client, "room", room); await client.startAudio(); Reflect.set(client, "room", null); };
+    await client.setDeafened(false);
+    await withRoom();
+    expect(mic.muted).toBe(false);
+    expect(share.muted).toBe(true);
+    await client.setDeafened(true);
+    await withRoom();
+    expect(mic.muted).toBe(true);
+    expect(share.muted).toBe(true);
+  });
   it("does not let stale cleanup steal audio from a replacement popup", () => {
     const { client, camera, screen, audio } = setup();
     const mic = audio(Track.Source.Microphone);
