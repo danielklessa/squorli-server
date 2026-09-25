@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
-import { buildRules, LIMITS, registerRateLimits, WindowCounter } from "./rateLimits";
+import { buildRules, ipKey, LIMITS, registerRateLimits, WindowCounter } from "./rateLimits";
 
 describe("WindowCounter", () => {
   it("allows the limit per window, then refuses with the seconds left", () => {
@@ -65,5 +65,17 @@ describe("hook", () => {
     const b = await app(1);
     expect((await b.inject({ method: "GET", url: "/health" })).statusCode).toBe(200);
     await b.close();
+  });
+});
+
+describe("ipKey", () => {
+  it("keeps IPv4, counts IPv6 by its /64", () => {
+    expect(ipKey("203.0.113.7")).toBe("203.0.113.7");
+    expect(ipKey("::ffff:203.0.113.7")).toBe("203.0.113.7");
+    expect(ipKey("2001:db8:1:2:aaaa:bbbb:cccc:dddd")).toBe("2001:db8:1:2::/64");
+    expect(ipKey("2001:0DB8:0001:0002::1")).toBe("2001:db8:1:2::/64");
+    expect(ipKey("2001:db8::1")).toBe("2001:db8:0:0::/64");
+    expect(ipKey("::1")).toBe("0:0:0:0::/64");
+    expect(ipKey("fe80::1%eth0")).toBe("fe80:0:0:0::/64");
   });
 });

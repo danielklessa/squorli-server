@@ -5,6 +5,7 @@ import { Icon } from "./Icon";
 import { t } from "./i18n";
 import { platform } from "./platform";
 import { playerFrameAllow } from "./playerWindow";
+import { safeHref } from "./safeHref";
 import type { ServerConnection } from "./serverConnection";
 import type { Store } from "./store";
 import { youtubeChatPlayerSrc } from "./youtube";
@@ -62,15 +63,15 @@ const linkProps = { target: "_blank", rel: "noreferrer noopener" } as const;
 
 function PageCard({ card: p, picture }: { card: Card; picture: Picture }) {
   // A link straight to a picture: the picture is all there is.
-  if (!p.title) return picture && picture !== "pending" ? <a className="preview-image-only" href={p.url} title={p.url} {...linkProps}><img src={picture} alt="" loading="lazy" /></a> : null;
+  if (!p.title) return picture && picture !== "pending" ? <a className="preview-image-only" href={safeHref(p.url)} title={p.url} {...linkProps}><img src={picture} alt="" loading="lazy" /></a> : null;
   return (
     <div className="preview-card">
       <div className="preview-text">
         {p.siteName && <span className="preview-site muted">{p.siteName}</span>}
-        <a className="preview-title" href={p.url} title={p.url} {...linkProps}>{p.title}</a>
+        <a className="preview-title" href={safeHref(p.url)} title={p.url} {...linkProps}>{p.title}</a>
         {p.description && <p className="preview-description">{p.description}</p>}
       </div>
-      {picture && <a className="preview-thumb" href={p.url} title={p.url} tabIndex={-1} {...linkProps}>{picture !== "pending" && <img src={picture} alt="" loading="lazy" />}</a>}
+      {picture && <a className="preview-thumb" href={safeHref(p.url)} title={p.url} tabIndex={-1} {...linkProps}>{picture !== "pending" && <img src={picture} alt="" loading="lazy" />}</a>}
     </div>
   );
 }
@@ -82,7 +83,7 @@ function VideoCard({ card: p, videoId, picture }: { card: Card; videoId: string;
     <div className="preview-card video">
       <div className="preview-text">
         <span className="preview-site muted">{p.siteName ?? "YouTube"}</span>
-        <a className="preview-title" href={p.url} title={p.url} {...linkProps}>{title}</a>
+        <a className="preview-title" href={safeHref(p.url)} title={p.url} {...linkProps}>{title}</a>
       </div>
       <div className="preview-video">
         {playing

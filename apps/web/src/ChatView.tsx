@@ -12,6 +12,7 @@ import { MentionContext, MessageText } from "./MessageText";
 import { useMentionSuggest } from "./MentionSuggest";
 import { decodeMentions, encodeMentions, mentionsUser } from "./mentions";
 import { pastedFiles } from "./pasteFiles";
+import { safeHref } from "./safeHref";
 import type { ChannelMessages } from "./store";
 import type { ServerConnection } from "./serverConnection";
 import { fmtDay, fmtTime, t } from "./i18n";
@@ -204,8 +205,8 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
                       {m.content && <MessageText text={m.content} edited={m.editedAt !== null} />}
                       {m.attachments.map((a) => (
                         a.mimeType.startsWith("image/")
-                          ? <a key={a.id} href={conn.api.abs(a.url)} target="_blank" rel="noreferrer"><img className="attachment-img" src={conn.api.abs(a.url)} alt={a.name} loading="lazy" /></a>
-                          : <a key={a.id} className="attachment" href={conn.api.abs(a.url)} target="_blank" rel="noreferrer"><Icon name="paperclip" /> {a.name} <span className="muted">({fmtSize(a.size)})</span></a>
+                          ? <a key={a.id} href={safeHref(conn.api.abs(a.url))} target="_blank" rel="noreferrer"><img className="attachment-img" src={conn.api.abs(a.url)} alt={a.name} loading="lazy" /></a>
+                          : <a key={a.id} className="attachment" href={safeHref(conn.api.abs(a.url))} target="_blank" rel="noreferrer"><Icon name="paperclip" /> {a.name} <span className="muted">({fmtSize(a.size)})</span></a>
                       ))}
                       {m.previews && <LinkPreviews messageId={m.id} previews={m.previews} mine={mine} conn={conn} onError={setErr} />}
                     </>

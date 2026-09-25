@@ -17,6 +17,7 @@ import type { Hub } from "../hub";
 import { broadcastStructure, loadSettings } from "../state";
 import { deleteUserAccount } from "../users/deleteUser";
 import type { VoicePresence } from "../voice/presence";
+import { ipKey } from "../rateLimits";
 import { ChallengeStore, RateLimiter } from "./challenges";
 import { admit, checkChallenge, signatureValid } from "./routes";
 import { hasAccount, requireSession } from "./session";
@@ -40,7 +41,10 @@ export async function registerLocalAccountRoutes(
   const paramsByIp = new RateLimiter(30);
   const fetchByIp = new RateLimiter(10);
   const fetchByHandle = new RateLimiter(10);
-  const sweeper = setInterval(() => { for (const l of [registerByIp, paramsByIp, fetchByIp, fetchByHandle]) l.sweep(); }, 60_000);
+  // Password checks behind a session (change, deletion): per account as well, over an hour, so a stolen session guesses
+  // slowly from any number of addresses.
+  const passwordByUser = new RateLimiter(10, 60 * 60_000);
+  const sweeper = setInterval(() => { for (const l of [registerByIp, paramsByIp, fetchByIp, fetchByHandle, passwordByUser]) l.sweep(); }, 60_000);
   app.addHook("onClose", async () => clearInterval(sweeper));
   const avatarDir = join(config.DATA_DIR, "avatars");
   const avatarPath = (userId: string) => join(avatarDir, userId);
@@ -51,8 +55,23 @@ export async function registerLocalAccountRoutes(
   }
   const handleFree = async (handle: string) => !(await db.select({ u: localAccounts.userId }).from(localAccounts).where(eq(localAccounts.handle, handle)).limit(1))[0];
 
+  /**
+   * Count a password attempt before anything is awaited (parallel requests must not all pass one check); false = refused.
+   * The caller gives the attempt back with `refundPassword` when the password was right.
+   */
+  const attemptPassword = (ip: string, account: { handle?: string; userId?: string }) => {
+    if (!fetchByIp.attempt(ipKey(ip))) return false;
+    if (account.handle !== undefined ? fetchByHandle.attempt(account.handle) : passwordByUser.attempt(account.userId!)) return true;
+    fetchByIp.refund(ipKey(ip));
+    return false;
+  };
+  const refundPassword = (ip: string, account: { handle?: string; userId?: string }) => {
+    fetchByIp.refund(ipKey(ip));
+    if (account.handle !== undefined) fetchByHandle.refund(account.handle); else passwordByUser.refund(account.userId!);
+  };
+
   app.get<{ Params: { handle: string } }>("/api/local/handles/:handle", async (req, reply) => {
-    if (!paramsByIp.allow(req.ip)) return reply.code(429).send({ error: "rate_limited" });
+    if (!paramsByIp.allow(ipKey(req.ip))) return reply.code(429).send({ error: "rate_limited" });
     const h = LocalHandle.safeParse(req.params.handle.replace(/^~/, ""));
     if (!h.success) return reply.code(400).send({ error: "bad_handle" });
     return { available: await handleFree(h.data) };
@@ -61,7 +80,7 @@ export async function registerLocalAccountRoutes(
   // A key registers a server account and signs in with it (the answer is the one of /api/auth/verify). The client makes a fresh
   // key per server account; a member from before without any account may register the key they had as well.
   app.post("/api/local/register", async (req, reply) => {
-    if (!registerByIp.allow(req.ip)) return reply.code(429).send({ error: "rate_limited" });
+    if (!registerByIp.allow(ipKey(req.ip))) return reply.code(429).send({ error: "rate_limited" });
     const body = LocalRegisterRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request", detail: body.error.issues[0]?.message ?? null });
     const { challengeId, publicKey, signature, handle, backup, invite } = body.data;
@@ -97,7 +116,7 @@ export async function registerLocalAccountRoutes(
   // the membership moves to it (docs/features/local-accounts.md, "Claim on a fresh key"): both keys sign, the old one through
   // a challenge requested for it. The old key (often the main identity) never reaches this server.
   app.post("/api/local/claim", async (req, reply) => {
-    if (!registerByIp.allow(req.ip)) return reply.code(429).send({ error: "rate_limited" });
+    if (!registerByIp.allow(ipKey(req.ip))) return reply.code(429).send({ error: "rate_limited" });
     const s = await requireSession(db, req, reply);
     if (!s) return;
     const body = LocalClaimRequest.safeParse(req.body);
@@ -130,7 +149,7 @@ export async function registerLocalAccountRoutes(
 
   // Signing in on another device, step 1: salt and iterations (without the iv) so the client can derive the auth key.
   app.get<{ Params: { handle: string } }>("/api/local/backup/:handle/params", async (req, reply) => {
-    if (!paramsByIp.allow(req.ip)) return reply.code(429).send({ error: "rate_limited" });
+    if (!paramsByIp.allow(ipKey(req.ip))) return reply.code(429).send({ error: "rate_limited" });
     const h = LocalHandle.safeParse(req.params.handle.replace(/^~/, ""));
     if (!h.success) return reply.code(400).send({ error: "bad_handle" });
     const [row] = await db.select({ params: localAccounts.backupParams }).from(localAccounts).where(eq(localAccounts.handle, h.data)).limit(1);
@@ -143,15 +162,16 @@ export async function registerLocalAccountRoutes(
   app.post("/api/local/backup/fetch", async (req, reply) => {
     const body = LocalBackupFetchRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
-    if (fetchByIp.blocked(req.ip) || fetchByHandle.blocked(body.data.handle)) return reply.code(429).send({ error: "rate_limited" });
+    const account = { handle: body.data.handle };
+    if (!attemptPassword(req.ip, account)) return reply.code(429).send({ error: "rate_limited" });
     const [row] = await db.select({ la: localAccounts, publicKey: users.publicKey }).from(localAccounts)
       .innerJoin(users, eq(users.id, localAccounts.userId)).where(eq(localAccounts.handle, body.data.handle)).limit(1);
     if (!row) return reply.code(404).send({ error: "unknown_account" });
     if (!sameHash(sha256(body.data.authKey), row.la.authHash)) {
-      fetchByIp.hit(req.ip); fetchByHandle.hit(body.data.handle);
       req.log.warn({ handle: row.la.handle, ip: req.ip }, "Serverkonto: Abruf mit falschem Passwort");
       return reply.code(401).send({ error: "auth_invalid" });
     }
+    refundPassword(req.ip, account);
     const blob: LocalBackupBlob = { handle: row.la.handle, publicKey: row.publicKey, ciphertext: row.la.ciphertext, params: BackupParams.parse(row.la.backupParams), updatedAt: row.la.updatedAt.toISOString() };
     return blob;
   });
@@ -162,10 +182,12 @@ export async function registerLocalAccountRoutes(
     if (!s) return;
     const body = LocalPasswordChangeRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
-    if (fetchByIp.blocked(req.ip)) return reply.code(429).send({ error: "rate_limited" });
+    const account = { userId: s.userId };
+    if (!attemptPassword(req.ip, account)) return reply.code(429).send({ error: "rate_limited" });
     const [row] = await db.select({ authHash: localAccounts.authHash }).from(localAccounts).where(eq(localAccounts.userId, s.userId)).limit(1);
     if (!row) return reply.code(404).send({ error: "unknown_account" });
-    if (!sameHash(sha256(body.data.oldAuthKey), row.authHash)) { fetchByIp.hit(req.ip); return reply.code(401).send({ error: "auth_invalid" }); }
+    if (!sameHash(sha256(body.data.oldAuthKey), row.authHash)) return reply.code(401).send({ error: "auth_invalid" });
+    refundPassword(req.ip, account);
     await db.update(localAccounts).set(stored(body.data.backup)).where(eq(localAccounts.userId, s.userId));
     req.log.info({ userId: s.userId }, "Serverkonto: Passwort geaendert");
     return { ok: true };
@@ -177,10 +199,12 @@ export async function registerLocalAccountRoutes(
     if (!s) return;
     const body = LocalDeleteRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
-    if (fetchByIp.blocked(req.ip)) return reply.code(429).send({ error: "rate_limited" });
+    const account = { userId: s.userId };
+    if (!attemptPassword(req.ip, account)) return reply.code(429).send({ error: "rate_limited" });
     const [row] = await db.select({ authHash: localAccounts.authHash }).from(localAccounts).where(eq(localAccounts.userId, s.userId)).limit(1);
-    if (!row || s.handle) return reply.code(409).send({ error: "use_directory" });
-    if (!sameHash(sha256(body.data.authKey), row.authHash)) { fetchByIp.hit(req.ip); return reply.code(401).send({ error: "auth_invalid" }); }
+    if (!row || s.handle) { refundPassword(req.ip, account); return reply.code(409).send({ error: "use_directory" }); }
+    if (!sameHash(sha256(body.data.authKey), row.authHash)) return reply.code(401).send({ error: "auth_invalid" });
+    refundPassword(req.ip, account);
     const result = await deleteUserAccount(app, db, hub, presence, s.publicKey, async () => "confirmed");
     if (result === "founder") return reply.code(409).send({ error: "founder" });
     await rm(avatarPath(s.userId), { force: true });

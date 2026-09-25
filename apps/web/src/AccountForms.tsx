@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 import { t } from "./i18n";
 import { createTabs, loginPrefix, type CreateTab, type LoginKind } from "./loginView";
 import { PasswordInput } from "./PasswordInput";
+import { safeHref } from "./safeHref";
 
 /**
  * The account forms of a server's login (docs/features/local-accounts.md, 25 September 2026), shared by the web client's
@@ -172,7 +173,7 @@ export function CreateAccount({ directoryUrl, localAccounts, busy, local, direct
       )}
       {shown === "directory" && directoryUrl && (directoryTab ?? (
         <div className="login-create-row">
-          <a href={directoryUrl} target="_blank" rel="noreferrer" onClick={openExternal ? (e) => { e.preventDefault(); openExternal(directoryUrl); } : undefined}>{t("login.createAccount")}</a>
+          <a href={safeHref(directoryUrl)} target="_blank" rel="noreferrer" onClick={openExternal ? (e) => { e.preventDefault(); openExternal(directoryUrl); } : undefined}>{t("login.createAccount")}</a>
           <p className="muted small">{t("login.createDirectoryHint", { host: dirHost })}</p>
         </div>
       ))}

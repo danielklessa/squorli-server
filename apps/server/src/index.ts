@@ -48,6 +48,7 @@ import { moveGrants } from "./voice/confine";
 import { VoicePresence } from "./voice/presence";
 import { registerWs } from "./ws/handler";
 import { registerRateLimits } from "./rateLimits";
+import { PAGE_HEADERS } from "./webHeaders";
 import { loadLinkSecret } from "./attachmentLinks";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -248,7 +249,10 @@ async function main() {
       // Hashed assets may be cached for a long time, the pages (index.html, player-window.html) never: otherwise, after a
       // deploy, a browser would point at asset names that no longer exist.
       setHeaders: (res, path) => {
-        res.setHeader("cache-control", path.endsWith(".html") ? "no-cache" : "public, max-age=31536000, immutable");
+        const page = path.endsWith(".html");
+        res.setHeader("cache-control", page ? "no-cache" : "public, max-age=31536000, immutable");
+        if (page) for (const [k, v] of Object.entries(PAGE_HEADERS)) res.setHeader(k, v);
+        else res.setHeader("x-content-type-options", "nosniff");
       },
     });
     app.setNotFoundHandler((req, reply) => {
@@ -257,7 +261,7 @@ async function main() {
       // Missing files (with an extension) get a 404, not the app shell. Otherwise a stale asset link
       // returns text/html and the browser reports "Expected a JavaScript module ... MIME type text/html".
       if (/\.[a-z0-9]{1,8}$/i.test(path)) return reply.code(404).type("text/plain").send("not found");
-      return reply.header("cache-control", "no-cache").sendFile("index.html");
+      return reply.headers(PAGE_HEADERS).header("cache-control", "no-cache").sendFile("index.html");
     });
   } else {
     // Without a built web client only the API runs. Instead of a bare 404 on "/", say what is missing.

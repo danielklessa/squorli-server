@@ -26,6 +26,7 @@ import { VOICE_CUES, type SoundCue, type SoundSettings } from "./voice/sounds";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 import { LocalAccountSettings } from "./AccountForms";
+import { safeHref } from "./safeHref";
 
 export type SettingsTab = "profile" | "view" | "voice" | "camera" | "sounds" | "hotkeys" | "games" | "sessions" | "account" | "app" | "licenses";
 const TABS: { id: SettingsTab; label: string; icon: string }[] = [
@@ -562,7 +563,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
                 <code className="key">{me?.publicKey ?? publicKey ?? "…"}</code>
                 {directoryUrl && !localHandle && (
                   <p className="muted small">
-                    <a href={`${directoryUrl}/?handle=${encodeURIComponent(handle ?? "")}`} target="_blank" rel="noreferrer">{t("profile.manageAt", { host: dirHost ?? "" })}</a>{t("profile.manageHint")}
+                    <a href={safeHref(`${directoryUrl}/?handle=${encodeURIComponent(handle ?? "")}`)} target="_blank" rel="noreferrer">{t("profile.manageAt", { host: dirHost ?? "" })}</a>{t("profile.manageHint")}
                   </p>
                 )}
                 {onDirectorySignIn && <p className="muted small">{t("profile.directorySignInHint")} <button className="secondary small" onClick={onDirectorySignIn}>{t("profile.directorySignIn")}</button></p>}

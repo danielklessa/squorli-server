@@ -49,7 +49,14 @@ export async function admit(
   if (ban) { await reply.code(403).send({ error: "banned", reason: ban.reason }); return null; }
   const [member] = await db.select().from(members).where(eq(members.userId, user.id)).limit(1);
   const settings = await loadSettings(db);
-  const firstEver = await isFirstEver(db, config, user.publicKey);
+  // The owner is claimed with one conditional update before anything else: of two first sign-ins at the same moment only
+  // one gets it, the other is handled as an ordinary sign-in (invite, open server; security review, 25 September 2026).
+  let firstEver = await isFirstEver(db, config, user.publicKey);
+  if (firstEver) {
+    const claimed = await db.update(serverSettings).set({ ownerId: user.id })
+      .where(and(eq(serverSettings.id, SETTINGS_ID), isNull(serverSettings.ownerId))).returning({ id: serverSettings.id });
+    firstEver = claimed.length > 0;
+  }
 
   // Membership: existing member, open server, or a valid invite.
   if (!member) {
@@ -64,9 +71,8 @@ export async function admit(
     void directory.refresh(user, true, proof);
   }
 
-  // Determine the owner: the first sign-in with an account while none exists.
+  // The owner (claimed above): the first sign-in with an account while none exists.
   if (firstEver) {
-    await db.update(serverSettings).set({ ownerId: user.id }).where(and(eq(serverSettings.id, SETTINGS_ID), isNull(serverSettings.ownerId)));
     await db.update(members).set({ isOwner: true }).where(eq(members.userId, user.id));
     const [admin] = await db.select({ id: roles.id }).from(roles).where(eq(roles.name, "Admin")).limit(1);
     if (admin) await db.insert(memberRoles).values({ userId: user.id, roleId: admin.id }).onConflictDoNothing();

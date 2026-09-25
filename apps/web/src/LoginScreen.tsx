@@ -9,6 +9,7 @@ import { platform } from "./platform";
 import { formatDeepLink, parseDeepLink } from "./platform/deepLink";
 import { ClaimAccount, CreateAccount, LocalRegisterForm, SignInForm } from "./AccountForms";
 import { PasswordInput } from "./PasswordInput";
+import { safeHref } from "./safeHref";
 
 /** Invite code from /invite/<code> or ?invite=<code>. */
 export function inviteFromUrl(): string | null {
@@ -121,7 +122,7 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
         </>
       )}
       <button className="login-primary" onClick={() => void continueSaved()} disabled={!state.identity || busy}>{busy ? t("login.connecting") : t("desktopLogin.continueAs", { handle: saved.handle })}</button>
-      {state.directoryAccount && <p className="muted small"><a href={`${state.directoryUrl ?? ""}/?handle=${encodeURIComponent(saved.handle)}`} target="_blank" rel="noreferrer">{t("login.manageAccount")}</a> {t("login.manageAccountHint")}</p>}
+      {state.directoryAccount && <p className="muted small"><a href={safeHref(`${state.directoryUrl ?? ""}/?handle=${encodeURIComponent(saved.handle)}`)} target="_blank" rel="noreferrer">{t("login.manageAccount")}</a> {t("login.manageAccountHint")}</p>}
     </div>
   );
 

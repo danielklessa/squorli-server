@@ -7,6 +7,7 @@ import { LOCALES, locale, t } from "./i18n";
 import { platform } from "./platform";
 import { PasswordInput } from "./PasswordInput";
 import { loginView, type LoginChoice } from "./loginView";
+import { safeHref } from "./safeHref";
 
 /**
  * Login of a client without a home server (the desktop app, docs/features/desktop.md). The directory account comes first:
@@ -70,7 +71,7 @@ export function DesktopLogin({ store, state }: { store: Store; state: State }) {
             <button type="button" className="secondary" aria-pressed={showDevice} disabled={busy} onClick={() => setChoice("device")}>{t(account ? "login.savedAccount" : "desktopLogin.serverAccountsOnly")}</button>
           </nav>
           <div className="login-create-row">
-            <a href={state.directoryUrl} target="_blank" rel="noreferrer" onClick={(e) => { e.preventDefault(); platform.links.openExternal(state.directoryUrl!); }}>{t("login.createAccount")}</a>
+            <a href={safeHref(state.directoryUrl)} target="_blank" rel="noreferrer" onClick={(e) => { e.preventDefault(); platform.links.openExternal(state.directoryUrl!); }}>{t("login.createAccount")}</a>
             <p className="muted small">{t("login.createDirectoryHint", { host: dirHost ?? "" })}</p>
           </div>
         </>}

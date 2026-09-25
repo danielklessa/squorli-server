@@ -1,9 +1,26 @@
 import { createHash } from "node:crypto";
+import { isIPv6 } from "node:net";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 /**
+ * The key an address counts under: an IPv4 address as it is, an IPv6 address by its /64 (one connection usually gets a whole
+ * /64 and can rotate through it; security review, 25 September 2026). IPv4-mapped IPv6 counts as the IPv4 address.
+ */
+export function ipKey(ip: string): string {
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip);
+  if (mapped) return mapped[1]!;
+  const bare = ip.split("%", 1)[0]!;
+  if (!isIPv6(bare)) return ip;
+  const [head = "", tail = ""] = bare.toLowerCase().split("::", 2);
+  const h = head ? head.split(":") : [];
+  const t = bare.includes("::") ? (tail ? tail.split(":") : []) : [];
+  const groups = bare.includes("::") ? [...h, ...Array<string>(8 - h.length - t.length).fill("0"), ...t] : h;
+  return `${groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
+
+/**
  * Rate limits on every public path (25 September 2026, docs/PLAN.md 2.1; docs/features/rate-limits.md). One `onRequest` hook
- * counts before any route runs, so a refused request costs no database work: fixed windows per client IP (behind
+ * counts before any route runs, so a refused request costs no database work: fixed windows per client IP (`ipKey`, behind
  * `TRUSTED_PROXIES`, `req.ip` is the real client) and per session token (hashed, never kept as is). The limits are generous
  * for a person and tight for a script; `RATE_LIMIT_FACTOR` scales all of them (0 switches them off, e.g. for load tests).
  * The routes of server accounts keep their own, stricter limits (auth/local.ts); slowmode stays per channel (messages.ts).
@@ -99,7 +116,7 @@ export function registerRateLimits(app: FastifyInstance, factor: number): (() =>
     for (const rule of rules) {
       if (!rule.applies(req.method, path)) continue;
       let key: string;
-      if (rule.by === "ip") key = req.ip;
+      if (rule.by === "ip") key = ipKey(req.ip);
       else {
         if (token === undefined) token = tokenKey(req);
         if (!token) continue; // without a token the route refuses anyway; the IP rules still count it

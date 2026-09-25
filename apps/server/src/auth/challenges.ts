@@ -52,6 +52,23 @@ export class RateLimiter {
     list.push(Date.now());
     this.hits.set(key, list);
   }
+  /**
+   * Password checks: count the attempt before the first await, so parallel requests cannot all pass one `blocked()` check
+   * (security review, 25 September 2026); a correct password gives the attempt back with `refund()`.
+   */
+  attempt(...keys: string[]): boolean {
+    if (keys.some((k) => this.blocked(k))) return false;
+    for (const k of keys) this.hit(k);
+    return true;
+  }
+  refund(...keys: string[]) {
+    for (const k of keys) {
+      const list = this.hits.get(k);
+      if (!list) continue;
+      list.pop();
+      if (!list.length) this.hits.delete(k);
+    }
+  }
   sweep() {
     const now = Date.now();
     for (const [k, list] of this.hits) {
