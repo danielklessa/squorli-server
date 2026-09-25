@@ -40,6 +40,7 @@ export const localAccounts = pgTable("local_accounts", {
 });
 
 export const sessions = pgTable("sessions", {
+  /** SHA-256 (hex) of the session token (auth/session.ts `tokenHash`, since migration 0034); the token itself is never stored. */
   token: text("token").primaryKey(),
   /** Public identifier for device management (M6c); the token stays secret. */
   id: uuid("id").notNull().defaultRandom().unique(),

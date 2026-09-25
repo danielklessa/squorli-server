@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, nativeImage, screen, session, type IpcMainEvent, type IpcMainInvokeEvent, type Tray } from "electron";
+import { randomBytes } from "node:crypto";
 import { release } from "node:os";
 import { join } from "node:path";
 import { INFO_ARGUMENT, IPC, type AppearanceState, type DesktopInfo, type PlatformOs, type UpdateState, type WindowAppearance, type WindowFrameState } from "@squorli/web/platform/bridge";
@@ -102,6 +103,18 @@ function showAttention(): void {
   } else app.setBadgeCount(attention); // the dock on macOS, the launcher of some Linux desktops; nothing elsewhere
 }
 
+/** The key of control links that could open the microphone (controlArgs.ts), made once per installation. */
+let controlKeyValue: string | null = null;
+function controlKey(): string {
+  if (controlKeyValue) return controlKeyValue;
+  const userData = app.getPath("userData");
+  const config = loadConfig(userData);
+  if (typeof config.controlKey === "string" && /^[A-Za-z0-9_-]{22,64}$/.test(config.controlKey)) return (controlKeyValue = config.controlKey);
+  controlKeyValue = randomBytes(16).toString("base64url");
+  saveConfig(userData, { ...config, controlKey: controlKeyValue });
+  return controlKeyValue;
+}
+
 /** Messages count only when they come from the client's own main frame, never from an embedded player or a foreign page. */
 const isClientFrame = (event: IpcMainEvent | IpcMainInvokeEvent): boolean => {
   const frame = event.senderFrame;
@@ -112,7 +125,7 @@ const isClientFrame = (event: IpcMainEvent | IpcMainInvokeEvent): boolean => {
 function createWindow(splash: Splash | null = null): BrowserWindow {
   const info: DesktopInfo = { version: app.getVersion(), electron: process.versions.electron ?? "", chrome: process.versions.chrome ?? "", os, directoryUrl, materials, nativeScreenAudio: helperPath() !== null, systemWatch: systemWatchPath() !== null, gameDetection: systemWatchPath() !== null, appearance: look, frame: { maximized: false, focused: true, fullscreen: false }, tray: tray ? { closeToTray } : null, autostart: autostartSupported() ? { enabled: autostartEnabled(), background: autostartBackground } : null,
     // Global shortcuts everywhere; the push-to-talk key across the system only where the system watch helper runs (Windows).
-    hotkeys: { globalPtt: systemWatchPath() !== null, executable: app.isPackaged ? process.execPath : null }, update: updateState() };
+    hotkeys: { globalPtt: systemWatchPath() !== null, executable: app.isPackaged ? process.execPath : null, controlKey: controlKey() }, update: updateState() };
   // The window reopens where it was closed, as long as that place still lies on a display (windowState.ts).
   const userData = app.getPath("userData");
   const state = restoreWindowState(loadConfig(userData).window, screen.getAllDisplays().map((d) => d.workArea));
@@ -174,7 +187,7 @@ else {
   app.on("second-instance", (_event, argv) => {
     // A command from outside (`squorli://control/<action>`, `--control=<action>`: a Stream Deck, G Hub, a macro) is carried
     // out without bringing the window to the front; whoever pressed it is in a game or elsewhere (hotkeys.ts).
-    const control = findControl(argv);
+    const control = findControl(argv, controlKey());
     if (control) { hotkeys?.control(control); return; }
     links.deliver(findDeepLink(argv));
     if (!mainWindow) return;

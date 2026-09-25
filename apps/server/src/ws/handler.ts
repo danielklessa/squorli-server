@@ -61,6 +61,8 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
     const send = (e: ServerEvent) => hub.send(socket, e);
     const helloTimeout = setTimeout(() => socket.close(4001, "hello timeout"), 10_000);
     let lastTyping = 0;
+    let expiryTimer: NodeJS.Timeout | null = null;
+    let helloSeen = false;
     const events = wsLimit?.() ?? null;
     // Game display: every change goes to all members, so a connection's reports take effect at most every GAME_CHANGE_MS;
     // what arrives in between waits, and only the last one counts.
@@ -88,6 +90,10 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
       if (!ev.success) return send({ type: "error", code: "bad_message", message: "unknown event" });
 
       if (ev.data.type === "hello") {
+        // One hello per connection (security review, 25 September 2026): a second one would add the socket for another user.
+        // Marked before the first await, so two hellos sent at once cannot both pass.
+        if (helloSeen) return send({ type: "error", code: "bad_message", message: "hello already done" });
+        helloSeen = true;
         if (ev.data.protocolVersion !== PROTOCOL_VERSION) {
           send({ type: "error", code: "protocol_version", message: `server speaks v${PROTOCOL_VERSION}` });
           return socket.close(4002, "protocol version");
@@ -107,6 +113,25 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
         userId = session.userId;
         clearTimeout(helloTimeout);
         hub.add(userId, socket, session.sessionId);
+        // A kick, ban or sign-out between the lookup above and hub.add would have missed this socket: look again now that it
+        // is registered (security review, 25 September 2026).
+        const still = await resolveSession(db, ev.data.sessionToken);
+        if (!still || !(await actorOf(db, still.userId))) {
+          send({ type: "error", code: "unauthorized", message: "session invalid" });
+          return socket.close(4003, "unauthorized");
+        }
+        // The session's end (or its deletion in the meantime) ends the socket too. A timer reaches at most ~24 days ahead:
+        // when it fires early, look again and wait for the rest.
+        const token = ev.data.sessionToken;
+        const watchExpiry = (expiresAt: Date) => {
+          expiryTimer = setTimeout(() => {
+            void resolveSession(db, token).then((s) => {
+              if (socket.readyState !== socket.OPEN) return;
+              if (!s) socket.close(4011, "session_expired"); else watchExpiry(s.expiresAt);
+            }).catch(() => watchExpiry(new Date(Date.now() + 60_000)));
+          }, Math.min(Math.max(expiresAt.getTime() - Date.now() + 1000, 0), 2 ** 31 - 1));
+        };
+        watchExpiry(still.expiresAt);
         liveness.add(socket);
         req.log.info({ userId }, "ws connected");
         send({ type: "welcome", userId, serverTime: new Date().toISOString(), protocolVersion: PROTOCOL_VERSION, state: await loadState(db, hub, userId) });
@@ -201,6 +226,7 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
     socket.on("close", () => {
       clearTimeout(helloTimeout);
       if (gameTimer) clearTimeout(gameTimer);
+      if (expiryTimer) clearTimeout(expiryTimer);
       liveness.remove(socket);
       hub.remove(socket);
       const seated = presence.channelOf(socket) !== undefined;

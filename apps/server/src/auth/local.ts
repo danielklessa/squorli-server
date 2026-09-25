@@ -20,7 +20,7 @@ import type { VoicePresence } from "../voice/presence";
 import { ipKey } from "../rateLimits";
 import { ChallengeStore, RateLimiter } from "./challenges";
 import { admit, checkChallenge, signatureValid } from "./routes";
-import { hasAccount, requireSession } from "./session";
+import { hasAccount, requireMember, requireSession } from "./session";
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const sameHash = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -213,8 +213,9 @@ export async function registerLocalAccountRoutes(
 
   // ---- The avatar of a server account (a directory account's picture lives at the directory). The client crops and scales
   // it like for the directory; the server checks type and size. File DATA_DIR/avatars/<userId>, public like the server icon.
+  // Members only (security review, 25 September 2026): a kicked or banned user keeps a session, but no say in what shows here.
   app.put("/api/me/avatar", { bodyLimit: Math.ceil(AVATAR_MAX_BYTES / 3) * 4 + 4096 }, async (req, reply) => {
-    const s = await requireSession(db, req, reply);
+    const s = await requireMember(db, req, reply);
     if (!s) return;
     if (s.handle || !s.localHandle) return reply.code(409).send({ error: "use_directory" });
     const body = LocalAvatarRequest.safeParse(req.body);
@@ -233,7 +234,7 @@ export async function registerLocalAccountRoutes(
   });
 
   app.delete("/api/me/avatar", async (req, reply) => {
-    const s = await requireSession(db, req, reply);
+    const s = await requireMember(db, req, reply);
     if (!s) return;
     if (s.handle || !s.localHandle) return reply.code(409).send({ error: "use_directory" });
     await rm(avatarPath(s.userId), { force: true });

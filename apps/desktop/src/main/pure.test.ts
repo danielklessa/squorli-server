@@ -269,12 +269,19 @@ describe("start window", () => {
 
 describe("findControl", () => {
   it("takes the first control link or --control argument and ignores everything else", () => {
-    expect(findControl(["Squorli.exe", "--control=mic-toggle"])).toBe("mic-toggle");
-    expect(findControl(["Squorli.exe", "--allow-file-access", "squorli://control/deafen-on"])).toBe("deafen-on");
-    expect(findControl(["Squorli.exe", "--CONTROL=Mic-Off"])).toBe("mic-off");
-    expect(findControl(["Squorli.exe", "squorli://server/example.org", "--control=quit", "--control=mic-on"])).toBe("mic-on");
-    expect(findControl(["Squorli.exe", "squorli://control/quit"])).toBeNull();
-    expect(findControl(["Squorli.exe"])).toBeNull();
+    expect(findControl(["Squorli.exe", "--control=mic-toggle"], "k1")).toBe("mic-toggle");
+    expect(findControl(["Squorli.exe", "--allow-file-access", "squorli://control/deafen-on"], "k1")).toBe("deafen-on");
+    expect(findControl(["Squorli.exe", "--CONTROL=Mic-Off"], "k1")).toBe("mic-off");
+    expect(findControl(["Squorli.exe", "squorli://server/example.org", "--control=quit", "--control=mic-on"], "k1")).toBe("mic-on");
+    expect(findControl(["Squorli.exe", "squorli://control/quit"], "k1")).toBeNull();
+    expect(findControl(["Squorli.exe"], "k1")).toBeNull();
+  });
+  it("takes a link that could open the microphone only with the installation's key", () => {
+    expect(findControl(["Squorli.exe", "squorli://control/mic-on?k=secret"], "secret")).toBe("mic-on");
+    expect(findControl(["Squorli.exe", "squorli://control/mic-on"], "secret")).toBeNull();
+    expect(findControl(["Squorli.exe", "squorli://control/mic-toggle?k=wrong"], "secret")).toBeNull();
+    expect(findControl(["Squorli.exe", "squorli://control/deafen-off?k=secre"], "secret")).toBeNull();
+    expect(findControl(["Squorli.exe", "squorli://control/mic-off"], "secret")).toBe("mic-off");
   });
 });
 

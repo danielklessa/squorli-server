@@ -49,6 +49,7 @@ import { VoicePresence } from "./voice/presence";
 import { registerWs } from "./ws/handler";
 import { registerRateLimits } from "./rateLimits";
 import { PAGE_HEADERS } from "./webHeaders";
+import { requestSerializer } from "./logRedact";
 import { loadLinkSecret } from "./attachmentLinks";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -73,7 +74,8 @@ async function main() {
   const config = loadConfig();
 
   const app = Fastify({
-    logger: { level: config.NODE_ENV === "production" ? "info" : "debug" },
+    // Query secrets (status key, attachment signature) never reach the log (logRedact.ts).
+    logger: { level: config.NODE_ENV === "production" ? "info" : "debug", serializers: { req: requestSerializer } },
     // In external mode we trust X-Forwarded-* only from the configured proxies.
     // In bundled mode the only proxy is our own Caddy inside the Docker network.
     trustProxy: config.trustedProxies,
@@ -309,7 +311,14 @@ async function main() {
   if (directory.enabled) {
     // Register, then reconcile all users' names every 5 minutes (changes on the account page arrive without a reload this way).
     // Account deletion requested through the directory: founder check, confirm there (token), then delete locally.
-    leaveHandler = (publicKey) => deleteUserAccount(app, db, hub, presence, publicKey, () => directory!.confirmLeave(publicKey));
+    leaveHandler = async (publicKey) => {
+      const r = await deleteUserAccount(app, db, hub, presence, publicKey, () => directory!.confirmLeave(publicKey));
+      // "founder" is decided before the directory is asked (so the request stays pending for the user to see). To a push
+      // anyone can send it would tell which key founded the server: only when the user's request is really pending
+      // (security review, 25 September 2026).
+      if (r === "founder" && !(await directory!.pendingLeaves()).includes(publicKey)) return "not_pending";
+      return r;
+    };
     const sync = async () => {
       for (const key of await directory!.pendingLeaves()) await leaveHandler!(key);
       const changed = await directory!.syncAll((u) => presence.rename(u.userId, { displayName: u.displayName, publicKey: u.publicKey, handle: u.handle }));

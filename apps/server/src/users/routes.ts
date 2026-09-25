@@ -1,7 +1,7 @@
 import { UpdateMeRequest, Uuid, type Me, type SessionInfo } from "@squorli/protocol";
 import { and, desc, eq, lt, ne, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import { hasAccount, requireSession } from "../auth/session";
+import { hasAccount, requireMember, requireSession } from "../auth/session";
 import { avatarOf } from "../names";
 import type { Db } from "../db";
 import { directoryStale, type DirectoryClient } from "../directory";
@@ -31,8 +31,9 @@ export async function registerUserRoutes(app: FastifyInstance, db: Db, directory
     return me;
   });
 
+  // Members only (security review, 25 September 2026): a kicked or banned user's session must not rename them here.
   app.patch("/api/me", async (req, reply) => {
-    const s = await requireSession(db, req, reply);
+    const s = await requireMember(db, req, reply);
     if (!s) return;
     const body = UpdateMeRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
@@ -78,6 +79,8 @@ export async function registerUserRoutes(app: FastifyInstance, db: Db, directory
     const s = await requireSession(db, req, reply);
     if (!s) return;
     await db.delete(sessions).where(eq(sessions.id, s.sessionId));
+    // Its WebSockets too (security review, 25 September 2026): before, they stayed open until the client closed them.
+    hub.disconnectSession(s.sessionId);
     return { ok: true };
   });
 

@@ -11,6 +11,7 @@ import { SETTINGS_ID, broadcastStructure, loadSettings } from "../state";
 import type { DirectoryClient, LoginProof } from "../directory";
 import type { VoicePresence } from "../voice/presence";
 import { ChallengeStore } from "./challenges";
+import { tokenHash } from "./session";
 import { registerLocalAccountRoutes } from "./local";
 
 const hexToBytes = (h: string) => Uint8Array.from(Buffer.from(h, "hex"));
@@ -82,7 +83,7 @@ export async function admit(
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + config.SESSION_TTL_DAYS * 86_400_000);
   // Device label for the session list (M6c); the client cannot set it, only the browser reveals it.
-  await db.insert(sessions).values({ token, userId: user.id, expiresAt, label: labelFromUserAgent(req.headers["user-agent"]), lastUsedAt: new Date() });
+  await db.insert(sessions).values({ token: tokenHash(token), userId: user.id, expiresAt, label: labelFromUserAgent(req.headers["user-agent"]), lastUsedAt: new Date() });
 
   if (!member) await broadcastStructure(db, hub, ["members", "settings"]);
   return { sessionToken: token, userId: user.id, expiresAt: expiresAt.toISOString(), registrationRequired };

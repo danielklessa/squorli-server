@@ -70,9 +70,10 @@ export function HotkeysTab({ settings, bindings, layout, status, capturing, refu
 
       <h3>{t("hotkeys.externalHead")}</h3>
       <span className="muted small">{t("hotkeys.externalText")}</span>
+      {shell?.controlKey && <span className="muted small">{t("hotkeys.externalKey")}</span>}
       <ul className="hotkey-links">
         {CONTROL_ACTIONS.map((action) => {
-          const link = controlLink(action);
+          const link = controlLink(action, shell?.controlKey ?? null);
           return (
             <li key={action}>
               <span className="hotkey-label">{CONTROL_LABELS[action]}</span>

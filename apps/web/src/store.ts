@@ -361,6 +361,10 @@ export class Store {
     if (!id) return;
     try { await conn.api.localChangePassword(id, handle, oldPassword, newPassword); }
     catch (err) { throw new Error(api.explainLocalError(err)); }
+    // A new password ends the account's other sessions here (security review, 25 September 2026): whoever changes it
+    // because it leaked wants the other devices out. Done by the client, since the same route rebinds an old backup with
+    // the same password at a sign-in (loginLocal), which must sign nobody out.
+    await conn.api.revokeOtherSessions().catch(() => { /* the password is changed; the list in Sitzungen still works */ });
   }
   /** Delete the server account of the server shown (the password proves it); the server then closes the socket with 4012. */
   async deleteLocalAccount(password: string): Promise<void> {

@@ -4,7 +4,7 @@ import type { FastifyInstance } from "fastify";
 import { requireMember } from "../auth/session";
 import { can, canSetRolesOf, canTouchRole, outranks, type Actor } from "../authz";
 import type { Db } from "../db";
-import { bans, categoryOverwrites, channelOverwrites, channels, localAccounts, memberRoles, members, roles, users } from "../db/schema";
+import { bans, categoryOverwrites, channelOverwrites, channels, localAccounts, memberRoles, members, roles, sessions, users } from "../db/schema";
 import { localJoin, nameColumns } from "../names";
 import type { Hub } from "../hub";
 import type { LivekitAdmin } from "../livekit/admin";
@@ -200,6 +200,8 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     if (target && !outranks(m.actor, target)) return reply.code(403).send({ error: "target_above_you" });
     await db.insert(bans).values({ userId: user.id, bannedBy: m.userId, reason: body.data.reason ?? null }).onConflictDoNothing();
     await removeMember(user.id, "banned", body.data.reason ?? null);
+    // A ban ends every session here (security review, 25 September 2026); a kicked member keeps theirs to come back with an invite.
+    await db.delete(sessions).where(eq(sessions.userId, user.id));
     req.log.info({ by: m.userId, target: user.id }, "Mitglied gebannt");
     await broadcastStructure(db, hub, ["members"]);
     return { ok: true };

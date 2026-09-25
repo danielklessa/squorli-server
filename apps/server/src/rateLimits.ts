@@ -68,7 +68,7 @@ export const LIMITS = {
   tokenWrite: { limit: 180, windowMs: 60_000 },
   /** Messages per session, over all channels. */
   tokenMessages: { limit: 15, windowMs: 10_000 },
-  /** Uploads per session. */
+  /** Uploads per session (attachments and the server account's avatar). */
   tokenUploads: { limit: 30, windowMs: 60_000 },
   /** Events on one WebSocket (typing, activity, voice state, ping). */
   wsEvents: { limit: 60, windowMs: 10_000 },
@@ -95,7 +95,7 @@ export function buildRules(factor: number): Rule[] {
     r("ipDirectoryPush", "ip", (m, p) => m === "POST" && (p === "/api/directory/notify" || p === "/api/directory/leave")),
     r("tokenWrite", "token", (m) => isWrite(m)),
     r("tokenMessages", "token", (m, p) => m === "POST" && /^\/api\/channels\/[^/]+\/messages$/.test(p)),
-    r("tokenUploads", "token", (m, p) => m === "POST" && p === "/api/attachments"),
+    r("tokenUploads", "token", (m, p) => (m === "POST" && p === "/api/attachments") || (m === "PUT" && p === "/api/me/avatar")),
   ];
 }
 

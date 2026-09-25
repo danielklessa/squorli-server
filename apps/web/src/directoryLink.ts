@@ -1,5 +1,7 @@
 import { DIRECTORY_WS_VERSION, DirectoryServerEvent, directoryWsAuthMessage, type DirectoryClientEvent, type GamePresence } from "@squorli/protocol";
+import { t } from "./i18n";
 import { sign, type Identity } from "./identity";
+import { connectedHost } from "./serverHost";
 
 /**
  * Second WebSocket connection (M7): to the directory service, for friends, presence and end-to-end encrypted
@@ -52,6 +54,13 @@ export class DirectoryLink {
       if (!parsed.success) return;
       const e = parsed.data;
       if (e.type === "challenge") {
+        // Signed for the host this client connects to (api.ts `signingHealth`): a directory naming another one gets nothing.
+        if (e.host.toLowerCase() !== connectedHost(this.url)) {
+          this.want = false;
+          this.dropSocket();
+          this.onStatus("error", t("dir.hostMismatch", { base: this.url, host: e.host }));
+          return;
+        }
         void sign(this.identity, directoryWsAuthMessage(e.host, e.nonce)).then((signature) => {
           if (this.ws === ws) this.send({ type: "auth", publicKey: this.identity.publicKey, signature, version: DIRECTORY_WS_VERSION });
         });

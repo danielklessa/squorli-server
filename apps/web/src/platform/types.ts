@@ -94,6 +94,8 @@ export interface Platform {
     readonly globalPtt: boolean;
     /** The app's program file for a command line that controls it; null = unpackaged. */
     readonly executable: string | null;
+    /** The key the control links carry (`controlLink`); null = an app from before it. */
+    readonly controlKey: string | null;
     set(request: HotkeyRequest): Promise<HotkeyStatus>;
     /** While the settings capture a new key: nothing is registered or watched meanwhile. */
     suspend(on: boolean): void;

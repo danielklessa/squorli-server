@@ -63,7 +63,7 @@ export function desktopPlatform(bridge: DesktopBridge): Platform {
     } : null,
     // An app older than this client has no such member: then there are no global shortcuts, as before.
     hotkeys: info.hotkeys && typeof bridge.setHotkeys === "function" ? {
-      globalPtt: info.hotkeys.globalPtt, executable: info.hotkeys.executable,
+      globalPtt: info.hotkeys.globalPtt, executable: info.hotkeys.executable, controlKey: info.hotkeys.controlKey ?? null,
       set: (request) => bridge.setHotkeys(request), suspend: (on) => bridge.suspendHotkeys(on), onControl: (cb) => bridge.onControl(cb),
     } : null,
     // app:// is a secure scheme; only the development window (Vite over http) may load http resources.

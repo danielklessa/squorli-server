@@ -13,6 +13,7 @@ import { z } from "zod";
 import { toBase64, type AvatarImage } from "./avatarImage";
 import { type Identity, identityFromPrivateKey, sign } from "./identity";
 import { t } from "./i18n";
+import { connectedHost } from "./serverHost";
 
 export class ApiError extends Error {
   constructor(method: string, path: string, readonly status: number, readonly code: string | null, readonly body: Record<string, unknown>) {
@@ -285,6 +286,17 @@ async function directoryFetch<T>(dirUrl: string, method: string, path: string, b
   }
   return (await res.json()) as T;
 }
+/**
+ * The directory's health for a signed action. Signatures are bound to the host this client connects to, never to the host the
+ * directory reports: a directory naming another host is refused (security review, 25 September 2026; the chat servers'
+ * counterpart is `connectedHost` in store.ts `signDomainOf`). Since then `health.host` is the connected host.
+ */
+async function signingHealth(dirUrl: string): Promise<DirectoryHealth> {
+  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const here = connectedHost(dirUrl);
+  if (health.host.toLowerCase() !== here) throw new Error(t("dir.hostMismatch", { base: dirUrl, host: health.host }));
+  return health;
+}
 /** Handle for a key; null = not registered. */
 export async function directoryLookup(dirUrl: string, publicKey: string): Promise<DirectoryAccount | null> {
   try { return DirectoryAccount.parse(await directoryFetch(dirUrl, "GET", `/api/keys/${publicKey}`)); }
@@ -299,7 +311,7 @@ export async function directoryRegister(dirUrl: string, id: Identity, rawHandle:
   const handle = Handle.parse(rawHandle);
   const email = rawEmail === undefined ? undefined : EmailAddress.parse(rawEmail);
   const emailCode = rawCode === undefined ? undefined : EmailCode.parse(rawCode);
-  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const health = await signingHealth(dirUrl);
   const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
   const signature = await sign(id, directoryRegisterMessage(health.host, handle, ch.nonce, email));
   const res = await directoryFetch<Record<string, unknown>>(dirUrl, "POST", "/api/register", { handle, publicKey: id.publicKey, challengeId: ch.challengeId, signature, ...(email ? { email } : {}), ...(emailCode ? { emailCode } : {}) });
@@ -307,7 +319,7 @@ export async function directoryRegister(dirUrl: string, id: Identity, rawHandle:
 }
 /** M6b: store a password backup of your own key (ciphertext signed, the password stays in the client). */
 export async function directoryBackupUpload(dirUrl: string, id: Identity, password: string): Promise<void> {
-  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const health = await signingHealth(dirUrl);
   const b = await createBackup(password, id.privateKey);
   const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
   const signature = await sign(id, directoryBackupMessage(health.host, ch.nonce, b.ciphertext));
@@ -338,7 +350,7 @@ export async function directoryEmailCode(dirUrl: string, rawHandle: string, pass
 }
 /** Display name in the directory: server = null -> global (all servers), otherwise only for this chat server (host = its PUBLIC_DOMAIN). */
 export async function directorySetDisplayName(dirUrl: string, id: Identity, server: string | null, displayName: string | null): Promise<void> {
-  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const health = await signingHealth(dirUrl);
   const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
   const signature = await sign(id, directoryActionMessage(health.host, "profile-update", ch.nonce, directoryProfilePayload(server, displayName)));
   await directoryFetch(dirUrl, "POST", "/api/profile", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, server, displayName });
@@ -348,7 +360,7 @@ export async function directorySetDisplayName(dirUrl: string, id: Identity, serv
  * normalized (avatarImage.ts). A directory from before the avatars has no such route: said in words instead of a bare 404.
  */
 export async function directorySetAvatar(dirUrl: string, id: Identity, image: AvatarImage | null): Promise<AvatarUpdateResponse> {
-  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const health = await signingHealth(dirUrl);
   if (!health.features.avatars) throw new Error(t("dir.avatars_unsupported"));
   const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
   const payload = directoryAvatarPayload(image?.mime ?? null, image ? await avatarDigest(image.bytes) : null);
@@ -362,14 +374,14 @@ export async function directorySetAvatar(dirUrl: string, id: Identity, image: Av
  * (signed, so only accounts ask, and limited per account). The desktop app never calls this: it asks the linked host itself.
  */
 export async function directoryLinkLookup(dirUrl: string, id: Identity, request: { url: string } | { youtube: string }): Promise<LinkLookupResponse> {
-  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const health = await signingHealth(dirUrl);
   const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
   const signature = await sign(id, directoryActionMessage(health.host, "link-lookup", ch.nonce, directoryLinkLookupPayload(request)));
   return LinkLookupResponse.parse(await directoryFetch(dirUrl, "POST", "/api/link-lookup", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, ...request }));
 }
 /** Store a picture the client has encrypted (dm.ts `sealDmBlob`) in the directory's blob store; the signature covers the hash of the bytes. */
 export async function directoryPutDmBlob(dirUrl: string, id: Identity, ciphertext: Uint8Array): Promise<string> {
-  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const health = await signingHealth(dirUrl);
   const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
   const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", ciphertext as BufferSource)), (b) => b.toString(16).padStart(2, "0")).join("");
   const signature = await sign(id, directoryActionMessage(health.host, "dm-blob-put", ch.nonce, digest));
@@ -383,14 +395,14 @@ export async function directoryDmBlob(dirUrl: string, blobId: string): Promise<U
 }
 /** Voice cue settings in the account (signed): follow the account across chat servers and devices; read back via directoryAccountStatus(). */
 export async function directorySetSoundSettings(dirUrl: string, id: Identity, soundSettings: SoundSettings): Promise<void> {
-  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const health = await signingHealth(dirUrl);
   const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
   const signature = await sign(id, directoryActionMessage(health.host, "sound-settings", ch.nonce, directorySoundSettingsPayload(soundSettings)));
   await directoryFetch(dirUrl, "POST", "/api/sound-settings", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, soundSettings });
 }
 /** All client settings in the account (signed; the JSON string itself is the signed payload): follow the account like the cue settings, which they include. */
 export async function directorySetSettings(dirUrl: string, id: Identity, accountSettings: AccountSettings): Promise<void> {
-  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const health = await signingHealth(dirUrl);
   const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
   const settings = JSON.stringify(accountSettings);
   const signature = await sign(id, directoryActionMessage(health.host, "settings", ch.nonce, settings));
@@ -398,7 +410,7 @@ export async function directorySetSettings(dirUrl: string, id: Identity, account
 }
 /** The settings as a blob only the user can read (directory `features.settingsSealed`; signed like `settings`: the JSON string itself is the payload). */
 export async function directorySetSealedSettings(dirUrl: string, id: Identity, blob: SealedSettings): Promise<void> {
-  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const health = await signingHealth(dirUrl);
   const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
   const sealed = JSON.stringify(blob);
   const signature = await sign(id, directoryActionMessage(health.host, "settings-sealed", ch.nonce, sealed));
@@ -406,7 +418,7 @@ export async function directorySetSealedSettings(dirUrl: string, id: Identity, b
 }
 /** Delete your account on one chat server (host = its PUBLIC_DOMAIN): signed at the directory, which notifies the server; it confirms and deletes the user. */
 export async function directoryLeaveServer(dirUrl: string, id: Identity, server: string): Promise<ServerLeaveResponse> {
-  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const health = await signingHealth(dirUrl);
   const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
   const signature = await sign(id, directoryActionMessage(health.host, "server-leave", ch.nonce, server));
   return ServerLeaveResponse.parse(await directoryFetch(dirUrl, "POST", "/api/servers/leave", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, server }));
@@ -418,7 +430,7 @@ export const directoryHealth = (dirUrl: string) => directoryFetch(dirUrl, "GET",
 export const directoryServers = (dirUrl: string) => directoryFetch(dirUrl, "GET", "/api/servers").then((r) => ServerListResponse.parse(r));
 /** Account status (signed): among other things, the servers the handle has signed in on (server rail, M6d). */
 export async function directoryAccountStatus(dirUrl: string, id: Identity): Promise<AccountStatus> {
-  const health = DirectoryHealth.parse(await directoryFetch(dirUrl, "GET", "/api/health"));
+  const health = await signingHealth(dirUrl);
   const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
   const signature = await sign(id, directoryActionMessage(health.host, "account-status", ch.nonce));
   return AccountStatus.parse(await directoryFetch(dirUrl, "POST", "/api/account/status", { publicKey: id.publicKey, challengeId: ch.challengeId, signature }));

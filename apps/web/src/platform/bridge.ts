@@ -126,8 +126,10 @@ export type DesktopInfo = {
    * Global shortcuts and control from outside (`setHotkeys`, `onControl`); missing = an app older than them. `globalPtt` =
    * the shell can watch the push-to-talk key across the system (its system watch helper is present, Windows). `executable` =
    * the app's own program file for a command line that controls it (`"<executable>" --control=<action>`); null unpackaged.
+   * `controlKey` = the key control links need when they could open the microphone (platform/hotkeys.ts `controlLink`);
+   * missing = an app from before it, whose links need none.
    */
-  hotkeys?: { globalPtt: boolean; executable: string | null };
+  hotkeys?: { globalPtt: boolean; executable: string | null; controlKey?: string };
   update: UpdateState;
 };
 

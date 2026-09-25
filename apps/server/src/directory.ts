@@ -34,6 +34,8 @@ export class DirectoryClient {
   private privateKey: Uint8Array | null = null;
   private token: string | null = null;
   private registering: Promise<boolean> | null = null;
+  /** After a failed registration, lookups do not try again before this time (see ensureToken). */
+  private registerRetryAt = 0;
 
   constructor(private readonly db: Db, private readonly config: Config, private readonly log: FastifyBaseLogger) {}
 
@@ -57,6 +59,18 @@ export class DirectoryClient {
   register(): Promise<boolean> {
     if (!this.registering) this.registering = this.doRegister().finally(() => { this.registering = null; });
     return this.registering;
+  }
+  /**
+   * A token for a lookup: registers when there is none, but after a failure not again for a minute. Unauthenticated pushes
+   * (notify, leave) lead to lookups, and without the pause each one would start a registration, i.e. a call to the directory
+   * and the directory's call back (security review, 25 September 2026). Explicit register() calls are not held back.
+   */
+  private async ensureToken(): Promise<boolean> {
+    if (this.token) return true;
+    if (Date.now() < this.registerRetryAt) return false;
+    const ok = await this.register();
+    if (!ok) this.registerRetryAt = Date.now() + 60_000;
+    return ok;
   }
   private async doRegister(): Promise<boolean> {
     const url = this.config.DIRECTORY_URL;
@@ -109,7 +123,7 @@ export class DirectoryClient {
     const url = this.config.DIRECTORY_URL;
     if (!url) return null;
     try {
-      if (!this.token) await this.register();
+      await this.ensureToken();
       let res = await this.lookup(url, user.publicKey, member, proof);
       if (res.status === 401 && this.token) {
         // Token expired (24 h) or directory reinstalled: re-register once.
@@ -127,6 +141,8 @@ export class DirectoryClient {
       let avatarUrl: string | null = null;
       if (res.status === 200) {
         const acc = DirectoryAccount.parse(await res.json());
+        // The answer must be about the key asked for (security review, 25 September 2026): never take another account's name.
+        if (acc.publicKey !== user.publicKey) { this.log.warn("Verzeichnis: Antwort fuer einen anderen Schluessel"); return null; }
         handle = acc.handle;
         displayName = acc.serverDisplayName ?? acc.displayName ?? user.displayName;
         avatarUrl = directoryAvatarUrl(url, acc.publicKey, acc.avatarUpdatedAt);
@@ -145,7 +161,7 @@ export class DirectoryClient {
   async syncAll(onChanged: (u: { userId: string; publicKey: string; handle: string | null; displayName: string | null }) => void): Promise<number> {
     const url = this.config.DIRECTORY_URL;
     if (!url) return 0;
-    if (!this.token && !(await this.register())) return 0;
+    if (!(await this.ensureToken())) return 0;
     const all = await this.db.select({ id: users.id, publicKey: users.publicKey, handle: users.handle, displayName: users.displayName, avatarUrl: users.avatarUrl }).from(users);
     let changed = 0;
     try {
@@ -182,11 +198,12 @@ export class DirectoryClient {
     const [u] = await this.db.select({ id: users.id, publicKey: users.publicKey, handle: users.handle, displayName: users.displayName, avatarUrl: users.avatarUrl }).from(users).where(eq(users.publicKey, publicKey)).limit(1);
     if (!u) return false;
     try {
-      if (!this.token && !(await this.register())) return false;
+      if (!(await this.ensureToken())) return false;
       let res = await this.resolveMany(url, [publicKey]);
       if (res.status === 401) { this.token = null; if (!(await this.register())) return false; res = await this.resolveMany(url, [publicKey]); }
       if (!res.ok) return false;
-      const acc = ServerResolveResponse.parse(await res.json())[0];
+      // Only the account of the key asked for (security review, 25 September 2026).
+      const acc = ServerResolveResponse.parse(await res.json()).find((a) => a.publicKey === publicKey);
       if (!acc) return false;
       const displayName = acc.serverDisplayName ?? acc.displayName ?? u.displayName;
       const avatarUrl = directoryAvatarUrl(url, acc.publicKey, acc.avatarUpdatedAt);
@@ -208,7 +225,7 @@ export class DirectoryClient {
     const url = this.config.DIRECTORY_URL;
     if (!url) return null;
     try {
-      if (!this.token && !(await this.register())) return null;
+      if (!(await this.ensureToken())) return null;
       let res = await this.postConfirm(url, publicKey);
       if (res.status === 401) { this.token = null; if (!(await this.register())) return null; res = await this.postConfirm(url, publicKey); }
       if (res.status === 200) return "confirmed";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkHotkey, controlLink, formatHotkey, hotkeyAccelerator, hotkeyFromKey, keyLabel, keyName, normalizeHotkeys, parseControlAction, sameHotkeys } from "./hotkeys";
+import { checkHotkey, controlLink, formatHotkey, hotkeyAccelerator, hotkeyFromKey, keyLabel, keyName, normalizeHotkeys, parseControlAction, parseControlLink, sameHotkeys } from "./hotkeys";
 
 const names = { ctrl: "Strg", alt: "Alt", shift: "Umschalt", meta: "Win" };
 const key = (code: string, mods: Partial<{ keyCode: number; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }> = {}) => ({ code, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods });
@@ -90,5 +90,19 @@ describe("parseControlAction", () => {
     expect(parseControlAction("mic-on")).toBe("mic-on");
     expect(parseControlAction(controlLink("deafen-toggle"))).toBe("deafen-toggle");
     for (const raw of ["squorli://control/quit", "squorli://server/example.org", "squorli://control/mic-toggle?x=1", "", "control/mic-toggle", "x".repeat(200)]) expect(parseControlAction(raw), raw).toBeNull();
+  });
+});
+
+describe("control links with the key", () => {
+  it("carry the key only where the action could open the microphone", () => {
+    expect(controlLink("mic-on", "abc_DEF-1")).toBe("squorli://control/mic-on?k=abc_DEF-1");
+    expect(controlLink("mic-off", "abc")).toBe("squorli://control/mic-off");
+    expect(controlLink("deafen-on", "abc")).toBe("squorli://control/deafen-on");
+    expect(controlLink("deafen-toggle", null)).toBe("squorli://control/deafen-toggle");
+  });
+  it("are read back with their key", () => {
+    expect(parseControlLink("squorli://control/mic-toggle?k=abc_DEF-1")).toEqual({ action: "mic-toggle", key: "abc_DEF-1" });
+    expect(parseControlLink("squorli://control/mic-off/")).toEqual({ action: "mic-off", key: null });
+    for (const raw of ["mic-on", "squorli://control/mic-on?k=", "squorli://control/mic-on?x=1", "squorli://control/mic-on?k=a&b=1", "squorli://control/quit?k=a"]) expect(parseControlLink(raw), raw).toBeNull();
   });
 });

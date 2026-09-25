@@ -134,7 +134,22 @@ export function formatHotkey(binding: HotkeyBinding, names: ModifierNames, layou
 }
 
 export const CONTROL_SCHEME_PREFIX = "squorli://control/";
-export const controlLink = (action: ControlAction): string => `${CONTROL_SCHEME_PREFIX}${action}`;
+/**
+ * Actions a control link may carry out without the installation's key: they only close the microphone or the sound. Every
+ * other one could open the microphone, and any web page can open a `squorli://` link (security review, 25 September 2026),
+ * so its link carries the key (`?k=`, made by the desktop app once per installation). The command line needs none.
+ */
+export const KEYLESS_CONTROL_ACTIONS: readonly ControlAction[] = ["mic-off", "deafen-on"];
+export const controlLink = (action: ControlAction, key: string | null = null): string =>
+  `${CONTROL_SCHEME_PREFIX}${action}${key && !KEYLESS_CONTROL_ACTIONS.includes(action) ? `?k=${key}` : ""}`;
+
+/** A control link (`squorli://control/<action>`, optionally `?k=<key>`): its action and key; null for anything else. */
+export function parseControlLink(raw: string): { action: ControlAction; key: string | null } | null {
+  if (typeof raw !== "string" || raw.length > 200) return null;
+  const m = /^squorli:(?:\/\/)?control\/([a-z-]+)\/?(?:\?k=([A-Za-z0-9_-]{1,64}))?$/i.exec(raw.trim());
+  const action = m ? parseControlAction(m[1]!) : null;
+  return action ? { action, key: m![2] ?? null } : null;
+}
 
 /** The action a control link (`squorli://control/<action>`, also without the slashes) or a bare action name means; null for anything else. */
 export function parseControlAction(raw: string): ControlAction | null {
