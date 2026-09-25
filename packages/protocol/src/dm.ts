@@ -12,7 +12,7 @@
  *
  * Message: AES-GCM(key, random 12-byte IV, JSON { text }, AAD = "v1\n<from>\n<to>\n<id>"). The AAD binds sender,
  * recipient and message id so the directory cannot swap anything around; authenticity follows from the DH (only the two
- * key holders can produce a valid tag). No forward secrecy (deliberate, PLAN-friends-dm.md §8).
+ * key holders can produce a valid tag). No forward secrecy (deliberate; directory repo, docs/features/friends-dm.md).
  *
  * Link previews (21 September 2026): the SENDER makes the preview and puts it into the plaintext (`previews`), so whoever
  * reads a message never contacts the linked host and no server learns what the preview says. The picture is too large for

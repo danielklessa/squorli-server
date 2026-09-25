@@ -1,6 +1,6 @@
 # Plan: a screen share that stays smooth by itself
 
-Part of the project description (entry point: root `AGENTS.md`, section 0; product plan `docs/PLAN.md`, open decision 8). Written on 22 September 2026 after the user's report: a member shares a game with H.265, the user watches and sees a lagging picture on every share of that member. The user's wish: a way for a viewer to see a share's statistics (built the same day, stage 0), and a plan for adapting the resolution by itself and automating other optimisations on demand.
+Part of the project description (entry point: root `AGENTS.md`, section 0; open work `docs/PLAN.md` 3.4 and decision 6.2). Written on 22 September 2026 after the user's report: a member shares a game with H.265, the user watches and sees a lagging picture on every share of that member. The user's wish: a way for a viewer to see a share's statistics (built the same day, stage 0), and a plan for adapting the resolution by itself and automating other optimisations on demand.
 
 Feature notes of what exists: `docs/features/voice-video.md` ("A game's share: smooth motion, and H.265 on the graphics unit", "The viewer's statistics of a share"). Standing rules: `apps/web/src/voice/AGENTS.md`.
 
@@ -31,19 +31,17 @@ The viewer's statistics (stage 0) show per second: codec and decoder (hardware o
 | An H.264/H.265 share arrives with under 20 fps while the path is clean | The sender's capture or encoder | Frame cap in the game, lower capture resolution; a lower bitrate does not help |
 | 30 fps, no loss, small buffer, and still "laggy" | Latency, not stutter: the sum of capture, encode, network, buffer, decode, render | Measure the round trip and the buffer; LiveKit's jitter buffer grows with jitter |
 
-The report of 22 September 2026 is not yet classified: the user is to open the statistics on that member's share the next time it lags and read the diagnosis line and the five rows.
+The report of 22 September 2026 was classified the same day with the statistics: the sender's capture starves (about 11 fps arrive over a clean path), so the path is not the cause; the next step is the sender's own rows (stage 1).
 
 ## 3. Stages
 
 Each stage is worth doing on its own; the later ones need the earlier ones' data. Everything stays in the client (`apps/web`, so a new desktop app release each time, root `AGENTS.md` section 4); LiveKit and the server stay untouched until stage 3.
 
-### Stage 0 (done 22 September 2026): the viewer's statistics
-
-`VideoStatsOverlay.tsx` on the stage's tile and in the pop-out window, read from the receiver's raw report through `VoiceClient.videoReceiveSample()`. Also useful for every later stage: it is the instrument the stages are measured with.
+### Stage 0: the viewer's statistics (built 22 September 2026, documented in `docs/features/voice-video.md`)
 
 ### Stage 1: classify the real case, then tune the thresholds
 
-- Read the statistics on the reported share while it lags (the user), note the diagnosis and the rows.
+- ~~Read the statistics on the reported share~~ (done 22 September 2026, see section 2).
 - Make the diagnosis thresholds match: they are my first guesses.
 - Reproduce on purpose with two clients: Windows' `clumsy` (loss, lag, jitter on the viewer's side) or Linux `tc netem` in a container on the LiveKit side; a viewer started with `--disable-gpu` for software decoding; a sender with a game or the moving test picture of the Electron test recipe (`docs/features/voice-video.md`, 21 September 2026).
 - Add the sender's side to the same overlay for the own share: `qualityLimitationReason`, encoder, target bitrate, fps, and the remote-inbound-rtp report's loss and round trip (what the viewers' RTCP says). Today only the debug view has part of it.
@@ -79,16 +77,17 @@ A codec change means a republish and a visible interruption for all viewers, so 
 
 ## 4. Open decisions for the user
 
-1. Stage 3 (a) simulcast or (b) quality reports, or (a) first and (b) only if needed.
-2. Whether the governor may lower the picture below what the user picked in the dialog without asking (my proposal: yes, with the line in the tile and a way to pin).
-3. Whether the standing VP8 share is ever governed (my proposal: no).
+1. Stage 3 (a) simulcast or (b) quality reports, or (a) first and (b) only if needed (asked on 25 September 2026, skipped by the user).
+2. Whether the governor may lower the picture below what the user picked in the dialog without asking (my proposal: yes, with the line in the tile and a way to pin; asked on 25 September 2026, skipped).
+3. ~~Whether the standing VP8 share is ever governed~~ **decided by the user on 25 September 2026: no.**
 4. The ladder's rungs and times (section 3, stage 2) once stage 1 has real numbers.
+
+Priority (user, 25 September 2026): medium (`docs/PLAN.md` 3.4).
 
 ## 5. Order and effort
 
 | Stage | Effort | Needs an app release |
 |---|---|---|
-| 0 | done | yes (client) |
 | 1 | half a day of measuring, small code | yes, for the sender's rows |
 | 2 | one day (state machine, tests, tile line) | yes |
 | 3a | half a day plus measuring the encoder cost | yes |

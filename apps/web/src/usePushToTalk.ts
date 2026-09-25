@@ -9,7 +9,7 @@ export const isTypingTarget = (target: EventTarget | null): boolean => {
 };
 
 /**
- * Push-to-talk for one window: only while that window has focus (a platform limit in the browser, PLAN 3.5). The main
+ * Push-to-talk for one window: only while that window has focus (a platform limit in the browser; the desktop app's global key: docs/features/hotkeys.md). The main
  * window (VoiceDock) and the stage's window of its own (StageWindow) each listen for themselves.
  * `suspended`: the settings dialog is capturing a new key, that key press must not open the microphone.
  */

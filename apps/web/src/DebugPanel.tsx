@@ -5,9 +5,9 @@ import { fmtTime, t } from "./i18n";
 import { systemActivityDiagnostics } from "./systemActivity";
 
 /**
- * Protocol inspector (PLAN 5): WebSocket events and LiveKit statistics, live.
+ * Protocol inspector (docs/DEVELOPMENT.md): WebSocket events and LiveKit statistics, live.
  * Shown via the bug button or ?debug in the URL. M3: video bitrates per simulcast layer and per received track
- * (measurement basis for PLAN 4.3).
+ * (measurement basis for the bandwidth table in deploy/AGENTS.md).
  */
 const POLL_MS = 2000;
 const EMPTY: AudioStats = { path: { publisher: null, subscriber: null }, sender: null, receivers: [], videoSend: [], videoRecv: [] };

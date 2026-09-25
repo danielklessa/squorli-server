@@ -15,7 +15,7 @@ export const ChallengeResponse = z.object({
 export type ChallengeResponse = z.infer<typeof ChallengeResponse>;
 
 /**
- * Contract of the directory service (PLAN 3.2 / M6, brought forward on 2026-09-14):
+ * Contract of the directory service (M6, brought forward on 2026-09-14; squorli-server docs/features/directory.md):
  * Handle (@name) -> public key. The service is deliberately narrow; chat servers query it only
  * optionally and tolerate its outage (the key then applies without a handle).
  *
@@ -67,7 +67,7 @@ export const DirectoryRegisterRequest = z.object({
 export const DirectoryRegisterPending = z.object({ emailPending: z.literal(true), sentTo: z.string() });
 export type DirectoryRegisterPending = z.infer<typeof DirectoryRegisterPending>;
 
-/** Display name (chat server: per server, PLAN 3.2; directory: global and per server). Empty = handle or the short form of the key. */
+/** Display name (chat server: per server; directory: global and per server). Empty = handle or the short form of the key. */
 export const DisplayName = z.string().trim().min(1).max(32);
 /** Host of a chat server (PUBLIC_DOMAIN, with port if any), the key for per-server display names in the directory. */
 export const ServerHost = z.string().trim().toLowerCase().min(1).max(253).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d{1,5})?$/, "Hostname, optional mit Port");

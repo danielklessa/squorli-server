@@ -8,7 +8,7 @@
 # downloads the deploy files, writes .env with fresh secrets, starts the stack and checks it. Running it again on an
 # existing installation updates it or changes its settings; secrets and data are kept.
 # It also writes <dir>/squorli, a small wrapper around docker compose with the right profile and overlays
-# (squorli update | status | logs | backup | restart | down | <any compose command>).
+# (squorli update | status | logs | backup | restore | restart | down | <any compose command>).
 #
 # Environment: SQUORLI_DIR (installation directory, default /opt/squorli), SQUORLI_LANG (de/en),
 # SQUORLI_REF (git ref of the deploy files, default main), SQUORLI_RAW_BASE (base URL of the files; tests use file://).
@@ -596,8 +596,26 @@ case "${1:-help}" in
     dc exec -T app tar czf - -C /app/data . > "$dest/squorli-files.tar.gz"
     cp ../.env "$dest/env"; chmod 600 "$dest"/*
     echo "Backup: $(readlink -f "$dest")" ;;
+  restore)
+    src="${2:-}"
+    if [ -z "$src" ] || [ ! -f "$src/squorli-database.sql" ] || [ ! -f "$src/squorli-files.tar.gz" ]; then
+      echo "squorli restore <dir> [--yes]   (a folder written by squorli backup)" >&2; exit 1
+    fi
+    src="$(readlink -f "$src")"
+    echo "This replaces the database and all files of this installation with the backup in $src."
+    if [ "${3:-}" != "--yes" ]; then
+      read -r -p "Type yes to continue: " answer </dev/tty
+      [ "$answer" = yes ] || { echo "Cancelled."; exit 1; }
+    fi
+    dc stop app
+    dc up -d --wait postgres
+    dc exec -T postgres psql -q -v ON_ERROR_STOP=1 -U chat -d postgres -c 'DROP DATABASE IF EXISTS chat WITH (FORCE)' -c 'CREATE DATABASE chat OWNER chat'
+    dc exec -T postgres psql -q -v ON_ERROR_STOP=1 -U chat -d chat < "$src/squorli-database.sql" > /dev/null
+    dc run --rm --no-deps -T --entrypoint sh app -c 'find /app/data -mindepth 1 -delete && tar xzf - -C /app/data' < "$src/squorli-files.tar.gz"
+    dc up -d --no-build
+    echo "Restored from $src. The .env was left as it is; the backup's copy is $src/env (PUBLIC_DOMAIN, OWNER_PUBLIC_KEY and DIRECTORY_URL should match it)." ;;
   help|-h|--help)
-    echo "squorli update | status | logs [service] | restart [service] | down | backup [dir] | <docker compose command>" ;;
+    echo "squorli update | status | logs [service] | restart [service] | down | backup [dir] | restore <dir> | <docker compose command>" ;;
   *) dc "$@" ;;
 esac
 EOF
@@ -684,6 +702,7 @@ finish() {
     "  $HELPER logs app    $(t "Logs verfolgen" "follow logs")" \
     "  $HELPER update      $(t "neues Image holen und neu starten (vorher Backup)" "pull the new image and restart (back up first)")" \
     "  $HELPER backup      $(t "Datenbank, Dateien und .env nach $DIR/backups sichern" "back up database, files and .env to $DIR/backups")" \
+    "  $HELPER restore <$(t "Ordner" "dir")>  $(t "eine Sicherung zurückspielen (ersetzt Datenbank und Dateien)" "restore a backup (replaces database and files)")" \
     "$(t "Einstellungen ändern: dieses Skript erneut ausführen, oder $DIR/.env bearbeiten und $HELPER up -d" \
       "Change settings: run this script again, or edit $DIR/.env and run $HELPER up -d")"
 }

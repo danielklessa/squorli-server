@@ -5,7 +5,7 @@ rtc:
   tcp_port: 7881
   udp_port: 7882          # a single UDP port instead of a range
   use_external_ip: true   # determine the public IP automatically; can be overridden via LIVEKIT_NODE_IP
-# TURN (PLAN 4.2 / 4.5): for users behind restrictive firewalls. Needs a TLS certificate for PUBLIC_DOMAIN
+# TURN (deploy/AGENTS.md, "TURN"): for users behind restrictive firewalls. Needs a TLS certificate for PUBLIC_DOMAIN
 # (Caddy does not share its own automatically). Therefore off by default; to enable:
 #   1. Mount certificate + key as a volume into the livekit container (e.g. /certs/fullchain.pem, /certs/privkey.pem)
 #   2. Uncomment the block below, enter the domain, publish port 5349/tcp for livekit in compose.yml

@@ -1,5 +1,5 @@
 /**
- * Voice settings per device (PLAN 3.5: "the user chooses per device"). Stored in localStorage; this is the "local profile"
+ * Voice settings per device ("the user chooses per device", a guideline in docs/PLAN.md). Stored in localStorage; this is the "local profile"
  * that always works, also on servers without a directory. One part of it, the join/leave cues (`sounds`), additionally
  * follows the directory account (store.ts): a change here is reported to subscribers with its source, so the store can
  * push user changes to the directory and apply the account's settings without echoing them back.

@@ -8,7 +8,7 @@ const ts = (name: string) => timestamp(name, { withTimezone: true });
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   publicKey: text("public_key").notNull().unique(),
-  /** Profile per server (PLAN 3.2). null = show the short form of the key. */
+  /** Profile per server (like a server nickname; identity: root AGENTS.md section 6). null = show the short form of the key. */
   displayName: text("display_name"),
   createdAt: ts("created_at").notNull().defaultNow(),
   lastSeenAt: ts("last_seen_at"),

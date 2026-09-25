@@ -9,7 +9,7 @@ import { helperPath, type ScreenAudioCapture } from "./windowAudio";
  * Screen share: Electron has no picker of its own, so the client shows one (ScreenPicker.tsx). `getDisplayMedia()` in the page
  * lands here, the shell lists screens and windows, the page answers with the choice.
  *
- * Audio (Windows only, PLAN 3.6): with the native helper (windowAudio.ts) a window carries what its application plays and a
+ * Audio (Windows only; matrix in docs/features/voice-video.md): with the native helper (windowAudio.ts) a window carries what its application plays and a
  * screen what the system plays without this app; the helper's PCM goes to the client separately and Chromium gets no audio
  * to capture. Without the helper only a screen has audio: Chromium's "loopback" (everything, the app included). The app's
  * own windows never carry audio: it would be the voices of the others.

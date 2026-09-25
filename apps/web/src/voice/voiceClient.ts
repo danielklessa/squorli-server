@@ -37,10 +37,10 @@ import { t } from "../i18n";
 import type { PlatformMedia } from "../platform/types";
 
 /**
- * Voice channel client without a UI dependency (PLAN 3.4 "shared core"): LiveKit room, microphone pipeline,
+ * Voice channel client without a UI dependency (UI-free core, apps/web/AGENTS.md): LiveKit room, microphone pipeline,
  * playback of the other participants, speaker indication, device selection, statistics for the debug view.
  * M3: camera (simulcast, adaptiveStream picks the layer by tile size), screen sharing with audio
- * as its own audio track (PLAN 3.6), video tiles for the stage.
+ * as its own audio track (docs/features/voice-video.md, screen share audio matrix), video tiles for the stage.
  */
 export type VoiceParticipant = {
   identity: string;
@@ -164,7 +164,7 @@ export type AudioStats = {
   videoRecv: VideoRecvStat[];
 };
 
-/** Chromium browsers can include tab/system audio with a screen share; all others cannot (PLAN 3.6). */
+/** Chromium browsers can include tab/system audio with a screen share; all others cannot (docs/features/voice-video.md, screen share audio matrix). */
 export const isChromium = () => typeof (window as { chrome?: unknown }).chrome !== "undefined";
 
 /** Explains why a screen share is running without audio; empty when audio is included or no share is active. */
@@ -397,7 +397,7 @@ export class VoiceClient {
     this.patch({ status: "connecting", channelId, afkRoom: afk, rtcUrl: url, error: null, audioProfile: this.audioProfile });
 
     // adaptiveStream: receive quality depending on the size of the <video> element (simulcast layer), pauses invisible tracks.
-    // dynacast: the sender turns off layers nobody subscribes to. Together: PLAN M3 "simulcast layers depending on tile size".
+    // dynacast: the sender turns off layers nobody subscribes to. Together: simulcast layers depending on tile size (bandwidth: deploy/AGENTS.md).
     // pauseVideoInBackground off: LiveKit would pause every video once the main page is hidden, also one showing in a pop-out
     // window; each video view handles that for its own window instead (videoDisplay.ts `watchDocumentHidden`).
     const room = new Room({
@@ -754,7 +754,7 @@ export class VoiceClient {
     return track instanceof LocalVideoTrack ? track.mediaStreamTrack.getSettings().deviceId || null : null;
   }
 
-  /** Share the screen; audio is always requested and published as its own track (PLAN 3.6). Whether it arrives is up to the browser. */
+  /** Share the screen; audio is always requested and published as its own track (docs/features/voice-video.md, screen share audio matrix). Whether it arrives is up to the browser. */
   async setScreenShareEnabled(on: boolean): Promise<void> {
     if (on && (this.state.afkRoom || this.screenStarting)) return;
     const room = this.room;

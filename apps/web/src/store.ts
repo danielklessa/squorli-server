@@ -23,7 +23,7 @@ import type { PlatformHome } from "./platform/types";
 export type { ChannelMessages, Connection, RawLogEntry, ServerConnState } from "./serverConnection";
 
 /**
- * Client state without a UI dependency (PLAN 3.4). Multi-server client: one `ServerConnection` per server (own server =
+ * Client state without a UI dependency (apps/web/AGENTS.md). Multi-server client: one `ServerConnection` per server (own server =
  * the one serving the client, key `homeHost`; foreign servers from the server rail via their origin, key =
  * the host from the directory). The server rail switches `activeHost` without leaving the page; running connections
  * (and with them the voice connection) survive. Plus identity, directory (M6), friends and direct messages (M7).

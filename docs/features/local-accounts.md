@@ -42,6 +42,7 @@ Part of the project description (root `AGENTS.md` section 0). Read before changi
 ### My decisions (not confirmed by the user)
 
 - A server account gets a **fresh key per server**; it never reuses the directory key (the isolated server does not learn it, and the accounts of different servers cannot be linked by their key). Consequence: `OWNER_PUBLIC_KEY` can only name a directory account's key.
+  - **Rejected:** 25 September 2026, user: the owner must also be nameable as a server account (~name); open, listed in `docs/PLAN.md`.
 - A key with a directory handle cannot register a server account on the same server (409 `has_account`); a server account that later gets a directory handle shows `@`.
 - Handles of server accounts follow the directory's rules (3-32, a-z 0-9 . _), their own namespace per server.
 - The rate limits: registration 20/min per IP, wrong passwords 10/min per IP and per handle, parameter queries 30/min per IP.

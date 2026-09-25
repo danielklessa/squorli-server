@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Testmatrix Bildschirmfreigabe (PLAN 3.6)</title>
+<title>Testmatrix Bildschirmfreigabe</title>
 <style>
   :root { color-scheme: dark; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; line-height: 1.45; }
   body { margin: 0; padding: 1.5rem; background: #313338; color: #dbdee1; max-width: 60rem; margin-inline: auto; }
@@ -19,9 +19,9 @@
 </head>
 <body>
 <h1>Testmatrix: Bildschirmfreigabe mit Ton</h1>
-<p class="hint">Diese Seite prueft, ob <code>getDisplayMedia({ audio: true })</code> in diesem Browser einen Ton-Track liefert (PLAN 3.6, Zeilen mit "pruefen").
+<p class="hint">Diese Seite prueft, ob <code>getDisplayMedia({ audio: true })</code> in diesem Browser einen Ton-Track liefert (Matrix in <code>docs/features/voice-video.md</code>, Zeilen mit "verify").
 Vorgehen: Knopf druecken, im Browser-Dialog nacheinander <strong>Tab</strong>, <strong>Fenster</strong> und <strong>ganzer Bildschirm</strong> waehlen (Audio-Option im Dialog aktivieren, wo angeboten),
-jeweils das Ergebnis unten sammeln und die Zeilen in <code>docs/PLAN.md</code> Abschnitt 3.6 eintragen.</p>
+jeweils das Ergebnis unten sammeln und die Zeilen in <code>docs/features/voice-video.md</code>, Abschnitt "Screen share audio: browser and system matrix", eintragen.</p>
 
 <h2>Umgebung</h2>
 <table><tbody>
@@ -47,7 +47,7 @@ jeweils das Ergebnis unten sammeln und die Zeilen in <code>docs/PLAN.md</code> A
 <span id="camResult">–</span>
 
 <h2>Gesammelte Ergebnisse</h2>
-<p class="hint">Jeder Versuch haengt eine Zeile an. Text markieren und in die Tabelle in PLAN 3.6 uebernehmen.</p>
+<p class="hint">Jeder Versuch haengt eine Zeile an. Text markieren und in die Tabelle in <code>docs/features/voice-video.md</code> uebernehmen.</p>
 <textarea id="results" readonly></textarea>
 
 <script>

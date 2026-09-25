@@ -2,7 +2,9 @@
  * Identity = Ed25519 key pair, generated in the browser, stored in localStorage.
  *
  * M0: unencrypted in localStorage. That is fine for development and
- * NOT sufficient for release 1. Before M5: recovery code + encrypted storage.
+ * NOT sufficient for release 1. No mnemonic recovery code (user's decision,
+ * 25 September 2026): the password-encrypted key backup at the directory and
+ * server accounts replace it. Encrypted local storage is still open.
  */
 import * as ed from "@noble/ed25519";
 

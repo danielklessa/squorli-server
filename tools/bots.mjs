@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Load-test bots for the voice channel (PLAN 5, M1: "15 bots in a channel must not topple the server").
+ * Load-test bots for the voice channel (tools/AGENTS.md; M1's goal: "15 bots in a channel must not topple the server").
  *
  * Uses `lk load-test` from the LiveKit CLI image; the bots publish real audio into the room.
  * They appear in the web client as "(external)" because they bypass the app server.

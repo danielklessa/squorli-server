@@ -14,7 +14,7 @@ The project description is split by area so that it does not fill the context (1
 
 ## Working in this repo
 
-- Before changing the server or the protocol, read `docs/PLAN.md` for the affected section; the plan is the basis for decisions, not the code.
+- Before changing the server or the protocol, read the guidelines at the top of `docs/PLAN.md` and the feature note of the area (`AGENTS.md` section 0); decisions are recorded there, not in the code. When work from `docs/PLAN.md` is finished, delete it there in the same step.
 - After every change run at least `pnpm typecheck` and `pnpm test`. For server/auth/protocol changes additionally start the server and run the smoke test.
 - Use `pnpm dev` for testing (starts and stops the containers itself); create `apps/server/.env` from `.env.development` if it is missing. For pure container work `pnpm docker:dev`.
 - Stop background processes after testing. On Windows, afterwards check `netstat -ano | grep ":3000 " | grep -E "ABH|LISTEN"` (German Windows prints `ABHÖREN`, never filter for `LISTEN` only) and remove leftovers with `taskkill //F //T //PID`; check the containers with `docker compose -f deploy/compose.dev.yml ps`. Never stop the user's dev server on :3000/:5173; run smoke tests against your own server on :3001 with the DB `chat_smoke`.

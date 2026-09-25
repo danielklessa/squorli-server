@@ -1,363 +1,157 @@
-# Project Plan: Self-Hosted Community Chat with Voice and Video
+# Squorli Server: guidelines and open work
 
-## Current product identity (15 September 2026)
+Rewritten on 25 September 2026 in a plan cleanup with the user: what is built and documented left this file (architecture in `AGENTS.md` and the area `AGENTS.md` files, features in `docs/features/`, history in `docs/MILESTONE-LOG.md` and `docs/VERIFIED-STATE.md`); what remains is the product's guidelines and the open work, **ranked by relevance** (the ranking is Claude's, the user asked for it; move items when priorities change). Detail plans: `docs/PLAN-reports.md`, `docs/PLAN-mobile.md`, `docs/PLAN-share-adaptation.md`. The directory's open work lives in its own repository (`../squorli-directory/docs/PLAN.md`), the website's in `../squorli-website/docs/PLAN.md`.
 
-The server container is published at https://github.com/danielklessa/squorli-server/pkgs/container/squorli-server as `ghcr.io/danielklessa/squorli-server:latest`. Production documentation now supports pulling the prebuilt app with APP_IMAGE and Compose --no-build, with source builds retained as an alternative. Check the package page for existing tags/digests; latest is mutable.
+**Keep it clean:** when an item is built, document it where section 0 of `AGENTS.md` says and delete it here (no "done" rows). A new large feature gets a `docs/PLAN-<name>.md` while it is being planned and loses it once it is built and documented.
 
-The public open-source server address is https://github.com/danielklessa/squorli-server. Always use it for public repository links and installation examples.
-
-Squorli Server is the open-source server and browser client under the Apache License 2.0 (`LICENSE`). Squorli Directory is a separately operated, non-open-source service at https://directory.squorli.com. The public German/English website for https://squorli.com lives in `../squorli-website` (Astro/Vite) and contains English installation documentation. Shared product wording and synchronization rules: [brand/PRODUCT.md](brand/PRODUCT.md). Keep all three brand packages and runtime asset copies synchronized. Historical milestones and target capacities below are planning records, not current production guarantees; the current implementation status is in AGENTS.md.
-
-Status: 13 September 2026 · Draft v0.3 · Solo development · Open source
+Squorli is public: the website, the repository and the image are announced and used by other operators (user, 25 September 2026). That is why security and operation come first.
 
 ---
 
-## 1. Fixed constraints
+## 1. Guidelines
+
+### 1.1 Fixed constraints
 
 | Item | Decision |
 |---|---|
 | Model | Discord (server → channels → roles), but every server self-hosted |
-| Video | Up to 15 simultaneous cameras per channel |
-| Clients (Release 1) | Web (browser) and desktop (Windows, macOS, Linux) |
-| Identity | One account for all servers, attached to a later online service |
+| Video | Up to 15 simultaneous cameras per channel (target; accepted once measured on a real server, see 3.2) |
+| Clients | Web (browser) and desktop (Windows and Linux built; macOS open, see 3.3); a native Android app is planned (`docs/PLAN-mobile.md`) |
+| Identity | One account for all servers through the directory (`@name`); a server's own accounts (`~name`) next to it |
 | Development | One person, TypeScript/Node, delivered as Docker containers |
-| License | Apache 2.0 (decided September 2026, see section 9) |
-| Speaking | Push-to-talk and voice activation, user chooses per device |
-| Screen share with audio | Mandatory in Release 1, browser and desktop (limitations, see 3.6) |
-| Operation | Standalone with bundled proxy **or** behind an existing reverse proxy (see 4.5) |
+| License | Apache 2.0. **No code from Stoat or other AGPL projects**, they may only serve as reference |
+| Speaking | Push-to-talk and voice activation, the user chooses per device |
+| Screen share with audio | Part of the product in browser and desktop, within the browsers' limits (`docs/features/voice-video.md`, "Screen share audio: browser and system matrix") |
+| Operation | Standalone with the bundled Caddy **or** behind an existing reverse proxy; subdomain only, no sub-path |
 
----
+### 1.2 Positioning
 
-## 2. Positioning
+The closest competitor is Stoat (formerly Revolt): Discord-like, self-hostable, AGPL-3, weak in voice and video. So Squorli is **not "yet another Discord clone", but the self-hosted server where voice and video work as well as on commercial services, and which runs in ten minutes.** Consequences:
 
-The strongest competitor in the same segment is Stoat (formerly Revolt): Discord-like, self-hostable, AGPL-3. Its well-known weakness is precisely voice and video; according to public reports, screen sharing was still under construction as of early 2026. The positioning follows from that:
+1. Media quality (latency, stability, echo and noise suppression, screen share with audio) comes before feature breadth (emoji, threads, bots).
+2. The setup is a product feature: one command, one domain, done. Everything an operator has to do on top costs users.
+3. Check every new feature against this before building it (the risk "scope creep" below).
 
-**Not "yet another Discord clone", but: the self-hosted server where voice and video work as well as on commercial services – and which is up and running in ten minutes.**
+### 1.3 Not planned for now
 
-Two consequences for the priorities:
+Recording, end-to-end encryption of media, a bot API, threads, federation between servers. (Mobile clients left this list on 25 September 2026: `docs/PLAN-mobile.md`.)
 
-1. Media quality (latency, stability, echo/noise suppression, screen share with audio) comes before feature breadth (emojis, threads, bots).
-2. The initial setup is a product feature. One `docker compose up`, one domain, done. Everything the operator has to set up on top of that costs users.
+### 1.4 Risks
 
----
-
-## 3. Architecture
-
-### 3.1 Components
-
-```
-                       ┌────────────────────────────────────┐
-   Browser / Desktop   │  Reverse proxy (Caddy)             │  :443
-   ──────────────────► │  TLS automatic via Let's Encrypt   │
-                       └───────┬────────────────────┬───────┘
-                               │                    │
-                    ┌──────────▼──────────┐ ┌───────▼────────────┐
-                    │  App server         │ │  Media server      │ :7881 TCP
-                    │  Node / TypeScript  │ │  LiveKit (Go)      │ UDP port(s)
-                    │  REST + WebSocket   │ │  SFU + TURN        │
-                    │  Auth, channels,    │ │  Simulcast, E2EE   │
-                    │  roles, chat        │ │                    │
-                    └──────────┬──────────┘ └────────────────────┘
-                               │
-            ┌──────────────────┼──────────────────┐
-     ┌──────▼──────┐  ┌────────▼────────┐  ┌──────▼──────┐
-     │  PostgreSQL │  │  Object storage │  │  Redis      │
-     │  Data       │  │  Attachments/   │  │  (optional) │
-     │             │  │  avatars        │  │             │
-     └─────────────┘  └─────────────────┘  └─────────────┘
-```
-
-**Why LiveKit instead of a custom SFU:** Writing an SFU in TypeScript yourself (e.g. with mediasoup as a library) is not realistic for one person with the goal "15 cameras, stable" on top of everything else. LiveKit brings simulcast, SVC, TURN, speaker detection, selective subscription to streams and a JS client SDK. The price: a dependency in Go that you cannot maintain yourself. That is a deliberate trade of control for feasibility.
-
-**What the app server does not do:** It does not transport media. It manages who is allowed in which channel and issues a short-lived join token for LiveKit for that purpose. Media signaling runs directly between client and LiveKit.
-
-**Redis:** To my knowledge not strictly required for a single LiveKit node; mandatory for multi-node operation. Leave it out for Release 1, but provide a Compose profile for it. To be verified.
-
-**Object storage:** In Release 1 a Docker volume with a local file system is sufficient. S3-compatible interface (MinIO, Garage) as a configurable alternative, not as a requirement.
-
-### 3.2 Identity: Key Pair plus Directory
-
-The chosen path is the one that allows a cross-server account without any server depending on the online service at runtime.
-
-- **Account = key pair** (Ed25519), generated on the client. The permanent identity towards every server is the public key.
-- **Login to a server:** Challenge-response. The server sends a random value, the client signs it, the server verifies and issues a session. No password ever leaves the device, because there is none.
-- **Profile per server:** Display name, avatar, roles live on the server. A user can have a different name on different servers (like Discord server nicknames).
-- **Online service (brought forward, see M6):** Maps a handle (`@name`) to a public key, offers encrypted key backup, device management and a server directory. On login, a server asks whether a key belongs to a verified handle and displays it; if the service is down, the last known state remains.
-- **Server accounts (25 September 2026, user's requirement; `docs/features/local-accounts.md`):** a server keeps accounts of its own, `~name` next to the directory's `@name`, with the same encrypted key backup as the directory (the client encrypts the key with the password, the server stores the ciphertext). A server without a directory is an isolated instance whose accounts are all server accounts. There are no temporary users any more: every sign-in needs an account, the first owner's too.
-- **Recovery:** The unsolved problem of this model. Planned: recovery code (mnemonic words, stored locally) from Release 1 on; encrypted backup with the online service later. Without the service, key loss = account loss. The user interface must state this unmistakably.
-
-**Assumption built in here:** Users accept "no password, but a recovery code instead". That is plausible for the target group "self-hosters and their communities", but not proven. Plan for early user feedback on this.
-
-### 3.3 Real-Time Protocol
-
-One WebSocket between client and app server for everything except media: presence, channel state (who is where), chat messages, role changes, typing indicators.
-
-- Messages as typed JSON events, schema in a shared package (e.g. with `zod`), from which server and client types are derived. One source of truth.
-- Versioned protocol number in the handshake from day one, so that old clients can be detected.
-- Reconnection with state reconciliation (sequence number), not "reload everything".
-
-### 3.4 Client
-
-**One web client that is packaged as a desktop app.** Not two clients.
-
-- **Web:** TypeScript, React (or a lighter framework, if you are more familiar with one), Vite. LiveKit JS SDK for media.
-- **Desktop:** Electron. Rationale: screen sharing including system audio, global keyboard shortcuts (push-to-talk), autostart and tray are mature in Electron. Tauri would be leaner, but to my knowledge less mature for exactly these functions; that is an assessment, not an established fact, and is worth a two-day prototype to verify before milestone 4 begins.
-- **Shared core:** State, protocol client, media logic in one package without UI dependency, so that a later mobile client can reuse it.
-- **One build, two shells (decision of 18 September 2026, user):** the desktop app lives in this repo as `apps/desktop` and ships exactly the web client's build (`apps/web/dist`), served from its own scheme. The UI is not moved into a package of its own and nothing is published to a registry, so both pipelines (GitLab, GitHub) build it from a bare checkout and a UI change cannot reach one shell and miss the other. What differs (screen share codec, global push-to-talk, system audio, window background, updates, `squorli://` links) goes through the `Platform` interface in `apps/web/src/platform/`. The app has no home server: it starts from the directory account at https://directory.squorli.com and opens the server viewed last; servers can also be added by address. Installers live in GitHub Releases, the update feed and the download page on squorli.com. Decisions, phases and state: `docs/features/desktop.md`.
-- **Multi-server client (decision of 14 September 2026, user's requirement):** the client served by one server can show other Squorli servers directly (server rail), like Discord: one `ServerConnection` per server (own session token, WebSocket, state), the rail switches the shown server without leaving the page. The voice connection belongs to one server and stays up across the switch; joining a voice channel on another server disconnects the previous one. Login at a foreign server uses the same browser key with a signature over that server's `PUBLIC_DOMAIN` (the domain binding of 3.2 is kept; the client reads the domain from its `/api/health`). This requires every chat server to answer CORS for all origins; that is safe because authentication is a Bearer token only (no cookies) and the token never leaves the client's origin. The login screen, the directory account and friends/DMs stay bound to the server that serves the client. **Exception since 18 September 2026:** a client without a home server (the desktop app) takes the directory from its platform, has a login of its own (directory account or the device's key) and treats every server as a foreign one; it opens the server viewed last (`docs/features/desktop.md`, P1).
-
-### 3.5 Speaking: Push-to-Talk and Voice Activation
-
-Both are offered, the choice is up to the user and is stored per device.
-
-- **Voice activation:** Local level measurement via the Web Audio API (AnalyserNode or AudioWorklet), threshold with slider and live display, hold time of a few hundred milliseconds so that word endings are not cut off. Below the threshold the microphone track is muted, not unpublished, so that switching back on is instantaneous.
-- **Push-to-talk in the desktop client:** Global keyboard shortcut via Electron, works even with the window minimized. Optionally a mouse button. Short tone on activation as feedback.
-- **Push-to-talk in the browser:** Only possible while the tab has focus; browsers do not allow global keyboard shortcuts. That is a platform limit, not an implementation gap. The user interface says so clearly when it is enabled and recommends the desktop client.
-- **Default choice:** Voice activation, because it works without explanation. Push-to-talk is offered as an alternative on first join.
-
-### 3.6 Screen Share with Audio
-
-Mandatory for Release 1, but the browsers impose hard limits that no code gets around. Status September 2026, from public sources, with uncertainties marked:
-
-| Environment | Video | Audio | Confidence |
-|---|---|---|---|
-| Chromium (Chrome, Edge, Brave) – share browser tab | yes | yes, tab audio, all operating systems | confirmed |
-| Chromium – entire screen, Windows | yes | yes, system audio after opt-in in the dialog | confirmed |
-| Chromium – entire screen, macOS / Linux | yes | unclear, depending on the source now possible | **verify** |
-| Chromium – single window | yes | to my knowledge no | **verify** |
-| Firefox | yes | no, rated low priority by Mozilla | confirmed |
-| Safari | yes | no to my knowledge | **verify** |
-| Desktop client, Windows | yes | yes: one window's audio, or the system's audio without the app, through a native helper (WASAPI process loopback, Windows 10 2004+); Chromium's loopback only as the fallback | signal measured in the app (18 September 2026, `docs/features/desktop.md`); a listener's side not yet checked |
-| Desktop client, macOS | yes | system audio needs an additional path (ScreenCaptureKit or virtual audio device) | **verify**, considerable effort possible |
-| Desktop client, Linux | yes | conceivable via PipeWire/PulseAudio monitor, Wayland complicates video capture | **verify**, can be documented as a limitation |
-
-What follows from this:
-
-1. **Officially supported in Release 1:** Screen share with audio in Chromium browsers and in the desktop client on Windows. Everything else: video without audio with a clear notice in the user interface, not silently.
-2. **Work through the test matrix:** The test page for this has been at `/test/screenshare.html` since M3 (shipped with the client, in dev at http://localhost:5173/test/screenshare.html). For each browser and operating system try tab, window and entire screen and replace the "verify" rows above. Status 2026-09-15: screen share transmission (picture) has been tested successfully end to end; the per-browser audio rows are not yet filled in.
-3. **macOS system audio in the desktop client** is the most expensive row. If the verification effort turns out to be high, it will be documented as a known limitation for Release 1 instead of blocking the release.
-4. **Technically:** The audio of the share is published as a separate audio track, not mixed with the microphone. That way listeners can control it separately and the presenter does not hear themselves twice. To be verified whether LiveKit handles multiple audio tracks per participant cleanly (to my knowledge yes).
-
-### 3.7 Repository Structure
-
-```
-/
-├── apps/
-│   ├── server/        Node/TS app server
-│   ├── web/           Web client
-│   └── desktop/       Electron shell around web/ (ships web's build; M4, docs/features/desktop.md)
-├── packages/
-│   ├── protocol/      Event schemas, shared types
-│   ├── core/          Client logic without UI (not split off: lives in apps/web/src as UI-free modules)
-│   └── ui/            Components (optional, later; not needed for the desktop app, decision of 18 September 2026)
-├── deploy/
-│   ├── compose.yml            Production
-│   ├── compose.dev.yml        Development
-│   └── caddy/, livekit/       Configuration templates
-├── docs/
-└── tools/                     Load-test bots, seed scripts
-```
-
-Monorepo with pnpm workspaces or comparable. A single `pnpm dev` starts everything.
-
----
-
-## 4. Network and delivery
-
-This is the part where self-hosted voice fails in practice. Hence the detail here.
-
-### 4.1 What the operator has to bring
-
-- A public IPv4 address (or IPv6 plus an understanding of the consequences) and the ability to open ports.
-- A domain pointing at the server.
-- A rented server or VPS. A full 15-camera channel produces roughly 60 Mbit/s of upload (estimate, see 4.3). Home connections are usually too weak for that. This belongs prominently in the docs, otherwise there will be disappointed users and bad reviews.
-
-### 4.2 Ports
-
-- **443 TCP:** Everything over HTTPS/WSS through Caddy (app server, web client, LiveKit signaling).
-- **7881 TCP:** LiveKit media fallback for networks that block UDP.
-- **UDP:** LiveKit supports a single multiplexed UDP port instead of a range. For self-hosters that is a big difference (one port instead of thousands). Use it by default.
-- **TURN:** LiveKit ships with a built-in TURN server. It needs TLS over 443 or 5349 to get through restrictive firewalls. Configure it via Caddy forwarding, do not demand it from the operator.
-
-Goal for standalone operation: **Open two ports (443 TCP, one UDP port), the rest just works.** If that does not work out, delivery is not finished. For operation behind an existing proxy, section 4.5 applies.
-
-### 4.3 Bandwidth: measurement (M3) and projection
-
-First measurement on 13 September 2026, locally (Docker Desktop, Windows): `pnpm bots --video 15 --audio 0 --subscribers 1`, 15 simulated cameras (LiveKit preset "high", VP8, simulcast with three layers), one listener with a 4×4 tile layout, 60 s.
-
-| Where | Direction | Measured | Projection |
-|---|---|---|---|
-| Client | Download (15 tiles) | **4.1 Mbit/s** total, 236–309 kbit/s per track, packet loss 0.03 % | matches the old estimate (≈ 4 Mbit/s) |
-| Client | Upload (camera 720p, simulcast 180/360/720) | client default: max. ~1.7 Mbit/s (720p) or ~0.4 Mbit/s (360p setting); the debug view shows the layers live | 1–2 Mbit/s |
-| Server | Download (ingest) | not measured (the bots run in the network namespace of the LiveKit container, `docker stats` does not see the traffic) | 15 × ~1.5 Mbit/s ≈ 20 Mbit/s |
-| Server | Upload (distribution) | one listener = 4.1 Mbit/s | 15 listeners ≈ 60 Mbit/s |
-| Server | CPU / RAM (LiveKit) | ~9 % of one core, ~135 MB with 15 cameras + 1 listener | linear with listeners, no transcoding |
-
-Thanks to `adaptiveStream`, the tile view only fetches the simulcast layer that matches the tile size; a speaker focus with a large tile pulls the 720p layer (~1.5 Mbit/s) for that one track and 180p for the small tiles. Status 2026-09-15: webcam transmission with real cameras has been tested successfully. Still open: the bandwidth measurement with real cameras over the internet (M3 acceptance) and the ingest on the server (`docker stats` on the target host there, not locally).
-
-CPU stays moderate as long as media is only forwarded. Recording and server-side transcoding would tip that over and stay out of release 1.
-
-### 4.4 Delivery
-
-- `deploy/compose.yml` with four services: caddy, app, livekit, postgres. Caddy sits in a Compose profile (`standalone`) and is dropped in proxy mode. One `.env` with three mandatory values: domain, admin handle, database password, plus `PROXY_MODE=bundled|external`. Everything else has sensible defaults.
-- A setup script or setup page on first start that checks: domain reachable? Ports open? UDP arriving? With clear error messages. This self-diagnosis saves more support than any documentation.
-- Versioned images, database migrations automatically at startup, backup guide (Postgres dump plus file volume).
-
-### 4.5 Operation behind an existing reverse proxy
-
-Requirement: The server must also run when port 443 already belongs to a foreign proxy (Traefik, nginx, Nginx Proxy Manager, Caddy, Apache). For self-hosters that is the normal case.
-
-**What goes through the proxy and what does not:**
-
-| Traffic | Through the proxy? | Note |
+| Risk | Handling | State |
 |---|---|---|
-| Web client, REST, app WebSocket | yes | Proxy must pass on the WebSocket upgrade; with nginx this has to be configured explicitly |
-| LiveKit signaling (WebSocket) | yes | Route the path `/rtc` to the LiveKit container. To my knowledge LiveKit serves this path natively, so no rewrite is needed; to be verified |
-| Media UDP | **no** | HTTP proxies do not transport UDP. The port must go directly to the LiveKit container |
-| Media TCP fallback (7881) | **no** | Separate port, passed through directly, not via the proxy |
-| TURN over TLS | **no** | Cannot sit on 443 in proxy mode because the port is taken |
-
-**Consequences for the implementation:**
-
-1. **Two operating modes, one image.** `PROXY_MODE=bundled` starts Caddy with automatic TLS. `PROXY_MODE=external` starts no Caddy, the app server and LiveKit listen unencrypted on internal ports, and TLS is terminated by the foreign proxy. Both modes use the same container images and the same configuration, only the profile differs.
-2. **Trust proxy headers, but only the right ones.** In external mode the app server reads `X-Forwarded-For` and `X-Forwarded-Proto` for rate limits, logs and secure cookies. Which senders are trusted is configurable (`TRUSTED_PROXIES`), default: the Docker network. Without this restriction any client could spoof its IP.
-3. **TURN in proxy mode.** Default: TURN/TLS on port 5349 with its own certificate, which the operator provides or LiveKit obtains itself. That is less firewall-friendly than 443, but honest. Documented for advanced users: SNI-based TCP passthrough at the proxy (Traefik TCP router, nginx `stream` with `ssl_preread`, Caddy `layer4`), so that a subdomain like `turn.chat.example.org` on 443 is passed straight through to LiveKit. Not as a requirement, because that overwhelms many operators.
-4. **Public IP for ICE.** LiveKit must know its public address in order to offer it to clients. Default: automatic detection (`use_external_ip`), overridable via `NODE_IP` for operators with multiple addresses or without working auto-detection.
-5. **Subdomain only, no sub-path.** `chat.example.org` yes, `example.org/chat` no. Sub-path operation creates special cases in client routing, asset paths and LiveKit signaling that are not worth the effort. Named in the docs as a deliberate limit.
-6. **Self-diagnosis knows both modes.** In external mode the setup check additionally tests: Does the WebSocket get through the proxy? Is `X-Forwarded-Proto` correct? Is the UDP port reachable from outside even though 443 lives elsewhere? The error messages name the suspected proxy fault explicitly ("WebSocket upgrade is not being passed on").
-7. **Ship reference configurations** under `deploy/proxies/`: Traefik (Docker labels), nginx, Nginx Proxy Manager (guide with screenshots), Caddy. Ready to copy, tested, part of the CI check at least for nginx and Traefik. This is the part that decides adoption, not the code behind it.
-
-**New minimum requirement in proxy mode:** The proxy forwards HTTPS and WebSocket to the internal app; in addition, one UDP port, 7881 TCP and 5349 TCP must get through directly to the server. Three ports instead of two, because 443 is no longer available.
+| NAT/TURN does not work for some operators or users | Self-diagnosis (2.3), TCP fallback 7881, docs on what a host must offer | TCP fallback built; TURN off; self-diagnosis open |
+| Key loss | Password-encrypted key backup at the directory and on the server (server accounts), authenticator, recovery codes | built; the mnemonic recovery code was dropped by the user on 25 September 2026 |
+| Audio quality below Discord level | Browser echo/noise suppression, speech gate, per-device settings | built; real-world measurement with users ongoing |
+| The operator's proxy breaks WebSockets or headers | Reference configurations, self-diagnosis naming the proxy fault, subdomain only | configs exist, untested against real installations (2.4) |
+| Screen share audio outside Chromium/Windows | Matrix, notices in the UI, the desktop app as the way out | matrix rows open (3.2) |
+| LiveKit dependency (Go, third party) | **Pinned version** (`livekit/livekit-server:v1.13.7` since 25 September 2026, `deploy/AGENTS.md`), raise it on purpose with a server release; keep the server's LiveKit layer thin | pinned; no upgrade test in CI |
+| Scope creep towards Discord's feature list | Section 1.2, section 1.3 | ongoing |
+| Bus factor 1 | Docs next to the code, public repository | ongoing |
 
 ---
 
-## 5. Development environment
+## 2. Priority 1: security and operation
 
-Explicitly planned, because you asked for it.
+### 2.0 Rollout of the 25 September 2026 changes (not committed yet)
 
-- **`compose.dev.yml`** starts Postgres and LiveKit in containers; app server and web client run locally with hot reload. LiveKit in dev mode without TLS, with fixed keys.
-- **Proxy mode testable locally:** A second dev profile with Traefik or nginx in front, so that header handling, WebSocket forwarding and `/rtc` routing are not discovered only at the user's site.
-- **Local TLS:** Browsers require a secure context for camera/microphone. `localhost` counts as secure; for tests from other devices on the LAN, mount `mkcert` certificates into Caddy.
-- **Fake media:** The Chromium flags `--use-fake-device-for-media-stream` and `--use-fake-ui-for-media-stream` allow tests without a real camera and without permission dialogs. A script that starts Chromium this way.
-- **Load-test bots:** Use the LiveKit server SDK (Node) to put N bot participants into a channel that publish test video. That lets you test 15 cameras alone at your desk. Build it early (milestone 1), it pays off throughout.
-- **Seed data:** Script that creates a server with channels, roles and users, so you do not start from zero every time.
-- **Tests:** Vitest for protocol and server logic, Playwright for end-to-end in the browser (including joining a voice channel with fake media). Do not aim for 100 % coverage; protocol and permission checks must be tested, UI details need not be.
-- **CI:** Lint, types, tests, Docker build on every push. Release images on tag.
-- **Protocol inspector:** A hidden debug view in the client that shows WebSocket events and LiveKit statistics (bitrate, packet loss, selected simulcast layer) live. Indispensable for media problems.
+- **squorli-server:** `squorli restore` in the installer's wrapper (`deploy/install.sh`), LiveKit pinned in `deploy/compose.yml`, `portainer.yml`, `compose.dev.yml`. Push to `main` **before** the website (the installer downloads its files from `main`); name the pin in the next server release notes. No desktop app release needed.
+- **squorli-website:** installation guide with `squorli restore` and the manual restore, both languages. Push after the server.
+- **squorli-directory:** see its `docs/PLAN.md` (second factor for deleting an account, logs to journald with a one-time host setting).
+
+### 2.1 Rate limits on every public path
+
+Today only server accounts (register, password), link previews and slowmode have limits. Missing: the challenge/verify sign-in, messages and uploads beyond slowmode, WebSocket events per connection, invite redemption, the status API beyond its 1 s cache (`docs/features/status-api.md`). Per IP and per account, in memory like the directory's `RateLimiter`, behind `TRUSTED_PROXIES`.
+
+### 2.2 Security review of the sign-in path
+
+Challenge-response and the domain binding, session tokens (lifetime, revocation, the directory's remote sign-out), server accounts (key backup, password change, deletion), the directory token and host proof, CORS for all origins with bearer tokens, the upload and attachment routes. Result as a dated entry in `docs/VERIFIED-STATE.md`, findings as items here.
+
+Known gaps found so far, to close in the same pass:
+- **`VIEW_VIDEO` channel overwrites** do not reach the per-member subscription list: `videoAccessOf()` uses server-wide masks (`docs/features/channel-permissions.md`).
+- **Attachments stay reachable by id** after a member loses access to the channel (`docs/features/channel-permissions.md`).
+- **Radio playlist fetches** are not protected against DNS rebinding (`docs/features/radio.md`).
+- **The identity key lies in `localStorage`** of the web client and the desktop app; move it to `safeStorage` in the desktop app (`docs/features/desktop.md`), the same interface later serves the phone's Keystore (`docs/PLAN-mobile.md` 3.3).
+
+### 2.3 Setup self-diagnosis
+
+User's decision of 25 September 2026: yes. A `squorli doctor` in the installer's wrapper and a check in Verwaltung > Server that test from outside what fails most often: domain and certificate, WebSocket upgrade through the proxy, `X-Forwarded-Proto`/`-For` from a trusted proxy, `/rtc/validate`, the media ports 7881/tcp and the UDP port from outside (needs a reachable echo: the directory could offer one to registered servers, to decide when building), `LIVEKIT_NODE_IP`. Error messages name the likely fault ("the proxy does not pass the WebSocket upgrade", "participant drops after 15 s: UDP 7882 not forwarded"). The known faults are listed in `deploy/AGENTS.md`, "Known pitfalls: LiveKit connectivity".
+
+### 2.4 Operator path
+
+- **Reference proxy configurations tested for real:** nginx, Traefik, Nginx Proxy Manager exist in `deploy/proxies/` but were never run against real installations; a config for an external Caddy is missing; a CI job for nginx and Traefik at least.
+- **Logging concept:** what the server logs (Fastify's default request log carries IP addresses), levels, and what an operator should set for retention (the directory's example: journald with 14 days, `../squorli-directory/deploy/README.md`, "Logs").
+- **The "stranger in 15 minutes" test:** somebody who has never seen Squorli installs it from the website on a fresh VPS, standalone and behind an existing proxy (test campaign T6).
 
 ---
 
-## 6. Milestones
+## 3. Priority 2: product
 
-The order is chosen so that **every milestone delivers something usable** and the riskiest part comes early. Effort figures are rough estimates for one person working part-time and serve only for proportion, not for scheduling.
+### 3.1 Reporting, blocking, deleting with evidence
 
-### M0 – Foundation (small)
-Monorepo, Compose for dev and prod, Caddy with automatic TLS, app server skeleton with Postgres migrations, protocol package with handshake, key pair generation and challenge-response login in the client, LiveKit container attached.
-**Done when:** A fresh VPS runs after a Compose start with a valid certificate, the same works behind an existing nginx in external mode, and a client can log in with a key.
+All seven decisions made by the user on 25 September 2026 (as proposed): `docs/PLAN-reports.md`. Stages 1 (server reports) to 4 (reports to the directory). Also the EU notice path an operator needs, and a precondition of the mobile app.
 
-### M1 – Two people talking (medium)
-One fixed voice channel. Join, leave, mute, speaker indication, device selection. Load-test bots. Debug view.
-**Done when:** You and a second person can talk stably from two different networks (at least one with restrictive NAT, e.g. a mobile hotspot), and 15 bots in the channel do not knock the server over.
-**Why so early:** This is the biggest technical risk. If it stalls here, the architecture has to change before much code sits on top of it.
+### 3.2 Acceptance of the media promise
 
-### M2 – Server structure (large)
-Multiple channels (voice and text), categories, roles with permissions, invite links, kick/ban, simple text chat with history, attachments. Admin area.
-**Done when:** A small community could use the server as a replacement for a simple Discord server, without video.
+- **15 real cameras on a target server** over the internet: bandwidth in and out (`docker stats` on the host), CPU, the tile view; replaces the projection in `deploy/AGENTS.md`.
+- **A restrictive network** (mobile hotspot, a company Wi-Fi): does 7881/tcp carry it; TURN only if somebody needs it (user, 25 September 2026: "erst wenn sich jemand beschwert", then TURN over 443 by SNI passthrough).
+- **The screen share audio matrix:** fill the "verify" rows (`docs/features/voice-video.md`, test page `/test/screenshare.html`); open decision 6.1.
 
-### M3 – Video and screen share (medium to large)
-Camera on/off, tile view with simulcast layers depending on tile size, speaker focus, screen share in the browser with audio as a separate audio track (Chromium officially, other browsers picture without audio with a notice, see 3.6). Bandwidth measurement, adjustment of the defaults. This is where the difference to the competition arises; plan time for polish accordingly.
-**Done when:** 15 real cameras (or bots with realistic test video) run smoothly on a defined target server, a screen share with tab audio from Chrome arrives at everyone, and the bandwidth table in section 4.3 has been replaced by measured values.
-**Status 15 September 2026:** Video transmission (webcam and screen share) has been tested successfully with real devices. Still open: the 15-camera run on a target server and the browser matrix in 3.6.
+### 3.3 Clients
 
-### M4 – Desktop client (medium)
-Electron shell: push-to-talk with a global hotkey, screen share with system audio (Windows for sure; macOS and Linux depending on the result of the test matrix in 3.6), tray, autostart, notifications, auto-update. Before that the Tauri prototype from 3.4, if you want to keep the decision open.
-**Done when:** Installers for all three platforms drop out of CI, PTT works with the window minimized, and system audio is shared on Windows.
+- **Desktop notifications** (operating system notifications for mentions and direct messages; today only the taskbar mark and a sound), and browser notifications as an opt-in.
+- **macOS desktop app** (user: medium): a mac build target and signing in CI, system audio through ScreenCaptureKit or a documented limitation (open decision 6.1).
+- **Self-hosted MediaPipe** for the camera background blur (user's decision, 25 September 2026): ship the model and wasm files instead of loading them from jsDelivr and Google Cloud Storage (`apps/web/src/voice/AGENTS.md`), then shorten section 4 of the privacy policy on the website. Needs a desktop app release.
+- **A switch "no link previews in direct messages"** (user's decision, 25 September 2026) in the sealed settings (`docs/features/link-previews.md`). Needs a desktop app release.
+- **The owner as a server account** (user's decision, 25 September 2026): today `OWNER_PUBLIC_KEY` can only name a directory account; allow `~name` too, and a question in the installer (`docs/features/local-accounts.md`).
+- **The licenses list misses the desktop bundle** (electron-updater and others; `tools/licenses.mjs`, `apps/desktop/AGENTS.md`).
 
-### M5 – Operational readiness and first public release (medium)
-Setup self-diagnosis for both operating modes, reference configurations for Traefik, nginx, Nginx Proxy Manager and Caddy, backup/restore guide, migration safety, rate limits, logging, documentation for operators and users, recovery code flow, security review of the auth path.
-**Done when:** A stranger following the docs has a running server in under 15 minutes, both standalone and behind an existing Traefik or nginx, and you would announce the project publicly.
+### 3.4 A screen share that adapts by itself (user: medium)
 
-### M6 – Online service (medium; pulled forward, own repo `squorli-directory`)
-Handle registration, mapping handle → public key, encrypted key backup, device management, server directory with join via link, server registration by operators. The service is deliberately so narrow that it can fail without crippling servers.
+`docs/PLAN-share-adaptation.md`: stage 1 (the sender's rows in the statistics), stage 2 (the governor), then stage 3 once decisions 1 and 2 there are made.
 
-**Decision of 14 September 2026:** M6 is built before M4/M5, because without a backup every browser reset is a lost account. The service lives in its own, unpublished repo `squorli-directory` next to this one (decision of 14 September 2026: it is not published with the chat; until then it was `apps/directory` in the monorepo). It carries a synchronized copy of the directory part of the protocol package and of the brand package, runs with its own database on its own host with its own subdomain; several chat servers share one service. Second factor: TOTP authenticator. E-mail (SMTP, 17 September 2026): optional confirmed address per account, notice on every key retrieval, 8-digit code by e-mail as a fallback second factor; never a password reset.
+### 3.5 Native Android app (user: medium)
 
-| Phase | Content | Status |
+`docs/PLAN-mobile.md`, all six decisions made on 25 September 2026: Capacitor, Android first without screen share, push only as a wake-up through the directory, no push for server accounts. Needs 3.1 first (stores).
+
+---
+
+## 4. Priority 3: later
+
+- **Games** (`docs/features/games.md`): detection on Linux, more launchers (Ubisoft, EA, Battle.net, Riot), a rule list for games behind another executable (Minecraft Java = `javaw.exe`), larger icons.
+- **Linux desktop:** system-wide push-to-talk and hotkeys on Wayland (X11 only today), window audio (Windows only; also macOS).
+- **Push-to-talk:** mouse buttons as the key, a short tone when it opens, offering push-to-talk on the first join (`docs/features/hotkeys.md`).
+- **Link previews:** an "embed links" permission, an admin setting instead of `LINK_PREVIEWS`, smaller copies of large pictures, Twitch clips and Vimeo (`docs/features/link-previews.md`).
+- **Server accounts:** second factor and e-mail, friends and direct messages, an admin view of them (`docs/features/local-accounts.md`).
+- **Mentions:** `@everyone`/`@here`/role mentions, mentions in direct messages; unread marks do not read `defaultNotify` yet; two same-name members picked from the list in one message both point to the last one picked (bug) (`docs/features/mentions-unread.md`).
+- **Voice:** H.264 hardware encoding (LiveKit negotiates only the constrained baseline profile), AV1 for the screen share (decision 7, deferred), the quiet microphone on iPhone and in Firefox/Safari, "voices get quieter while watching a share" (not reproduced) (`docs/features/voice-video.md`).
+- **Radio:** re-reading a YouTube playlist that changed, the queue limit of 200 (`docs/features/radio.md`).
+- **Status API:** an env variable that pins the mode, the mobile join sheet's mute icons (`docs/features/status-api.md`).
+- **UI:** settings search and collapsible advanced sections; kick/ban still shown to members who do not outrank (the server refuses) (`docs/features/ui-admin.md`).
+- **Import:** the bot path for community templates (`docs/features/import.md`).
+- **Protocol:** reconnect with sequence numbers instead of the full state in the welcome (user, 25 September 2026: low).
+- **Delivery:** a Redis profile (only for several LiveKit nodes), S3-compatible storage for attachments, a beta channel for the desktop app, GitHub Actions off Node 20.
+- **Development:** a dev profile with a proxy in front, mkcert for LAN tests, a fake-media launch script, a seed script, Playwright end-to-end tests, a lint step (`docs/DEVELOPMENT.md`); drop the old `directory` dev database in this repo's Postgres (`apps/server/AGENTS.md`).
+
+---
+
+## 5. Test campaign
+
+Most features were checked with typecheck, unit tests, smoke tests and headless browsers; what needs real people, devices or hosts is collected here by setup. The details stay in each feature note's "Not checked" line; tick a setup off by recording the run in `docs/VERIFIED-STATE.md` and clearing those lines.
+
+| # | Setup | Covers |
 |---|---|---|
-| M6a | Register a handle (proof of ownership by signature), resolution in both directions, chat server shows verified handles | done 14 September 2026 |
-| M6b | Password-encrypted key backup (PBKDF2 + HKDF + AES-GCM in the client, the service only sees ciphertext and the hash of an auth key), account page of the service for creating an account with handle + password and for changing the password, login on any chat server with handle + password | done 14 September 2026 |
-| M6c | TOTP authenticator as second factor for key retrieval and account changes (secret encrypted with `DIRECTORY_SECRET_KEY`, each code only once), ten recovery codes (hashed only), device management: sessions per chat server with device label and remote logout (WebSocket close 4011) plus list of key retrievals on the account page; e-mail: address confirmed by code, notice on every key retrieval, code by e-mail as a fallback second factor (own SMTP client in the directory) | done 14 September 2026, e-mail 17 September 2026 |
-| M6c+ | Display names in the directory: one global name and one per chat server (override), set signed on the account page or in the chat profile dialog; chat servers take them at login and refresh them on `GET /api/me`; the names are readable only by the registered chat server of that host | done 14 September 2026 |
-| M6d (1/2) | Server registration: each chat server has its own key, registers at the directory with a signature and a host proof (the directory fetches the server's `/api/health` and compares `serverKey`), gets a 24-h token and may then read only its own users' names; the directory records logins per server for the account page, pushes name changes to the servers concerned and the servers re-sync all users every 5 minutes | done 14 September 2026 |
-| M6d (2/2) | Server directory: servers opt in (`listed` + description in the admin panel), the directory keeps their icon (fetched from the proven host at registration) and serves list and icons publicly; client: server rail with the own handle's servers (icons from the directory) and a "Server entdecken" modal, join via link to the server's origin | done 14 September 2026 |
-
-### M7 – Friends and end-to-end encrypted direct messages (done 14 September 2026)
-Friends are linked at the directory (account-wide, independent of chat servers); a friendship is valid only after the invited side accepts. Direct messages run 1:1 between friends through the directory as a ciphertext mailbox: the Ed25519 identity key is converted to X25519, both sides derive one pair key (static-static DH + HKDF), each message is AES-256-GCM with sender/recipient/id bound in the AAD; the directory sees metadata only, no content, and no forward secrecy in v1. Client: Squorli icon mark at the top of the server rail opens the home view (friends, requests, search by handle at the directory or by name in the member list, conversations with unread badges), right-click on a member = "Als Freund hinzufügen"; presence of friends via the directory; delete for both within 5 minutes, otherwise for oneself; the account page manages friends too. Plan, decisions and open follow-ups (notifications, per-device prekeys for forward secrecy, encrypted attachments): `../squorli-directory/docs/PLAN-friends-dm.md`.
-
-**Not in release 1:** Mobile clients, recording, end-to-end encryption of media, bot API, threads, federation between servers.
+| T1 | **Two real clients over the internet** (different networks, one old and one new version) | voice, camera, screen share incl. a real game with H.265 and the viewer statistics, vote kick, channel blocks and removal, game display end to end, link and DM previews, the AFK video rule (10 min hands off, then the 4 h cap), mentions and rail marks, radio in step, channel permissions side by side |
+| T2 | **A real phone** (Android and iPhone, browser and home screen) | push-to-talk button, microphone level, rear camera, background audio, touch menus, modals and narrow layout, the on-screen keyboard |
+| T3 | **Firefox and Safari** | emoji font, camera and pop-out, viewing H.264/H.265 shares, WebP-to-JPEG fallback, the settings dialogs |
+| T4 | **The packaged desktop app on Windows** | update at start end to end, tray, deep links from a browser, hotkeys with a Stream Deck or G Hub, window audio heard by a listener, AMD and Intel graphics |
+| T5 | **The desktop app on Linux** (AppImage, deb) | install, update, tray, hotkeys on X11 |
+| T6 | **Operators** | the installer's bundled mode up to a real certificate, nginx/Traefik/NPM in front, restore on a new host, a fresh VPS by a stranger (2.4) |
 
 ---
 
-## 7. Risks
+## 6. Open decisions
 
-| Risk | Impact | Handling |
-|---|---|---|
-| NAT/TURN does not work for some operators | Users cannot join, frustration, bad reviews | Self-diagnosis during setup, TCP fallback, TURN over 443, docs with "what your host must be able to do" |
-| Key loss without the online service | Account gone | Recovery code from M0, clear warnings, backup at the service from M6 |
-| Audio quality below Discord level | Core promise not delivered | Use the browser's own echo/noise suppression, test Opus parameters, possibly evaluate RNNoise in the client; measurement with real users in M1 |
-| Operator's proxy forwards WebSockets or headers incorrectly | Chat works, voice does not; hard to diagnose | Reference configurations, self-diagnosis with proxy-specific error messages, mandatory subdomain |
-| TURN in proxy mode only on 5349 instead of 443 | Users on very restrictive networks cannot get in | SNI passthrough as a documented advanced path; diagnosis shows whether TURN is reachable |
-| Screen share with audio outside Chromium/Windows | Core feature missing on Firefox, Safari, partly macOS/Linux | Work through the test matrix early (3.6), name the limits in the UI, recommend the desktop client as the way out |
-| LiveKit dependency (Go, third-party project) | Bugs you cannot fix yourself; license change | Pin the version, upgrade tests in CI, keep the abstraction layer in the server so thin that a switch remains conceivable |
-| Scope creep towards the Discord feature list | Never finished | Take the section "Not in release 1" seriously; check every new feature against the positioning |
-| Bus factor 1 | Project dies during a pause | Docs, clear structure, go public early so contributors can get on board |
-
----
-
-## 8. Technology candidates (to verify)
-
-My knowledge of versions and maturity is a snapshot; check the current state before committing to each one.
-
-| Area | Candidate | Note |
-|---|---|---|
-| Media server | LiveKit | Go, Docker image, JS SDK, built-in TURN. Check the license in the repo (Apache 2.0 as far as I know) |
-| App server | Node + Fastify or Hono | Both lightweight; check WebSocket support |
-| ORM/migrations | Drizzle or Prisma | Drizzle closer to SQL, Prisma more convenient; a matter of taste |
-| Schemas | zod | For the protocol package and validation |
-| Web client | React + Vite | Or whatever you are more familiar with |
-| Desktop | Electron (Tauri as a candidate to evaluate) | See 3.4 |
-| Proxy/TLS | Caddy | Automatic Let's Encrypt without configuration |
-| Tests | Vitest, Playwright | |
-| Monorepo | pnpm workspaces, possibly Turborepo | |
-
----
-
-## 9. Open decisions
-
-These must be made before M0 or at the latest before the respective milestone:
-
-*Channel permissions (23 September 2026, user's decisions, `docs/features/channel-permissions.md`): the M2 provisional "permissions apply server-wide, no channel overrides" of decision 3 is replaced; channels and categories carry Discord-style overwrites for roles and members, private channels never reach a client that may not see them, voice channels can hold their members (sticky).*
-
-Already decided: permissive license, PTT and voice activation both, screen share with audio in release 1.
-
-1. **MIT or Apache 2.0.** Both allow everything including closed forks. Apache 2.0 additionally contains an explicit patent license from contributors and matches LiveKit's license; MIT is shorter and more common in the JS world. In substance hardly any difference for this project. I am not a lawyer; if in doubt, a brief review. Consequence of the permissive choice: code from Stoat (AGPL-3) must not be adopted, it may only serve as reference.
-2. **Text chat depth in release 1:** channel messages only, or also direct messages, reactions, edit/delete. *Provisional (M2, 13 September 2026, not confirmed): channel messages with edit/delete, no reactions/threads.* **Decided (14 September 2026): direct messages yes, as 1:1 between friends, end-to-end encrypted via the directory (M7).*
-3. **Moderation:** Who may do what, audit log yes/no, report function yes/no. *Provisional (M2): role permissions + kick/ban, no audit log, no report function. **Decided (13 September 2026):** The default role "Gast" (guest) may only see channels and join voice channels; "Mitglied" (member: write, files, invites, camera/screen) is assigned by admins. Moderators (permission "Sprachkanäle moderieren", moderate voice channels) move members between voice channels, end camera/screen and block camera/screen per member; LiveKit enforces this server-side. **Added (17 September 2026):** permission "Kamera- und Bildschirmübertragungen sehen" (watch camera and screen shares); roles without it only hear the voice channel. Guests do not have it, "Mitglied" does; on existing servers the migration grants it to every role except the default role. Enforced at LiveKit through the senders' track subscription permissions.*
-4. **Name of the project.** **Decided (14 September 2026): Squorli.** Brand and design in `docs/brand/` (version 2, dark mode, blue signet with three speech figures); package names `@squorli/*`, Compose projects `squorli`/`squorli-dev`, image tags `squorli/app` and `squorli/directory`. Signed messages (`community-chat-login`, `community-directory-*`, HKDF infos `community-backup-*`) and the localStorage keys keep their old identifiers so that existing backups and sessions remain valid.
-5. **Tauri prototype yes/no** before M4. Note: With system audio as a requirement, Electron's maturity weighs more heavily; a Tauri prototype would have to prove exactly this function.
-6. **macOS system audio in the desktop client:** release-1 requirement or documented limitation, depending on the result of the test matrix.
-7. **Video codec of the screen share: AV1 (or VP9) instead of VP8.** *Deferred (18 September 2026, user's decision): the web app stays on VP8 for now; AV1 with a VP8 backup is to be tested at a later time, for the screen share only. What to measure and what is known: `docs/features/voice-video.md`, "Screen share codec".*
-8. **A screen share that adapts by itself (22 September 2026):** a viewer saw a member's H.265 game share lag on every share. The viewer's statistics exist since that day; the stages (sender-side governor, simulcast or the viewers' quality reports, one-click optimisations, an automatic codec switch) and the decisions to make are in `docs/PLAN-share-adaptation.md`. *Open: which stage next, after the reported share was read with the statistics.*
-
----
-
-## 10. Next concrete steps
-
-1. ~~Settle the license text (MIT or Apache 2.0)~~ Done: Apache 2.0, `LICENSE` added September 2026. Settle the project name.
-2. Work through the test matrix from 3.6 with a small test page: getDisplayMedia with `audio: true` in Chrome, Firefox, Safari on all available operating systems; replace the "prüfen" (check) rows with the result. One afternoon.
-3. Start LiveKit locally via Docker, open a room with the bundled example client, put 15 bots in, watch resources. One day. Confirms or refutes the component choice before code is written.
-4. Set up the monorepo, start M0.
-
-## Standard container installation
-
-The default user installation requires no Git clone, Node.js or application build. Download only .env.example, deploy/compose.yml, Caddyfile, livekit.yaml and the optional nginx port overlay into a fresh squorli directory. Configure .env with APP_IMAGE and the matching proxy mode, then run Compose pull and up --no-build from squorli/deploy. Updates pull the image without git pull; never overwrite existing secrets by repeating the initial download. Source cloning and --build belong only to a separate optional developer workflow at the end of both public guides. Both languages must stay equivalent.
+1. **macOS system audio in the desktop app:** a requirement or a documented limitation (after the matrix rows of 3.2).
+2. **The screen share's adaptation:** stage 3 (a) simulcast or (b) the viewers' quality reports, and whether the governor may go below the quality the user picked without asking (`docs/PLAN-share-adaptation.md`, section 4; the user skipped both on 25 September 2026).
+3. **AV1 for the screen share** (deferred by the user on 18 September 2026; `docs/features/voice-video.md`, "Screen share codec").

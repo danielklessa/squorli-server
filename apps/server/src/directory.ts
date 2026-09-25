@@ -23,7 +23,7 @@ const hexToBytes = (h: string) => Uint8Array.from(Buffer.from(h, "hex"));
  * via /api/health (serverKey) that the server controls its host. The issued token (kept in memory only)
  * allows reading the handle and display name of its own users (`?server=PUBLIC_DOMAIN`); without a token the
  * directory returns only handle and key. On a 401 it re-registers once. Best effort with a short timeout; if the service
- * is unreachable, the last known state stays. The chat server never depends on the service at runtime (PLAN 3.2).
+ * is unreachable, the last known state stays. The chat server never depends on the service at runtime (apps/server/AGENTS.md, directory service).
  */
 export class DirectoryClient {
   /** Public server key (hex), published in /api/health; null before init(). */

@@ -54,7 +54,7 @@ services:
     networks: [internal]
 
   livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.13.7  # pinned; raise it on purpose with a server release (deploy/AGENTS.md)
     restart: unless-stopped
     # Media ports from the stack variables; the flags override tcp_port/udp_port of LIVEKIT_CONFIG below.
     command: --rtc.tcp_port ${LIVEKIT_TCP_PORT:-7881} --udp-port ${LIVEKIT_UDP_PORT:-7882}

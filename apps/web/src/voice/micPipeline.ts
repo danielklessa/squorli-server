@@ -9,7 +9,7 @@ import { AutoGain, DEFAULT_MIC_BOOST, DESKTOP_BOOST_LIMITS, MOBILE_BOOST_LIMITS,
  *
  * The gate (voice activation or push-to-talk) works locally through the gain; the published track stays
  * published and "unmuted" throughout. That way there is no signalling on every word and
- * switching back on is instant (PLAN 3.5). The mute button is separate from this (LiveKit mute).
+ * switching back on is instant (apps/web/src/voice/AGENTS.md, speech gate). The mute button is separate from this (LiveKit mute).
  */
 export type GateMode = "vad" | "ptt";
 
@@ -30,7 +30,7 @@ export async function openMic(
 ): Promise<OpenedMic> {
   const audio = (id: string | null): MediaTrackConstraints => ({
     ...(id ? { deviceId: { exact: id } } : {}),
-    // Use the browser's own processing (PLAN 7: "browser-native echo/noise suppression").
+    // Use the browser's own processing (browser-native echo/noise suppression, the answer to the risk "audio quality" in docs/PLAN.md).
     // Stereo (music channels): processing off, because echo/noise suppression downmixes to mono.
     echoCancellation: !stereo,
     noiseSuppression: !stereo,

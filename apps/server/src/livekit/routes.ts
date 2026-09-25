@@ -17,7 +17,7 @@ import { channelBlockStore } from "../voice/channelBlocks";
  * The app server decides who may enter which room and issues a
  * short-lived LiveKit token for it. Media then flows directly client <-> LiveKit.
  * Room name = channel id. Permission: member with CONNECT_VOICE and VIEW_CHANNELS.
- * Camera and screen (including screen audio as its own track, PLAN 3.6) only with STREAM_VIDEO;
+ * Camera and screen (including screen audio as its own track, docs/features/voice-video.md) only with STREAM_VIDEO;
  * LiveKit enforces this via canPublishSources, not just the client.
  * The AFK channel (server setting) gets a token without publish and subscribe grants: nobody sends or hears anything
  * in it, whatever the client does; participants still see who is there.
