@@ -70,6 +70,8 @@ export const serverSettings = pgTable("server_settings", {
   iconUpdatedAt: ts("icon_updated_at"),
   /** The server's Ed25519 seed (hex) for registration at the directory (M6); generated on first start, unchanged afterwards. */
   directoryPrivateKey: text("directory_private_key"),
+  /** HMAC key (hex) of the signed attachment links (attachmentLinks.ts); generated on first start, unchanged afterwards. */
+  linkSecret: text("link_secret"),
   /** Web radio: turn a channel's radio off once the channel has been empty for two minutes (admin area > server). */
   radioAutoStop: boolean("radio_auto_stop").notNull().default(true),
   /** AFK channel (admin area > server): absent members are moved here; no sending, no hearing, no radio in it. A deleted channel clears it. */

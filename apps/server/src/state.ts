@@ -168,6 +168,12 @@ export type StructurePart = "settings" | "categories" | "channels" | "roles" | "
  * user's visible set changed: the hub's presence hook broadcasts "members" on every connect, disconnect and AFK change,
  * and the full list on each of those would multiply the traffic.
  */
+/**
+ * Called after a structure change that may change permissions (roles, members, overwrites, channels): the WebSocket part
+ * sends every occupied voice channel's state again, whose `viewVideo` may have changed (ws/handler.ts).
+ */
+export const permissionListeners = new Set<() => void>();
+
 export async function broadcastStructure(db: Db, hub: Hub, parts: StructurePart[]) {
   visibility.invalidate();
   const has = (p: StructurePart) => parts.includes(p);
@@ -196,6 +202,7 @@ export async function broadcastStructure(db: Db, hub: Hub, parts: StructurePart[
       hub.sendToUser(userId, { type: "me", myPermissions: a?.permissions ?? 0, myChannelPermissions: visibleMasks(masks), myVoiceLock: visibility.voiceLockOf(userId) });
     }
   }
+  if (mayChangeVisibility) for (const fn of permissionListeners) fn();
 }
 
 /**

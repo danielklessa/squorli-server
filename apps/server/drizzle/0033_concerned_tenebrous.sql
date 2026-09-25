@@ -1,0 +1,1 @@
+ALTER TABLE "server_settings" ADD COLUMN "link_secret" text;

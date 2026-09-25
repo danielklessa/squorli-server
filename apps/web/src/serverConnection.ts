@@ -103,6 +103,11 @@ const READ_ACK_DELAY_MS = 800;
 /** Edits and deletions in marked channels are counted again after this pause (one request for a burst). */
 const RECOUNT_DELAY_MS = 500;
 const EMPTY: ChannelMessages = { list: [], hasMore: true, loaded: false, loading: false };
+/**
+ * Attachment links are signed and valid for at least 7 days (server: attachmentLinks.ts). A history loaded longer ago than
+ * this is loaded again, so its pictures never break: an open channel at once, the others when they are opened next.
+ */
+const HISTORY_MAX_AGE_MS = 3 * 86_400_000;
 
 export class ServerConnection {
   readonly api: ServerApi;
@@ -112,6 +117,9 @@ export class ServerConnection {
   private reconnectDelay = 1000;
   private wantConnection = false;
   private pingTimer: number | null = null;
+  /** When each channel's history was loaded from scratch (HISTORY_MAX_AGE_MS), and when that was last checked. */
+  private historyLoadedAt = new Map<string, number>();
+  private historyCheckedAt = 0;
   /** Watchdog for a connection that died without a close (sleep, network change): when the last ping went out and when anything last arrived. */
   private pingSentAt = 0;
   private lastHeard = 0;
@@ -296,7 +304,22 @@ export class ServerConnection {
   }
 
   /** Every 20 s: nothing arrived since the last ping (the server answers each with `pong`) = the connection is dead; connect again. */
+  /** At most once an hour (from the heartbeat): histories older than HISTORY_MAX_AGE_MS are loaded again or forgotten. */
+  private refreshOldHistories() {
+    const now = Date.now();
+    if (now - this.historyCheckedAt < 3_600_000) return;
+    this.historyCheckedAt = now;
+    const old = [...this.historyLoadedAt].filter(([, at]) => now - at > HISTORY_MAX_AGE_MS).map(([id]) => id);
+    if (!old.length) return;
+    const messages = { ...this.state.messages };
+    for (const id of old) { delete messages[id]; this.historyLoadedAt.delete(id); }
+    this.set({ messages });
+    const current = this.state.currentChannelId;
+    if (current && old.includes(current)) void this.loadHistory(current);
+  }
+
   private heartbeat() {
+    this.refreshOldHistories();
     const now = Date.now();
     // A timer that fired late (throttled or frozen page) proves nothing: answers may still be waiting behind it.
     if (this.pingSentAt && this.lastHeard < this.pingSentAt && now - this.pingSentAt < 60_000) {
@@ -381,8 +404,9 @@ export class ServerConnection {
         if (this.pingTimer) clearInterval(this.pingTimer);
         this.pingSentAt = 0;
         this.pingTimer = window.setInterval(() => this.heartbeat(), 20_000);
-        // After a reconnect: reload the current channel's history, messages could be missing.
-        if (wasReconnect && current) { this.set({ messages: { ...this.state.messages, [current]: EMPTY } }); void this.loadHistory(current); }
+        // After a reconnect: messages could be missing, and a long pause may have outlived the attachment links: forget every
+        // history, reload the current one (the others load when they are opened).
+        if (wasReconnect) { this.historyLoadedAt.clear(); this.set({ messages: {} }); if (current) void this.loadHistory(current); }
         else if (current) void this.loadHistory(current);
         break;
       }
@@ -616,6 +640,7 @@ export class ServerConnection {
         if (!userId || this.state.userId !== userId || this.state.connection !== "connected") return;   // signed out or another user meanwhile
         const cur = this.state.messages[c.id];
         const list = cur?.loaded ? mergeLatest(cur.list, page.messages) : page.messages;
+        if (!cur?.loaded) this.historyLoadedAt.set(c.id, Date.now());
         const messages = { ...this.state.messages, [c.id]: { list, hasMore: cur?.loaded ? cur.hasMore : page.hasMore, loaded: true, loading: cur?.loading ?? false } };
         if (c.id === this.state.currentChannelId) { this.set({ messages }); this.rememberRead(c.id, list); continue; }   // opened while we were fetching
         const result = catchUp(page.messages, this.read[c.id], userId);
@@ -639,6 +664,7 @@ export class ServerConnection {
       const page = await this.api.getMessages(channelId, before);
       const cur = this.state.messages[channelId] ?? EMPTY;
       const merged = older ? [...page.messages, ...cur.list] : mergeLatest(cur.list, page.messages);
+      if (!older && !cur.loaded) this.historyLoadedAt.set(channelId, Date.now());
       this.set({ messages: { ...this.state.messages, [channelId]: { list: merged, hasMore: older ? page.hasMore : (cur.loaded ? cur.hasMore : page.hasMore), loaded: true, loading: false } } });
       if (channelId === this.state.currentChannelId) this.rememberRead(channelId, merged);
     } catch (err) {

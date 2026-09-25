@@ -24,6 +24,7 @@ services:
       DIRECTORY_PROOF_URL: ${DIRECTORY_PROOF_URL:-}
       # Server accounts (~name): true/false fixes the admin panel's switch; empty = the admin panel decides. Always on without a directory.
       LOCAL_ACCOUNTS: ${LOCAL_ACCOUNTS:-}
+      RATE_LIMIT_FACTOR: ${RATE_LIMIT_FACTOR:-1}
     volumes: [appdata:/app/data]   # attachments, pictures of link previews
     depends_on:
       postgres: { condition: service_healthy }

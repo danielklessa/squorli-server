@@ -7,7 +7,7 @@ import { can } from "../authz";
 import type { Db } from "../db";
 import { channels, users } from "../db/schema";
 import type { Hub } from "../hub";
-import { actorOf, loadChannels, loadSettings, loadState } from "../state";
+import { actorOf, loadChannels, loadSettings, loadState, permissionListeners } from "../state";
 import type { VoicePresence } from "../voice/presence";
 import type { RadioMetadata } from "../radio/metadata";
 import type { LivekitAdmin } from "../livekit/admin";
@@ -19,6 +19,7 @@ import { holdOnJoin, refreshUserView, releaseOnLeave, stickyVerdict } from "../v
 import { voiceStateEvent } from "../voice/voiceState";
 import { voteKicks, voteOnWire } from "../voice/votekick";
 import { channelBlockStore } from "../voice/channelBlocks";
+import type { WindowCounter } from "../rateLimits";
 
 /** Game display: how often one connection may change what its member plays (each change is a broadcast to everybody). */
 const GAME_CHANGE_MS = 5000;
@@ -27,12 +28,19 @@ const GAME_CHANGE_MS = 5000;
  * Real-time channel for everything except media: state after the handshake, presence, channel state, messages, typing.
  * State reconciliation by sequence number after a reconnect: the client reloads /api/state and the history (M2).
  */
-export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presence: VoicePresence<WebSocket>, radioMeta: RadioMetadata, lk: LivekitAdmin) {
+/** Close code for a connection that sends more events than `LIMITS.wsEvents` allows (docs/features/rate-limits.md). */
+export const CLOSE_RATE_LIMITED = 4008;
+
+export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presence: VoicePresence<WebSocket>, radioMeta: RadioMetadata, lk: LivekitAdmin, wsLimit: (() => WindowCounter) | null = null) {
   // Who sits in a voice channel goes only to those who may see the channel (docs/features/channel-permissions.md).
   const unsubscribe = presence.onChange((channelId, members) => {
     hub.broadcastToChannel(channelId, voiceStateEvent(channelId, members));
   });
   app.addHook("onClose", async () => unsubscribe());
+  // Permissions changed: every occupied voice channel again, with the members' `viewVideo` as it resolves now.
+  const resend = () => { for (const channelId of new Set(presence.seated().map((s) => s.channelId))) hub.broadcastToChannel(channelId, voiceStateEvent(channelId, presence.members(channelId))); };
+  permissionListeners.add(resend);
+  app.addHook("onClose", async () => { permissionListeners.delete(resend); });
 
   // Connections whose other end vanished without a close would keep their voice presence and keep their user "present"
   // for the AFK detection for ever (liveness.ts): ping them, terminate the dead, count the silent ones as idle.
@@ -53,6 +61,7 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
     const send = (e: ServerEvent) => hub.send(socket, e);
     const helloTimeout = setTimeout(() => socket.close(4001, "hello timeout"), 10_000);
     let lastTyping = 0;
+    const events = wsLimit?.() ?? null;
     // Game display: every change goes to all members, so a connection's reports take effect at most every GAME_CHANGE_MS;
     // what arrives in between waits, and only the last one counts.
     let lastGameAt = 0;
@@ -68,6 +77,10 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
 
     socket.on("pong", () => { liveness.heard(socket, false); });
     socket.on("message", async (raw) => {
+      if (events && !events.hit("c").ok) {
+        app.log.warn({ userId, ip: req.ip }, "ws: zu viele Ereignisse, Verbindung geschlossen");
+        return socket.close(CLOSE_RATE_LIMITED, "rate limited");
+      }
       if (liveness.heard(socket, true)) hub.setStale(socket, false);
       let json: unknown;
       try { json = JSON.parse(raw.toString()); } catch { return send({ type: "error", code: "bad_message", message: "invalid json" }); }

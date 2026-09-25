@@ -685,6 +685,16 @@ const [sm5, msg2] = await api("POST", `/api/channels/${textCh.id}/messages`, { c
 check("message with attachment", sm5 === 200 && msg2.attachments?.[0]?.id === att.id);
 const dl = await api("GET", att.url, undefined, undefined, true);
 check("download attachment", dl.status === 200 && (await dl.text()) === "hallo datei" && dl.headers.get("content-type")?.startsWith("text/plain"));
+// Signed links (25 September 2026, attachmentLinks.ts): without the signature, with a changed expiry or signature -> 404.
+{
+  const u = new URL(att.url, BASE);
+  const e = u.searchParams.get("e"), s = u.searchParams.get("s");
+  const noSig = await api("GET", u.pathname, undefined, undefined, true);
+  const longer = await api("GET", `${u.pathname}?e=${Number(e) + 86400}&s=${s}`, undefined, undefined, true);
+  const forged = await api("GET", `${u.pathname}?e=${e}&s=${"A".repeat(s?.length ?? 32)}`, undefined, undefined, true);
+  check("attachment link: signed with an expiry of 7 to 8 days; unsigned, extended or forged -> 404", e && s && Number(e) * 1000 - Date.now() > 7 * 86_400_000 - 60_000
+    && Number(e) * 1000 - Date.now() <= 8 * 86_400_000 && noSig.status === 404 && longer.status === 404 && forged.status === 404, `${e} ${noSig.status} ${longer.status} ${forged.status}`);
+}
 const [sm6] = await api("POST", `/api/channels/${textCh.id}/messages`, { content: "", attachmentIds: [att.id] }, B.token);
 check("attachment cannot be reused", sm6 === 400);
 
@@ -840,6 +850,18 @@ const pVoiceSt = waitNew(wsA, (e) => e.type === "voice.state" && e.channelId ===
 wsB.send({ type: "voice.status", micMuted: true, deafened: true, screenOn: true });
 const evVoiceSt = await pVoiceSt.catch(() => null);
 check("voice.status broadcast (mute, sound, screen)", !!evVoiceSt && evVoiceSt.members.find((m) => m.userId === B.userId)?.screenOn === true);
+// VIEW_VIDEO per channel (25 September 2026): voice.state says per member whether they may watch here, through the channel's
+// overwrites, and comes again when those change, so the senders can restrict their video.
+{
+  const viewOf = (e) => e?.members.find((m) => m.userId === B.userId)?.viewVideo;
+  const pDeny = waitNew(wsA, (e) => e.type === "voice.state" && e.channelId === voiceCh.id && viewOf(e) === false);
+  const [sd] = await api("PUT", `/api/channels/${voiceCh.id}/overwrites`, { overwrites: [{ targetType: "member", targetId: B.userId, allow: 0, deny: P.VIEW_VIDEO }] }, owner.token);
+  const evDeny = await pDeny.catch(() => null);
+  const pAllow = waitNew(wsA, (e) => e.type === "voice.state" && e.channelId === voiceCh.id && viewOf(e) === true);
+  const [sa] = await api("PUT", `/api/channels/${voiceCh.id}/overwrites`, { overwrites: [] }, owner.token);
+  const evAllow = await pAllow.catch(() => null);
+  check("voice.state: viewVideo per member follows the channel's overwrites (true, denied -> false, cleared -> true)", viewOf(evVoiceSt) === true && sd === 200 && !!evDeny && sa === 200 && !!evAllow, `${viewOf(evVoiceSt)} ${sd} ${!!evDeny} ${sa} ${!!evAllow}`);
+}
 await api("PATCH", "/api/settings", { statusApi: "public" }, owner.token);
 const [, stSeat] = await api("GET", "/api/status");
 const seatB = stSeat.members?.find((m) => m.userId === B.userId);

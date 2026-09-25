@@ -47,6 +47,8 @@ import { AfkMover } from "./voice/afk";
 import { moveGrants } from "./voice/confine";
 import { VoicePresence } from "./voice/presence";
 import { registerWs } from "./ws/handler";
+import { registerRateLimits } from "./rateLimits";
+import { loadLinkSecret } from "./attachmentLinks";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** Version from the server's package.json (dev: apps/server, container: /app); the client shows it on the login screen. */
@@ -85,6 +87,8 @@ async function main() {
   // PUBLIC_DOMAIN; so a foreign origin cannot do anything on the user's behalf without holding their token.
   await app.register(cors, { origin: true });
   await app.register(websocket);
+  // Before every route: a refused request costs no database work (docs/features/rate-limits.md).
+  const wsLimit = registerRateLimits(app, config.RATE_LIMIT_FACTOR);
 
   // Directory integration (M6): server key + token; init() after bootstrap (settings), register() after app.listen.
   let directory: DirectoryClient | null = null;
@@ -138,6 +142,7 @@ async function main() {
   if (config.REQUIRE_ACCOUNT !== undefined) app.log.warn("REQUIRE_ACCOUNT ist veraltet und wirkungslos: jede Anmeldung braucht seit den Serverkonten ein Konto (Verzeichnis-Handle oder ~Serverkonto)");
   if (config.LOCAL_ACCOUNTS === false && !config.DIRECTORY_URL) app.log.warn("LOCAL_ACCOUNTS=false ohne DIRECTORY_URL wirkungslos: ohne Verzeichnis sind Serverkonten der einzige Weg hinein");
   await bootstrap(db, config, app.log);
+  await loadLinkSecret(db);
   directory = new DirectoryClient(db, config, app.log);
   await directory.init();
 
@@ -227,7 +232,7 @@ async function main() {
   await registerRadioRoutes(app, db, hub, presence, syncRadioMeta);
   await registerAttachmentRoutes(app, db, config);
   await registerLivekitRoutes(app, db, config, presence);
-  await registerWs(app, db, hub, presence, radioMeta, lk);
+  await registerWs(app, db, hub, presence, radioMeta, lk, wsLimit);
 
   // The built web client is served by the same process (one container less).
   const staticDir = config.STATIC_DIR ?? join(here, "..", "public");

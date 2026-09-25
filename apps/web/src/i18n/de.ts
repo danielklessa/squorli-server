@@ -280,6 +280,7 @@ export const de = {
   "local.auth_invalid": "Benutzername oder Passwort falsch.",
   "local.unknown_account": "Benutzername oder Passwort falsch.",
   "local.rate_limited": "Zu viele Versuche. Bitte warte eine Minute.",
+  "err.rateLimited": "Zu viele Anfragen an diesen Server. Bitte warte einen Moment.",
   "local.founder": "Der erste Eigentümer kann sein Konto auf diesem Server nicht löschen.",
   "local.bad_handle": "Dieser Benutzername ist nicht erlaubt.",
   "local.use_directory": "Dein Squorli-Konto verwaltest du beim Verzeichnis.",

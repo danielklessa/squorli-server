@@ -43,7 +43,7 @@ import { Store, activeState, homeState, type ServerConnState, type State } from 
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
 import { RadioPlayer, type RadioState } from "./voice/radioPlayer";
 import { EmbedPlayer, embedKeyOf, usePlayerWindow, type EmbedSource } from "./EmbedPlayer";
-import { videoAccessOf } from "./voice/videoAccess";
+import { channelVideoAccess, mayViewIn } from "./voice/videoAccess";
 import { videoActive } from "./voice/videoWatch";
 import { activity, watchActivity } from "./activity";
 import { resumeIdleDetection } from "./idleDetection";
@@ -350,7 +350,7 @@ export function App() {
         await client.join(channelId, url, token, settings, {
           ...(ice === "relay" ? { iceTransportPolicy: "relay" as const } : {}),
           audio: { bitrate: ch?.audioBitrate ?? 64, stereo: ch?.audioStereo ?? false },
-          ...(srv ? { video: { access: videoAccessOf(srv), mayView: hasPermission(srv.myPermissions, Permission.VIEW_VIDEO) }, peerKeys: peerKeysOf(srv.members) } : {}),
+          ...(srv ? { video: { access: channelVideoAccess(srv, conn?.state.voice[channelId]), mayView: mayViewIn(srv, channelId) }, peerKeys: peerKeysOf(srv.members) } : {}),
           afk,
         });
       } catch (err) {
@@ -447,10 +447,12 @@ export function App() {
   // Permission VIEW_VIDEO: roles or members changed -> the running connection restricts its camera/screen to the members
   // who may watch (enforced by LiveKit), and stops receiving others' feeds when we lost the permission ourselves.
   const voiceState = voiceServer?.server ?? null;
+  // Who sits in my voice channel, each with `viewVideo` as the server resolved it for this channel (videoAccess.ts).
+  const voiceSeated = voice.channelId ? voiceServer?.voice[voice.channelId] : undefined;
   const afkReturnChannel = afkReturn && voice.afkRoom ? state.servers[afkReturn.host]?.server?.channels.find((c) => c.id === afkReturn.channelId) ?? null : null;
   useEffect(() => {
-    if (voiceState) client.setVideoAccess(videoAccessOf(voiceState), hasPermission(voiceState.myPermissions, Permission.VIEW_VIDEO));
-  }, [client, voiceState?.roles, voiceState?.members, voiceState?.settings.ownerId, voiceState?.myPermissions]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (voiceState) client.setVideoAccess(channelVideoAccess(voiceState, voiceSeated), mayViewIn(voiceState, voice.channelId));
+  }, [client, voiceState?.roles, voiceState?.members, voiceState?.settings.ownerId, voiceState?.myPermissions, voiceState?.myChannelPermissions, voiceSeated, voice.channelId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Per-person playback volume is stored by public key; the voice client only sees LiveKit identities (user ids of this server).
   useEffect(() => { if (voiceState) client.setPeerKeys(peerKeysOf(voiceState.members)); }, [client, voiceState?.members]); // eslint-disable-line react-hooks/exhaustive-deps

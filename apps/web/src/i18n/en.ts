@@ -279,6 +279,7 @@ export const en: Messages = {
   "local.auth_invalid": "Wrong username or password.",
   "local.unknown_account": "Wrong username or password.",
   "local.rate_limited": "Too many attempts. Please wait a minute.",
+  "err.rateLimited": "Too many requests to this server. Please wait a moment.",
   "local.founder": "The first owner cannot delete their account on this server.",
   "local.bad_handle": "This username is not allowed.",
   "local.use_directory": "You manage your Squorli account at the directory.",

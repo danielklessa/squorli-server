@@ -590,7 +590,12 @@ export const RtcTokenResponse = z.object({
  * `voice.join` and `voice.status`, so everyone sees it, not only the people in the same LiveKit room; defaults for
  * servers from before it (clients then fall back to what LiveKit shows them).
  */
-export const VoiceMember = z.object({ userId: Uuid, displayName: z.string(), micMuted: z.boolean().default(false), deafened: z.boolean().default(false), cameraOn: z.boolean().default(false), screenOn: z.boolean().default(false) });
+/**
+ * `viewVideo` (25 September 2026, docs/features/channel-permissions.md): whether the member may watch camera and screen in
+ * this channel (VIEW_VIDEO resolved through the channel's overwrites by the server). Senders restrict their video to those
+ * members. Missing = a server from before, the client falls back to the server-wide roles. No version bump.
+ */
+export const VoiceMember = z.object({ userId: Uuid, displayName: z.string(), micMuted: z.boolean().default(false), deafened: z.boolean().default(false), cameraOn: z.boolean().default(false), screenOn: z.boolean().default(false), viewVideo: z.boolean().optional() });
 
 export const ClientHello = z.object({ type: z.literal("hello"), protocolVersion: z.number().int(), sessionToken: z.string() });
 export const ClientPing = z.object({ type: z.literal("ping"), t: z.number() });

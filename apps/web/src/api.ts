@@ -229,6 +229,7 @@ export async function explainLoginError(err: unknown, api: ServerApi, here: stri
       return t("err.signatureInvalid", { here });
     }
     case "challenge_invalid": return t("err.challengeInvalid");
+    case "rate_limited": return t("err.rateLimited");
     case "invite_required": return t("err.inviteRequired");
     case "invite_invalid": return t("err.inviteInvalid");
     case "account_required": return t("err.accountRequired");

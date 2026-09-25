@@ -1,4 +1,4 @@
-import type { ServerEvent, VoiceMember } from "@squorli/protocol";
+import { Permission, hasPermission, type ServerEvent, type VoiceMember } from "@squorli/protocol";
 import { visibility } from "../visibility";
 import { isVoiceModerator, voteKickOffered, voteKicks } from "./votekick";
 
@@ -18,5 +18,7 @@ export function voiceStateEvent(channelId: string, members: VoiceMember[]): Serv
     running: voteKicks.running(channelId) !== undefined,
     moderator: (userId) => isVoiceModerator(visibility.masksOf(userId).get(channelId) ?? 0, visibility.actorOf(userId)?.permissions ?? 0),
   });
-  return { type: "voice.state", channelId, members, voteKick };
+  // VIEW_VIDEO in this channel, through its overwrites: the senders restrict their camera and screen to these members.
+  const withView = members.map((m) => ({ ...m, viewVideo: hasPermission(visibility.resolvedMask(m.userId, channelId), Permission.VIEW_VIDEO) }));
+  return { type: "voice.state", channelId, members: withView, voteKick };
 }

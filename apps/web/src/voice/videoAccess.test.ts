@@ -1,6 +1,6 @@
 import { Permission, type ServerState } from "@squorli/protocol";
 import { describe, expect, it } from "vitest";
-import { subscriptionPermissions, videoAccessOf } from "./videoAccess";
+import { channelVideoAccess, mayViewIn, subscriptionPermissions, videoAccessOf } from "./videoAccess";
 
 const GUEST = "00000000-0000-4000-8000-000000000001";
 const MEMBER = "00000000-0000-4000-8000-000000000002";
@@ -61,5 +61,26 @@ describe("subscriptionPermissions", () => {
   it("allows nothing, not everything, before the microphone is published", () => {
     const r = subscriptionPermissions({ open: false, viewers: [], audioOnly: ["b"] }, []);
     expect(r.list).toEqual([{ participantIdentity: "b", allowAll: false, allowedTrackSids: [] }]);
+  });
+});
+
+describe("channelVideoAccess", () => {
+  const seat = (userId: string, viewVideo?: boolean) => ({ userId, displayName: userId, micMuted: false, deafened: false, cameraOn: false, screenOn: false, ...(viewVideo === undefined ? {} : { viewVideo }) });
+  it("follows the server's per-channel answer, never open, even where the default role may watch server-wide", () => {
+    const a = channelVideoAccess(server(BASE | Permission.VIEW_VIDEO), [seat("c-member", true), seat("d-guest", false)]);
+    expect(a).toEqual({ open: false, viewers: ["c-member"], audioOnly: ["d-guest"] });
+  });
+  it("falls back to the server-wide rule for a server from before and while nobody is listed", () => {
+    expect(channelVideoAccess(server(BASE), [seat("c-member", true), seat("d-guest")])).toEqual(videoAccessOf(server(BASE)));
+    expect(channelVideoAccess(server(BASE), [])).toEqual(videoAccessOf(server(BASE)));
+    expect(channelVideoAccess(server(BASE), undefined)).toEqual(videoAccessOf(server(BASE)));
+  });
+});
+
+describe("mayViewIn", () => {
+  it("takes my mask in the channel, else the server-wide one", () => {
+    expect(mayViewIn({ myPermissions: Permission.VIEW_VIDEO, myChannelPermissions: { ch: BASE } }, "ch")).toBe(false);
+    expect(mayViewIn({ myPermissions: BASE, myChannelPermissions: { ch: BASE | Permission.VIEW_VIDEO } }, "ch")).toBe(true);
+    expect(mayViewIn({ myPermissions: Permission.VIEW_VIDEO }, "ch")).toBe(true);
   });
 });

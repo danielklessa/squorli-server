@@ -12,11 +12,12 @@ import type { Db } from "../db";
 import { attachments } from "../db/schema";
 import { visibility } from "../visibility";
 import { attachmentUrl } from "./messages";
+import { verifyAttachment } from "../attachmentLinks";
 
 /**
  * Attachments: upload the file first (it gets an id), then attach it to a message via attachmentIds.
- * Storage: DATA_DIR/attachments/<id>, metadata in the DB. Download is only possible via the unguessable id
- * and needs no token so that <img src> works (like Discord CDN links). Orphaned uploads
+ * Storage: DATA_DIR/attachments/<id>, metadata in the DB. Download needs no token so that <img src> works, but a signed,
+ * expiring link (attachmentLinks.ts, since 25 September 2026; like Discord's CDN links since 2024). Orphaned uploads
  * (never attached to a message) are deleted after an hour.
  */
 export async function registerAttachmentRoutes(app: FastifyInstance, db: Db, config: Config) {
@@ -51,7 +52,9 @@ export async function registerAttachmentRoutes(app: FastifyInstance, db: Db, con
     return out;
   });
 
-  app.get<{ Params: { id: string; name: string } }>("/api/attachments/:id/:name", async (req, reply) => {
+  app.get<{ Params: { id: string; name: string }; Querystring: { e?: string; s?: string } }>("/api/attachments/:id/:name", async (req, reply) => {
+    // An unsigned, foreign or expired link looks like a missing file: nothing tells whether the id exists.
+    if (!verifyAttachment(req.params.id, req.query.e, req.query.s)) return reply.code(404).send({ error: "not_found" });
     const [row] = await db.select().from(attachments).where(eq(attachments.id, req.params.id)).limit(1);
     const path = row ? join(dir, row.id) : null;
     if (!row || !path || !existsSync(path)) return reply.code(404).send({ error: "not_found" });

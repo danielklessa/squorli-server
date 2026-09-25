@@ -1,4 +1,5 @@
 import { CreateMessageRequest, Permission, RemovePreviewRequest, UpdateMessageRequest, type Attachment, type Message, type MessagePage } from "@squorli/protocol";
+import { signAttachment } from "../attachmentLinks";
 import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { requireMember } from "../auth/session";
@@ -11,8 +12,9 @@ import { visiblePreviews, type LinkPreviews } from "../previews/service";
 const PAGE = 50;
 const Params = { type: "object", properties: { id: { type: "string", format: "uuid" } }, required: ["id"] } as const;
 
+/** Signed and expiring (attachmentLinks.ts): whoever sees the message gets a link that works for at least a week. */
 export function attachmentUrl(a: { id: string; name: string }): string {
-  return `/api/attachments/${a.id}/${encodeURIComponent(a.name)}`;
+  return `/api/attachments/${a.id}/${encodeURIComponent(a.name)}?${signAttachment(a.id)}`;
 }
 
 /** `withPreviews` false = link previews are turned off: the field is left out, which is what tells clients so. */

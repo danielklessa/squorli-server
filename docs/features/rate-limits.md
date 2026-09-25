@@ -1,0 +1,31 @@
+# Feature notes: rate limits
+
+Part of the project description (entry point: root `AGENTS.md`, section 0). Dated entries: what was built, the user's wishes and decisions, consequences, and what was and was not checked. Whoever changes a limit or adds a public route updates this file in the same step.
+
+Code: `apps/server/src/rateLimits.ts` (the limits, the `onRequest` hook, `WindowCounter`), `rateLimits.test.ts`, the WebSocket part in `apps/server/src/ws/handler.ts` (`CLOSE_RATE_LIMITED`), `RATE_LIMIT_FACTOR` in `config.ts`; the client's text `err.rateLimited` in `apps/web/src/api.ts` (sign-in) and `ChatView.tsx` (sending).
+
+**Rate limits on every public path (25 September 2026; `docs/PLAN.md` priority 1, the user: Squorli is public and used by strangers, so security first):** until then only the server accounts' routes (`auth/local.ts`), link previews and slowmode had limits. Most urgent was `/api/auth/verify`: it accepts any freshly generated key with a valid signature, writes a `users` row and asks the directory about it, without any limit.
+
+- *One hook before every route:* `registerRateLimits()` runs as Fastify's `onRequest` hook for paths under `/api/`, registered right after the WebSocket plugin, so a refused request costs no database work. Fixed windows (`WindowCounter`: one counter per key, O(1), swept every minute). Keys: the client IP (`req.ip`, which `TRUSTED_PROXIES` makes the real client behind a proxy) and the session token, hashed (SHA-256, never kept as is); rules by token skip requests without one (the route refuses those anyway, the IP rules still count them).
+- *Refusal:* 429 `{ error: "rate_limited", retryAfter }` with a `Retry-After` header, a warning in the log with rule, IP and path.
+- *The limits at factor 1* (Claude's choice, confirmed by the user on 25 September 2026; generous for a person, tight for a script; many people can share one IP: a household, a company, carrier NAT):
+
+| Rule | Key | Limit |
+|---|---|---|
+| everything under `/api/` | IP | 1200 / minute |
+| `POST /api/auth/challenge` + `/api/auth/verify` | IP | 60 / minute (30 sign-ins; invites are redeemed in verify, so guessing codes is covered too) |
+| opening `/api/ws` | IP | 60 / minute |
+| `GET /api/invites/:code` (public preview) | IP | 30 / minute |
+| `GET /api/status` | IP | 60 / minute |
+| `POST /api/directory/notify` and `/leave` (no proof; each makes the server ask the directory) | IP | 120 / minute |
+| every `POST`/`PUT`/`PATCH`/`DELETE` | session | 180 / minute |
+| `POST /api/channels/:id/messages` | session | 15 / 10 seconds (over all channels; slowmode stays per channel) |
+| `POST /api/attachments` | session | 30 / minute |
+| events on one WebSocket (before and after `hello`) | connection | 60 / 10 seconds, then close **4008** `rate limited` |
+
+- *WebSocket:* the close code only, no `error` event: the protocol's `ServerEvent` error codes have no `rate_limited`, and an older client would fail to parse a new one. The client reconnects with its usual backoff (a code it does not know).
+- *`RATE_LIMIT_FACTOR`* (default 1) scales every limit; 0 switches them off (logged as a warning). For load tests and the smoke test only; passed through `deploy/compose.yml` and `deploy/portainer.yml`, commented in `.env.example`.
+- *Kept as they were:* the server accounts' own limits (register 20/min, wrong password 10/min per IP and handle, parameters 30/min), slowmode, the vote kick's cooldown, the link previews' limits.
+- *Client:* a refused sign-in says "Zu viele Anfragen an diesen Server. Bitte warte einen Moment." instead of the raw error, as does a refused message in the chat. Needs a desktop app release for that text; without it older clients show the technical error, nothing breaks.
+- *In memory, per process:* a restart resets every counter (like the directory's). One node only, as everything else in memory here.
+- *Checked:* root typecheck and tests (server 113 with 6 new: the counter, the rules' paths and scaling, 429 with `Retry-After` for a sign-in flood, messages counted per token and not per IP, factor 0 and paths outside `/api`); `pnpm smoke` against a separate instance: at factor 1 it failed with 429 on `tokenWrite` (the script sets a whole server up as the owner within seconds, more than 180 writes a minute), green with `RATE_LIMIT_FACTOR=5` and no limit reached, so the smoke recipe (root `AGENTS.md`) now sets it; against the same instance 400 WebSocket messages in a row were answered 300 times (60 × 5) and then closed with 4008. *Not checked:* a real proxy in front (the IP as the key depends on `TRUSTED_PROXIES` being right: with a wrong value every client shares the proxy's address and the IP limits hit everybody at once), many real users behind one address, the texts in the running client.

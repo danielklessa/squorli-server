@@ -116,6 +116,7 @@ export function ChatView({ channel, messages, members, myUserId, myPermissions, 
     } catch (e) {
       const retry = e instanceof ApiError && e.code === "slowmode" && typeof e.body.retryAfter === "number" ? e.body.retryAfter : null;
       if (retry !== null) { setLastSentAt(Date.now() - Math.max(0, slowmode - retry) * 1000); setNow(Date.now()); }
+      else if (e instanceof ApiError && e.code === "rate_limited") setErr(t("err.rateLimited"));
       else setErr(String(e));
     } finally { setSending(false); inputRef.current?.focus(); }   // keep writing right away, also after a click on "Senden"
   }

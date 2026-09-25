@@ -58,6 +58,8 @@ const Env = z.object({
    * description and one picture) and keeps the pictures under DATA_DIR/previews. false = no previews and no such requests.
    */
   LINK_PREVIEWS: z.enum(["true", "false", "1", "0"]).transform((v) => v === "true" || v === "1").default("true"),
+  /** Scales every rate limit (rateLimits.ts, docs/features/rate-limits.md): 2 = twice as many requests, 0 = no limits (load tests only). */
+  RATE_LIMIT_FACTOR: z.coerce.number().min(0).default(1),
   /**
    * For tests only: one origin (e.g. http://127.0.0.1:3198) the preview fetcher may reach although it is not public, so the
    * smoke test can play the linked website. Never set it on a real server: it opens that address to every member.
