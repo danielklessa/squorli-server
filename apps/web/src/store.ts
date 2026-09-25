@@ -19,6 +19,8 @@ import { loadVoiceSettings, sameSoundSettings, saveVoiceSettings, subscribeVoice
 import { normalizeSoundSettings } from "./voice/sounds";
 import { platform } from "./platform";
 import type { PlatformHome } from "./platform/types";
+import { connectedHost } from "./serverHost";
+
 
 export type { ChannelMessages, Connection, RawLogEntry, ServerConnState } from "./serverConnection";
 
@@ -256,12 +258,24 @@ export class Store {
     forgetServerAccount(host);
     this.set({ serverAccounts: handlesOf(loadServerAccounts()) });
   }
-  /** The domain a sign-in on `conn` signs: the address bar's for the own server, else the server's PUBLIC_DOMAIN. */
+  /**
+   * The domain a sign-in on `conn` signs: the address bar's for the own server, else the host this client actually connects
+   * to (security review of 25 September 2026: a server's own word about its domain is never signed, or a malicious server
+   * could name another one and pass the signature on, a login relay; docs/features/directory.md). The server's
+   * PUBLIC_DOMAIN must be that same host; a server that says otherwise gets no sign-in at all.
+   */
   private async signDomainOf(conn: ServerConnection): Promise<string> {
     if (conn.state.host === this.homeHost) return this.signDomain;
-    const domain = conn.state.serverDomain ?? (await conn.refreshHealth())?.domain ?? null;
-    if (!domain) throw new Error(t("err.serverUnreachableShort", { base: conn.state.base }));
-    return domain.toLowerCase();
+    const reported = conn.state.serverDomain ?? (await conn.refreshHealth())?.domain ?? null;
+    if (!reported) throw new Error(t("err.serverUnreachableShort", { base: conn.state.base }));
+    const actual = connectedHost(conn.state.base);
+    if (reported.toLowerCase() !== actual) {
+      const msg = t("err.foreignDomainMismatch", { base: conn.state.base, domain: reported });
+      conn.state = { ...conn.state, connection: "error", error: msg };
+      this.publish(conn);
+      throw new Error(msg);
+    }
+    return actual;
   }
   private publish(conn: ServerConnection) { this.set({ servers: { ...this.state.servers, [conn.state.host]: conn.state } }); }
   private failed(conn: ServerConnection, err: unknown): never {
@@ -441,7 +455,7 @@ export class Store {
     if (!health) { this.markUnreachable(conn); return; }
     const token = this.storedToken(conn.state.host);
     if (token && await conn.resume(token)) return;
-    try { await conn.login(health.domain.toLowerCase(), invite); } catch { /* the message is kept in the server's state */ }
+    try { await conn.login(await this.signDomainOf(conn), invite); } catch { /* the message is kept in the server's state */ }
   }
   /** Close a foreign server and remove it from the client's rail (the session stays stored). */
   closeServer(host: string) {
@@ -1038,7 +1052,8 @@ export class Store {
   async setServerDisplayName(displayName: string | null): Promise<void> {
     const conn = this.active; const acc = this.state.directoryAccount;
     if (!conn) return;
-    const domain = conn.state.serverDomain;
+    // Only a domain this client verified (signDomainOf): the per-server name belongs to the host we are really connected to.
+    const domain = conn.state.host === this.homeHost ? conn.state.serverDomain : conn.state.serverDomain === connectedHost(conn.state.base) ? conn.state.serverDomain : null;
     const global = acc?.displayName ?? null;
     if (acc && domain) await this.setDirectoryName(domain, displayName === global ? null : displayName);
     await conn.updateDisplayName(displayName ?? global);

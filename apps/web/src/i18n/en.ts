@@ -1063,6 +1063,7 @@ export const en: Messages = {
   "err.serverUnreachableCors": "The server {base} is unreachable or does not allow access from other clients (older Squorli server without CORS).",
   "err.serverUnreachable": "The server is unreachable.",
   "err.serverUnreachableShort": "The server {base} is unreachable or does not allow access from other clients.",
+  "err.foreignDomainMismatch": "Sign-in refused: the server at {base} claims to be \"{domain}\". A server that names another address than the one it is reached at gets no sign-in, for security (its PUBLIC_DOMAIN must match the address).",
   "err.domainMismatch": "Sign-in rejected: the server expects the domain \"{expected}\" (PUBLIC_DOMAIN), this page runs at \"{here}\". Both must match.",
   "err.signatureInvalid": "Sign-in rejected: invalid signature (domain \"{here}\"). Discard the identity and try again.",
   "err.challengeInvalid": "Sign-in rejected: challenge expired or the server restarted. Please try again.",

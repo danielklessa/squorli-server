@@ -1064,6 +1064,7 @@ export const de = {
   "err.serverUnreachableCors": "Der Server {base} ist nicht erreichbar oder erlaubt keinen Zugriff aus anderen Clients (älterer Squorli-Server ohne CORS).",
   "err.serverUnreachable": "Der Server ist nicht erreichbar.",
   "err.serverUnreachableShort": "Der Server {base} ist nicht erreichbar oder erlaubt keinen Zugriff aus anderen Clients.",
+  "err.foreignDomainMismatch": "Anmeldung verweigert: Der Server unter {base} gibt sich als \"{domain}\" aus. Ein Server, der eine andere Adresse nennt als die, unter der er erreichbar ist, bekommt aus Sicherheitsgründen keine Anmeldung (sein PUBLIC_DOMAIN muss zur Adresse passen).",
   "err.domainMismatch": "Anmeldung abgelehnt: Der Server erwartet die Domain \"{expected}\" (PUBLIC_DOMAIN), diese Seite läuft unter \"{here}\". Beides muss übereinstimmen.",
   "err.signatureInvalid": "Anmeldung abgelehnt: Signatur ungültig (Domain \"{here}\"). Identität verwerfen und erneut versuchen.",
   "err.challengeInvalid": "Anmeldung abgelehnt: Challenge abgelaufen oder Server neu gestartet. Bitte erneut versuchen.",

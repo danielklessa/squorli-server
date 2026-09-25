@@ -1,5 +1,7 @@
 # Verified state
 
+- **Security review group A (25 September 2026):** root typecheck, root tests (web 407 with the `connectedHost` test), `pnpm smoke` against a separate instance green with a new check (an SVG attachment: download, CSP with `sandbox`). Not checked: a real relay attempt between two servers, the refusal message on screen.
+
 - **Desktop keys in `safeStorage` (25 September 2026):** root typecheck, root tests (web 406 with 4 new in `identitySecrets.test.ts`; once a WebCrypto test failed with "Cipher job failed" during the parallel root run, three runs of the web tests afterwards were green, looks like a flake under load); the unpackaged app driven twice over the DevTools protocol with its own user data folder: new key in the store only, a key in localStorage moved at the next start and removed there, foreign keys refused, no plain text in `secrets.json`. Not checked: a packaged app, Linux.
 
 - **Radio playlists against DNS rebinding (25 September 2026):** root typecheck and tests, `pnpm smoke` green (internal playlist addresses refused as before); live: SomaFM `.pls` and `.m3u` resolve to their streams, `127.0.0.1` and `localhost` give `forbidden_host`.

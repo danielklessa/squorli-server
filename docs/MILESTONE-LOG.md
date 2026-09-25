@@ -4,6 +4,7 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 | Date | Change |
 |---|---|
+| 2026-09-25 | Security review, group A: a foreign server's sign-in signs the host actually connected to and is refused when the server names another domain (login relay, critical); attachments inline only for safe types, everything else a download, a sandboxing CSP on every answer (SVG script on the server's origin). Server image and desktop app release. The review's other findings: `docs/PLAN.md` 2.1. |
 | 2026-09-25 | Desktop app: the identity key and the server accounts' keys and tokens encrypted with `safeStorage` (`apps/desktop/src/main/secrets.ts`, `DesktopBridge.secrets`, `Platform.secretStore`, `setSecretStore` in `identity.ts`), moved over from localStorage at the first read. Desktop app release; no downgrade afterwards. |
 | 2026-09-25 | Radio playlists fetched through `safeGet` of `packages/link-preview` (the connected address is checked, also at redirects): closes the DNS rebinding gap of `docs/features/radio.md`. Server image only. |
 | 2026-09-25 | `VIEW_VIDEO` per channel: the server resolves it per seated member through the overwrites (`VoiceMember.viewVideo`, optional, no version bump) and resends every occupied `voice.state` after permission changes; senders restrict their camera and screen by it (`channelVideoAccess`, `mayViewIn`). Closes the known gap of `docs/features/channel-permissions.md`. Server image and desktop app release. |

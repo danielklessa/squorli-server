@@ -685,6 +685,16 @@ const [sm5, msg2] = await api("POST", `/api/channels/${textCh.id}/messages`, { c
 check("message with attachment", sm5 === 200 && msg2.attachments?.[0]?.id === att.id);
 const dl = await api("GET", att.url, undefined, undefined, true);
 check("download attachment", dl.status === 200 && (await dl.text()) === "hallo datei" && dl.headers.get("content-type")?.startsWith("text/plain"));
+// An SVG (security review, 25 September 2026): never shown on this origin, always a download inside a sandbox.
+{
+  const fdSvg = new FormData();
+  fdSvg.append("file", new Blob(['<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'], { type: "image/svg+xml" }), "x.svg");
+  const [, attSvg] = await api("POST", "/api/attachments", fdSvg, B.token);
+  const dlSvg = await api("GET", attSvg.url, undefined, undefined, true);
+  const csp = dlSvg.headers.get("content-security-policy") ?? "";
+  check("svg attachment: served as a download with a sandboxing CSP", dlSvg.status === 200 && dlSvg.headers.get("content-disposition")?.startsWith("attachment") && csp.includes("sandbox") && csp.includes("default-src 'none'"), `${dlSvg.status} ${dlSvg.headers.get("content-disposition")} ${csp}`);
+  await dlSvg.body?.cancel();
+}
 // Signed links (25 September 2026, attachmentLinks.ts): without the signature, with a changed expiry or signature -> 404.
 {
   const u = new URL(att.url, BASE);

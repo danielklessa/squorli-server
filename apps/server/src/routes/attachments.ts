@@ -20,6 +20,9 @@ import { verifyAttachment } from "../attachmentLinks";
  * expiring link (attachmentLinks.ts, since 25 September 2026; like Discord's CDN links since 2024). Orphaned uploads
  * (never attached to a message) are deleted after an hour.
  */
+/** Types a browser may show in place: raster pictures, video, audio, plain text, PDF. */
+const INLINE_TYPES = /^(image\/(png|jpeg|gif|webp|avif)|video\/[a-z0-9.+-]+|audio\/[a-z0-9.+-]+|text\/plain|application\/pdf)$/;
+
 export async function registerAttachmentRoutes(app: FastifyInstance, db: Db, config: Config) {
   const dir = join(config.DATA_DIR, "attachments");
   await mkdir(dir, { recursive: true });
@@ -58,7 +61,12 @@ export async function registerAttachmentRoutes(app: FastifyInstance, db: Db, con
     const [row] = await db.select().from(attachments).where(eq(attachments.id, req.params.id)).limit(1);
     const path = row ? join(dir, row.id) : null;
     if (!row || !path || !existsSync(path)) return reply.code(404).send({ error: "not_found" });
-    const inline = /^(image\/|video\/|audio\/|text\/plain|application\/pdf)/.test(row.mimeType);
+    // The type is what the uploader's browser said. Shown in the browser only where that is harmless (security review of
+    // 25 September 2026: an SVG opened on this origin ran its script and could read the key in localStorage); anything
+    // else, SVG and HTML included, is a download. The sandbox keeps a document opened here from running script at all;
+    // Chrome's PDF viewer does not work under it and runs its own script apart from this origin anyway.
+    const inline = INLINE_TYPES.test(row.mimeType);
+    if (row.mimeType !== "application/pdf") reply.header("content-security-policy", "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox");
     return reply
       .type(row.mimeType)
       .header("content-length", row.size)
