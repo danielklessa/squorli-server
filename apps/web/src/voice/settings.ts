@@ -24,7 +24,7 @@ export type VoiceSettings = {
   vadHangoverMs: number;
   inputDeviceId: string | null;
   /**
-   * Microphone boost (micBoost.ts): automatic by default. Per device like the device selection and NOT part of the directory
+   * Microphone boost (micBoost.ts): off by default (automatic until 25 September 2026). Per device like the device selection and NOT part of the directory
    * account: how quiet a microphone is belongs to this computer, not to the person.
    */
   micBoost: MicBoostSettings;

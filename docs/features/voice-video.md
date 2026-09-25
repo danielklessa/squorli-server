@@ -156,3 +156,5 @@ What follows from it:
 - *Fix:* `VoiceClient.startAudio()` applies `applyAudioMuted()` in the same tick as LiveKit's synchronous unmute; a listener on `AudioStreamAcquired` does the same in a microtask after LiveKit's own listener. Test in `videoAudio.test.ts`.
 - *Open:* the user's report itself (desktop app, watching a share, voice and screen audio on different devices; the voices get quieter) is not explained by this and not reproduced yet: the routing in `applyScreenSink()` looks right. Next with a second person: the debug view's "Bildschirm-Ton Ausgabe" (device, tracks, error) and the Windows volume mixer while it happens.
 - *Checked:* see `docs/VERIFIED-STATE.md` of the same date.
+
+**Microphone boost off by default (25 September 2026, user's decision):** "Leises Mikrofon automatisch anheben" is no longer ticked for a new device (`DEFAULT_MIC_BOOST.auto = false` in `micBoost.ts`). A device that has stored its settings keeps what it stored; only devices without a stored choice (and broken values) start with it off.

@@ -38,7 +38,8 @@ export type MicBoostSettings = {
   /** Gain by hand, 1..MIC_BOOST_MAX (1 = off). */
   gain: number;
 };
-export const DEFAULT_MIC_BOOST: MicBoostSettings = { auto: true, gain: 1 };
+/** Off by default (user's decision, 25 September 2026): the automatic boost is something a user switches on. */
+export const DEFAULT_MIC_BOOST: MicBoostSettings = { auto: false, gain: 1 };
 
 export const clampBoost = (g: unknown, max = MIC_BOOST_MAX): number => (typeof g === "number" && Number.isFinite(g) ? Math.min(max, Math.max(1, g)) : 1);
 /** Stored settings: clamped to the widest limits there are; the pipeline clamps to those of the device it runs on. */

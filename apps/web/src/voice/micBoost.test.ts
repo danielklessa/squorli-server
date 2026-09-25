@@ -82,10 +82,10 @@ describe("softClip", () => {
 });
 
 describe("normalizeMicBoost", () => {
-  it("defaults to automatic and repairs rubbish", () => {
-    expect(normalizeMicBoost(undefined)).toEqual({ auto: true, gain: 1 });
+  it("defaults to off and repairs rubbish", () => {
+    expect(normalizeMicBoost(undefined)).toEqual({ auto: false, gain: 1 });
     expect(normalizeMicBoost({ auto: false, gain: 3 })).toEqual({ auto: false, gain: 3 });
     // Stored settings keep what a phone may set; the pipeline clamps to the limits of the device it runs on.
-    expect(normalizeMicBoost({ auto: "yes", gain: 400 })).toEqual({ auto: true, gain: MOBILE_BOOST_LIMITS.max });
+    expect(normalizeMicBoost({ auto: "yes", gain: 400 })).toEqual({ auto: false, gain: MOBILE_BOOST_LIMITS.max });
   });
 });
