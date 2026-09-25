@@ -9,6 +9,11 @@
  *             HKDF-SHA256(master, info "community-backup-auth")-> auth key (hex, sent to the service)
  * Whoever has the service's database still has to guess the password through PBKDF2; whoever intercepts the auth key
  * only gets the ciphertext.
+ *
+ * `context` (server accounts since 25 September 2026, security review): both infos end in "\n<context>", the host the client
+ * connects to. Without it a server account's auth key equalled the directory's for the same password and salt, so a
+ * malicious chat server could serve the directory's parameters for a handle and get the directory's auth key from a user
+ * who reuses the password. `params.bound` records it; the client supplies the host itself, never the server.
  */
 import type { BackupParams } from "./directory";
 
@@ -32,20 +37,21 @@ export const randomHex = (bytes: number): string => bytesToHex(globalThis.crypto
 export type BackupKeys = { encKey: CryptoKey; authKey: string };
 
 /** Derive both keys from password and parameters (deliberately takes a moment because of PBKDF2). */
-export async function deriveBackupKeys(password: string, saltHex: string, iterations: number): Promise<BackupKeys> {
+export async function deriveBackupKeys(password: string, saltHex: string, iterations: number, context?: string): Promise<BackupKeys> {
   const s = subtle();
   const base = await s.importKey("raw", utf8(password.normalize("NFKC")), "PBKDF2", false, ["deriveBits"]);
   const master = await s.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: hexToBytes(saltHex), iterations }, base, 256);
   const hk = await s.importKey("raw", master, "HKDF", false, ["deriveBits"]);
-  const hkdf = (info: string) => s.deriveBits({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: utf8(info) }, hk, 256);
+  const suffix = context === undefined ? "" : `\n${context}`;
+  const hkdf = (info: string) => s.deriveBits({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: utf8(info + suffix) }, hk, 256);
   const encKey = await s.importKey("raw", await hkdf("community-backup-enc"), "AES-GCM", false, ["encrypt", "decrypt"]);
   return { encKey, authKey: bytesToHex(new Uint8Array(await hkdf("community-backup-auth"))) };
 }
 
 /** New backup: fresh salt and IV, encrypt the seed with AES-GCM. */
-export async function createBackup(password: string, privateKeyHex: string, iterations = BACKUP_ITERATIONS): Promise<{ params: BackupParams; ciphertext: string; authKey: string }> {
-  const params: BackupParams = { kdf: "pbkdf2-sha256", iterations, salt: randomHex(16), iv: randomHex(12) };
-  const keys = await deriveBackupKeys(password, params.salt, params.iterations);
+export async function createBackup(password: string, privateKeyHex: string, iterations = BACKUP_ITERATIONS, context?: string): Promise<{ params: BackupParams; ciphertext: string; authKey: string }> {
+  const params: BackupParams = { kdf: "pbkdf2-sha256", iterations, salt: randomHex(16), iv: randomHex(12), ...(context === undefined ? {} : { bound: true as const }) };
+  const keys = await deriveBackupKeys(password, params.salt, params.iterations, context);
   const ct = await subtle().encrypt({ name: "AES-GCM", iv: hexToBytes(params.iv) }, keys.encKey, hexToBytes(privateKeyHex));
   return { params, ciphertext: bytesToBase64(new Uint8Array(ct)), authKey: keys.authKey };
 }

@@ -30,3 +30,24 @@ describe("backup (M6b)", () => {
     expect(BackupUploadRequest.safeParse({ ...req, params: { ...b.params, iterations: 10 } }).success).toBe(false);
   });
 });
+
+describe("backups bound to a host (server accounts, 25 September 2026)", () => {
+  const seed = "11".repeat(32);
+  it("give another auth key than the unbound derivation, and open only with the same host", async () => {
+    const b = await createBackup("richtig-lang", seed, 100_000, "chat.example.org");
+    expect(b.params.bound).toBe(true);
+    const unbound = await deriveBackupKeys("richtig-lang", b.params.salt, b.params.iterations);
+    const other = await deriveBackupKeys("richtig-lang", b.params.salt, b.params.iterations, "evil.example");
+    const same = await deriveBackupKeys("richtig-lang", b.params.salt, b.params.iterations, "chat.example.org");
+    expect(unbound.authKey).not.toBe(b.authKey);
+    expect(other.authKey).not.toBe(b.authKey);
+    expect(same.authKey).toBe(b.authKey);
+    expect(await openBackup(same, b.params.iv, b.ciphertext)).toBe(seed);
+    await expect(openBackup(unbound, b.params.iv, b.ciphertext)).rejects.toBeTruthy();
+  });
+  it("leave the directory's backups as they were (no context, no flag)", async () => {
+    const b = await createBackup("richtig-lang", seed, 100_000);
+    expect(b.params.bound).toBeUndefined();
+    expect((await deriveBackupKeys("richtig-lang", b.params.salt, b.params.iterations)).authKey).toBe(b.authKey);
+  });
+});

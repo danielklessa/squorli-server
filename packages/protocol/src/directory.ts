@@ -95,6 +95,11 @@ export const BackupParams = z.object({
   iterations: z.number().int().min(100_000).max(10_000_000),
   salt: Hex(16),
   iv: Hex(12),
+  /**
+   * true = the keys are bound to the host they are kept at (backup.ts `context`; server accounts since 25 September 2026,
+   * the client passes the host it connects to, never a value from the server). Missing = unbound, as the directory's own.
+   */
+  bound: z.literal(true).optional(),
 });
 /** Auth key derived from the password; grants retrieval of the ciphertext, the service stores only its SHA-256. */
 export const BackupAuthKey = Hex(32);
@@ -520,3 +525,14 @@ export type RecoveryCodesResponse = z.infer<typeof RecoveryCodesResponse>;
 export type KeyFetch = z.infer<typeof KeyFetch>;
 export type AccountStatus = z.infer<typeof AccountStatus>;
 export type AccountServer = z.infer<typeof AccountServer>;
+
+/**
+ * The chat server's sign-in message (index.ts `challengeMessage` is this): what a user signs for a server's domain when
+ * signing in there. The chat server passes the nonce and that signature to the directory as the proof that the user really
+ * signed in there (security review of 25 September 2026: until then any registered server could add itself to any
+ * account's server list by looking the key up). Query parameters `nonce` and `sig` on GET /api/keys/:key.
+ */
+export function chatLoginMessage(domain: string, nonce: string): string {
+  return `community-chat-login\n${domain}\n${nonce}`;
+}
+export const LoginProofNonce = z.string().regex(/^[0-9a-f]{64}$/);

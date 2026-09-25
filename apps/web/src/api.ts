@@ -6,7 +6,9 @@ import {
   MuteState, ReadStateResponse, StatusApiKeyResponse, type Attachment, type Category, type Channel, type RadioStation, type Role, type StatusApiMode,
   type DiscordImportRequest, type DiscordImportResult, type ImportPlan,
   LocalBackupBlob, LocalBackupParamsResponse, LocalHandle, LocalHandleResponse, localRegisterMessage,
-  DmBlobPutResponse, LinkLookupResponse, directoryDmBlobUrl, directoryLinkLookupPayload, OverwritesResponse, type PermissionOverwrite, type ChannelNotification, type ChannelBlock, type ChannelBlockMinutes } from "@squorli/protocol";
+  DmBlobPutResponse, LinkLookupResponse, directoryDmBlobUrl, directoryLinkLookupPayload, OverwritesResponse, type PermissionOverwrite, type ChannelNotification, type ChannelBlock, type ChannelBlockMinutes,
+  localClaimMessage,
+} from "@squorli/protocol";
 import { z } from "zod";
 import { toBase64, type AvatarImage } from "./avatarImage";
 import { type Identity, identityFromPrivateKey, sign } from "./identity";
@@ -34,6 +36,13 @@ export class ServerApi {
   /** Called when the server rejects a set token with a 401 (expired, or signed out from another device, M6c). */
   onUnauthorized: (() => void) | null = null;
   constructor(readonly base: string) {}
+  /**
+   * The host a server account's backup is bound to (backup.ts `context`): the hostname this client reaches the server at,
+   * never what the server says about itself; without a port, so browser, desktop app and a dev proxy agree.
+   */
+  private get bindHost(): string {
+    try { return (this.base ? new URL(this.base).hostname : globalThis.location.hostname).toLowerCase(); } catch { return ""; }
+  }
   setToken(t: string | null) { this.token = t; }
   getToken() { return this.token; }
   /** Resolve a relative server URL (attachments, server icon) against this server. */
@@ -74,19 +83,23 @@ export class ServerApi {
   /** Register a server account for `id` (a fresh key) and sign in with it; the signature binds handle and ciphertext to `domain`. */
   async localRegister(id: Identity, domain: string, rawHandle: string, password: string, invite?: string): Promise<VerifyResponse> {
     const handle = LocalHandle.parse(rawHandle);
-    const backup = await createBackup(password, id.privateKey);
+    const backup = await createBackup(password, id.privateKey, undefined, this.bindHost);
     const challenge = ChallengeResponse.parse(await this.request("POST", "/api/auth/challenge", { publicKey: id.publicKey }, { auth: false }));
     const signature = await sign(id, localRegisterMessage(domain, challenge.nonce, handle, backup.ciphertext));
     return VerifyResponse.parse(await this.request("POST", "/api/local/register",
       { challengeId: challenge.challengeId, publicKey: id.publicKey, signature, handle, backup, ...(invite ? { invite } : {}) }, { auth: false }));
   }
-  /** The auth key of a password (derived with the account's stored salt and iterations). */
+  /**
+   * The keys of a password (derived with the account's stored salt and iterations), bound to this server's host where the
+   * backup says so; `legacy` = an unbound backup from before 25 September 2026, which the client binds at the next chance.
+   */
   private async localKeys(handle: string, password: string) {
     const p = LocalBackupParamsResponse.parse(await this.request("GET", `/api/local/backup/${encodeURIComponent(handle)}/params`, undefined, { auth: false }));
-    return deriveBackupKeys(password, p.salt, p.iterations);
+    const keys = await deriveBackupKeys(password, p.salt, p.iterations, p.bound ? this.bindHost : undefined);
+    return { ...keys, legacy: !p.bound };
   }
-  /** Signing in on another device: fetch the account's key with handle + password and open it. */
-  async localRestore(rawHandle: string, password: string): Promise<Identity> {
+  /** Signing in on another device: fetch the account's key with handle + password and open it (`legacy`: see localKeys). */
+  async localRestore(rawHandle: string, password: string): Promise<{ id: Identity; legacy: boolean }> {
     const handle = LocalHandle.parse(rawHandle);
     const keys = await this.localKeys(handle, password);
     const blob = LocalBackupBlob.parse(await this.request("POST", "/api/local/backup/fetch", { handle, authKey: keys.authKey }, { auth: false }));
@@ -95,17 +108,26 @@ export class ServerApi {
     catch { throw new Error(t("err.backupUndecryptable")); }
     const restored = await identityFromPrivateKey(seed);
     if (restored.publicKey !== blob.publicKey) throw new Error(t("err.backupMismatch"));
-    return restored;
+    return { id: restored, legacy: keys.legacy };
   }
-  /** A member from before server accounts registers the key of the session (`registrationRequired`). */
-  async localClaim(id: Identity, rawHandle: string, password: string): Promise<void> {
+  /**
+   * A member from before server accounts (`registrationRequired`) registers a server account on `fresh`, a new key for this
+   * server only; `old` (the session's key) and `fresh` both sign the move, and only `fresh` is encrypted and kept by the server.
+   */
+  async localClaim(old: Identity, fresh: Identity, domain: string, rawHandle: string, password: string): Promise<void> {
     const handle = LocalHandle.parse(rawHandle);
-    await this.request("POST", "/api/local/claim", { handle, backup: await createBackup(password, id.privateKey) });
+    const backup = await createBackup(password, fresh.privateKey, undefined, this.bindHost);
+    const challenge = ChallengeResponse.parse(await this.request("POST", "/api/auth/challenge", { publicKey: old.publicKey }, { auth: false }));
+    const message = localClaimMessage(domain, challenge.nonce, handle, fresh.publicKey, backup.ciphertext);
+    await this.request("POST", "/api/local/claim", {
+      handle, backup, challengeId: challenge.challengeId, newPublicKey: fresh.publicKey,
+      signature: await sign(old, message), newSignature: await sign(fresh, message),
+    });
   }
   /** A new password: the same key, encrypted anew; the old password proves the change. */
   async localChangePassword(id: Identity, handle: string, oldPassword: string, newPassword: string): Promise<void> {
     const old = await this.localKeys(handle, oldPassword);
-    await this.request("PUT", "/api/local/backup", { oldAuthKey: old.authKey, backup: await createBackup(newPassword, id.privateKey) });
+    await this.request("PUT", "/api/local/backup", { oldAuthKey: old.authKey, backup: await createBackup(newPassword, id.privateKey, undefined, this.bindHost) });
   }
   /** Delete the server account (the password proves it; the first owner cannot). */
   async localDelete(handle: string, password: string): Promise<void> {
@@ -240,6 +262,8 @@ export async function explainLoginError(err: unknown, api: ServerApi, here: stri
 }
 
 export type Health = {
+  /** The claim moves to a fresh key (servers since 25 September 2026); missing = an older server, no claim offered. */
+  localClaimRekey?: boolean;
   ok: boolean; domain: string; protocolVersion: number; directoryUrl: string | null; serverName: string | null; iconUrl: string | null;
   /** Until server accounts: sign-in only with a directory account. Servers since then always report true. */
   requireAccount: boolean;

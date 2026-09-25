@@ -8,21 +8,26 @@ import type { Db } from "../db";
 import { bans, invites, localAccounts, memberRoles, members, roles, serverSettings, sessions, users } from "../db/schema";
 import type { Hub } from "../hub";
 import { SETTINGS_ID, broadcastStructure, loadSettings } from "../state";
-import type { DirectoryClient } from "../directory";
+import type { DirectoryClient, LoginProof } from "../directory";
 import type { VoicePresence } from "../voice/presence";
 import { ChallengeStore } from "./challenges";
 import { registerLocalAccountRoutes } from "./local";
 
 const hexToBytes = (h: string) => Uint8Array.from(Buffer.from(h, "hex"));
 
-/** Check a signature over a message built from the consumed challenge's nonce; sends 401 itself and returns false otherwise. */
-export async function checkChallenge(challenges: ChallengeStore, config: Config, reply: FastifyReply, challengeId: string, publicKey: string, signature: string, message: (domain: string, nonce: string) => string): Promise<boolean> {
+/** Check a signature over a message built from the consumed challenge's nonce; returns that nonce, or sends 401 itself and returns null. */
+export async function checkChallenge(challenges: ChallengeStore, config: Config, reply: FastifyReply, challengeId: string, publicKey: string, signature: string, message: (domain: string, nonce: string) => string): Promise<string | null> {
   const nonce = challenges.consume(challengeId, publicKey);
-  if (!nonce) { await reply.code(401).send({ error: "challenge_invalid" }); return false; }
+  if (!nonce) { await reply.code(401).send({ error: "challenge_invalid" }); return null; }
   const msg = new TextEncoder().encode(message(config.PUBLIC_DOMAIN, nonce));
   const ok = await ed.verifyAsync(hexToBytes(signature), msg, hexToBytes(publicKey)).catch(() => false);
-  if (!ok) { await reply.code(401).send({ error: "signature_invalid" }); return false; }
-  return true;
+  if (!ok) { await reply.code(401).send({ error: "signature_invalid" }); return null; }
+  return nonce;
+}
+
+/** Whether `signature` is `publicKey`'s over `message` (both hex); never throws. */
+export async function signatureValid(publicKey: string, signature: string, message: string): Promise<boolean> {
+  return ed.verifyAsync(hexToBytes(signature), new TextEncoder().encode(message), hexToBytes(publicKey)).catch(() => false);
 }
 
 /** The first sign-in with an account becomes the owner, while none exists (and OWNER_PUBLIC_KEY, if set, matches). */
@@ -38,6 +43,7 @@ export async function isFirstEver(db: Db, config: Config, publicKey: string): Pr
 export async function admit(
   db: Db, config: Config, hub: Hub, directory: DirectoryClient, req: FastifyRequest, reply: FastifyReply,
   user: { id: string; publicKey: string; displayName: string | null }, invite: string | undefined, registrationRequired = false,
+  proof: LoginProof | null = null,
 ): Promise<VerifyResponse | null> {
   const [ban] = await db.select().from(bans).where(eq(bans.userId, user.id)).limit(1);
   if (ban) { await reply.code(403).send({ error: "banned", reason: ban.reason }); return null; }
@@ -55,7 +61,7 @@ export async function admit(
     await db.insert(members).values({ userId: user.id }).onConflictDoNothing();
     req.log.info({ userId: user.id, via: invite ? "invite" : firstEver ? "owner" : "open" }, "neues Mitglied");
     // Now a member: the directory may list this server for the account.
-    void directory.refresh(user, true);
+    void directory.refresh(user, true, proof);
   }
 
   // Determine the owner: the first sign-in with an account while none exists.
@@ -91,7 +97,10 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: C
     const body = VerifyRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
     const { challengeId, publicKey, signature, invite } = body.data;
-    if (!(await checkChallenge(challenges, config, reply, challengeId, publicKey, signature, challengeMessage))) return;
+    const nonce = await checkChallenge(challenges, config, reply, challengeId, publicKey, signature, challengeMessage);
+    if (!nonce) return;
+    // The directory records this server for the account only with this proof (the user's own signature for our domain).
+    const proof: LoginProof = { nonce, signature };
 
     // No temporary users (docs/features/local-accounts.md): a key needs a directory handle or a server account here. A key
     // this server has never seen gets a row only while the directory is asked, and loses it again when it has no account.
@@ -101,13 +110,13 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: C
     const [member] = await db.select({ userId: members.userId }).from(members).where(eq(members.userId, user.id)).limit(1);
     // Look up the verified handle and display name from the directory (M6); an outage of the service is not a sign-in error
     // (the last cached handle counts). Only a member's lookup counts as a sign-in there.
-    const profile = await directory.refresh({ id: user.id, publicKey, displayName: user.displayName }, !!member);
+    const profile = await directory.refresh({ id: user.id, publicKey, displayName: user.displayName }, !!member, proof);
     const handle = profile ? profile.handle : user.handle;
     const [local] = await db.select({ handle: localAccounts.handle }).from(localAccounts).where(eq(localAccounts.userId, user.id)).limit(1);
     if (!handle && !local) {
       // A member from before server accounts keeps their key, messages and roles: they sign in, but must register first.
       if (member) {
-        const res = await admit(db, config, hub, directory, req, reply, user, invite, true);
+        const res = await admit(db, config, hub, directory, req, reply, user, invite, true, proof);
         if (res) req.log.info({ userId: user.id }, "Mitglied ohne Konto: Registrierung verlangt");
         return res ?? undefined;
       }
@@ -115,7 +124,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: C
       const settings = await loadSettings(db);
       return reply.code(403).send({ error: "registration_required", localAccounts: settings.localAccounts === true });
     }
-    const res = await admit(db, config, hub, directory, req, reply, { id: user.id, publicKey, displayName: profile?.displayName ?? user.displayName }, invite);
+    const res = await admit(db, config, hub, directory, req, reply, { id: user.id, publicKey, displayName: profile?.displayName ?? user.displayName }, invite, false, proof);
     return res ?? undefined;
   });
 

@@ -133,6 +133,8 @@ async function main() {
     directoryUrl: config.DIRECTORY_URL ?? null,
     /** Domain that login signatures are bound to; the client compares it against its hostname. */
     domain: config.PUBLIC_DOMAIN,
+    /** The claim of a member from before moves to a fresh key (25 September 2026); a client offers the claim only where this is true. */
+    localClaimRekey: true,
     protocolVersion: PROTOCOL_VERSION,
     time: new Date().toISOString(),
   }));

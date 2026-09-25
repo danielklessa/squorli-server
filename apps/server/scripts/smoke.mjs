@@ -1395,5 +1395,44 @@ for (const u of [B, C]) await api("DELETE", `/api/members/${u.userId}`, undefine
 const [, finalState] = await api("GET", "/api/state", undefined, owner.token);
 check("cleanup", !finalState.channels.some((c) => c.id === textCh.id) && !finalState.roles.some((r) => r.id === modRole.id));
 
+// The claim of a member from before on a fresh key (security review, 25 September 2026; docs/features/local-accounts.md).
+// Such a member (membership, no account) cannot be made through the API any more, so this part needs the database:
+// SMOKE_DATABASE_URL = the server's DATABASE_URL. Skipped without it.
+if (process.env.SMOKE_DATABASE_URL) {
+  const { default: postgres } = await import("postgres");
+  const sql = postgres(process.env.SMOKE_DATABASE_URL, { max: 1 });
+  try {
+    const old = await newKey(); const fresh = await newKey(); const other = await newKey();
+    const [u] = await sql`insert into users (public_key) values (${old.publicKey}) returning id`;
+    await sql`insert into members (user_id) values (${u.id})`;
+    const signedIn = await verify(old);
+    check("claim: a member from before signs in and must register", signedIn.status === 200 && signedIn.body.registrationRequired === true, `${signedIn.status}`);
+    const handle = `c${fresh.publicKey.slice(0, 10)}`;
+    const claimWith = async (newSigner, oldSigner = old) => {
+      const [, ch] = await api("POST", "/api/auth/challenge", { publicKey: old.publicKey });
+      const backup = backupOf(fresh);
+      const msg = new TextEncoder().encode(`squorli-local-claim\n${DOMAIN}\n${ch.nonce}\n${handle}\n${fresh.publicKey}\n${backup.ciphertext}`);
+      return api("POST", "/api/local/claim", { handle, backup, challengeId: ch.challengeId, newPublicKey: fresh.publicKey,
+        signature: hex(await ed.signAsync(msg, oldSigner.priv)), newSignature: hex(await ed.signAsync(msg, newSigner.priv)) }, signedIn.token);
+    };
+    const [sBad] = await claimWith(other);
+    const [sBadOld] = await claimWith(fresh, other);
+    const [sLegacy] = await api("POST", "/api/local/claim", { handle, backup: backupOf(old) }, signedIn.token);
+    check("claim: refused without the new key's signature, with a foreign old signature, and in the old form (key upload)", sBad === 401 && sBadOld === 401 && sLegacy === 400, `${sBad} ${sBadOld} ${sLegacy}`);
+    const [sOk, rOk] = await claimWith(fresh);
+    const [, meC] = await api("GET", "/api/me", undefined, signedIn.token);
+    const [[row]] = [await sql`select public_key from users where id = ${u.id}`];
+    const byFresh = await verify(fresh);
+    const byOld = await verify(old);
+    // Read in the database: the fetch route may already be at its failure limit for this address after the checks above.
+    const [acct] = await sql`select ciphertext from local_accounts where user_id = ${u.id} and handle = ${handle}`;
+    check("claim: the membership moved to the fresh key; the session stays; the old key no longer signs in; the backup holds the fresh key only",
+      sOk === 200 && rOk.localHandle === handle && meC.localHandle === handle && row.public_key === fresh.publicKey
+      && byFresh.status === 200 && byFresh.userId === u.id && byOld.status === 403 && acct?.ciphertext === backupOf(fresh).ciphertext,
+      `${sOk} ${row.public_key === fresh.publicKey} fresh ${byFresh.status} old ${byOld.status} backup ${acct?.ciphertext === backupOf(fresh).ciphertext}`);
+    await sql`delete from users where id = ${u.id}`;
+  } finally { await sql.end(); }
+} else console.log("info claim: mit SMOKE_DATABASE_URL (die DATABASE_URL des Servers) starten, um den Claim zu pruefen");
+
 console.log(failures ? `\n${failures} Pruefung(en) fehlgeschlagen` : "\nalles ok");
 process.exitCode = failures ? 1 : 0;

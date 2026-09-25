@@ -59,8 +59,27 @@ export const LocalRegisterRequest = z.object({
 });
 export type LocalRegisterRequest = z.infer<typeof LocalRegisterRequest>;
 
-/** POST /api/local/claim (session): a member from before, without any account, registers the key it is signed in with. */
-export const LocalClaimRequest = z.object({ handle: LocalHandle, backup: LocalBackup });
+/**
+ * The claim of a member from before (25 September 2026, security review): the member gets a fresh key for this server and
+ * the membership moves to it. Both keys sign this over one challenge (requested for the old key): the old one proves it is
+ * the member, the new one that the client holds it. Until then the claim uploaded the old key itself, often the main
+ * identity used everywhere, encrypted only with the password and kept by this server.
+ */
+export function localClaimMessage(domain: string, nonce: string, handle: string, newPublicKey: string, ciphertext: string): string {
+  return `squorli-local-claim\n${domain}\n${nonce}\n${handle}\n${newPublicKey}\n${ciphertext}`;
+}
+
+/** POST /api/local/claim (session of a member from before without any account): register a server account on a fresh key. */
+export const LocalClaimRequest = z.object({
+  handle: LocalHandle,
+  /** The backup of the NEW key. */
+  backup: LocalBackup,
+  /** Challenge of the old key (the session's), both signatures over `localClaimMessage`. */
+  challengeId: Uuid,
+  newPublicKey: PublicKey,
+  signature: Signature,
+  newSignature: Signature,
+});
 export type LocalClaimRequest = z.infer<typeof LocalClaimRequest>;
 
 /** GET /api/local/handles/:handle */

@@ -9,6 +9,7 @@ import { ImportSource } from "./import";
 
 export * from "./permissions";
 export * from "./directory";
+import { chatLoginMessage } from "./directory";
 export * from "./backup";
 export * from "./useragent";
 export * from "./friends";
@@ -58,8 +59,9 @@ export const VerifyResponse = z.object({
 export const VerifyErrorCode = z.enum(["challenge_invalid", "signature_invalid", "invite_required", "invite_invalid", "banned"]);
 
 /** What the client signs. The domain binding prevents reuse on other servers. */
+/** The same text as `chatLoginMessage` of directory.ts (the directory checks it as the proof of a sign-in). */
 export function challengeMessage(domain: string, nonce: string): string {
-  return `community-chat-login\n${domain}\n${nonce}`;
+  return chatLoginMessage(domain, nonce);
 }
 
 // ---------- Profile ----------

@@ -1,6 +1,7 @@
 import {
   AVATAR_MAX_BYTES, BackupParams, LocalAvatarRequest, LocalBackupFetchRequest, LocalClaimRequest, LocalDeleteRequest, LocalHandle,
   LocalPasswordChangeRequest, LocalRegisterRequest, Uuid, localRegisterMessage, sniffAvatarMime, type LocalBackup, type LocalBackupBlob,
+  localClaimMessage,
 } from "@squorli/protocol";
 import { eq, isNotNull } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
@@ -10,14 +11,14 @@ import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Config } from "../config";
 import type { Db } from "../db";
-import { localAccounts, users } from "../db/schema";
+import { localAccounts, members, users } from "../db/schema";
 import type { DirectoryClient } from "../directory";
 import type { Hub } from "../hub";
 import { broadcastStructure, loadSettings } from "../state";
 import { deleteUserAccount } from "../users/deleteUser";
 import type { VoicePresence } from "../voice/presence";
 import { ChallengeStore, RateLimiter } from "./challenges";
-import { admit, checkChallenge } from "./routes";
+import { admit, checkChallenge, signatureValid } from "./routes";
 import { hasAccount, requireSession } from "./session";
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -92,25 +93,39 @@ export async function registerLocalAccountRoutes(
     return res;
   });
 
-  // A member from before server accounts (signed in, `registrationRequired`) registers the key of their session.
+  // A member from before server accounts (signed in, `registrationRequired`) registers a server account on a fresh key, and
+  // the membership moves to it (docs/features/local-accounts.md, "Claim on a fresh key"): both keys sign, the old one through
+  // a challenge requested for it. The old key (often the main identity) never reaches this server.
   app.post("/api/local/claim", async (req, reply) => {
+    if (!registerByIp.allow(req.ip)) return reply.code(429).send({ error: "rate_limited" });
     const s = await requireSession(db, req, reply);
     if (!s) return;
     const body = LocalClaimRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request", detail: body.error.issues[0]?.message ?? null });
     if (hasAccount(s)) return reply.code(409).send({ error: "has_account" });
+    const [member] = await db.select({ userId: members.userId }).from(members).where(eq(members.userId, s.userId)).limit(1);
+    if (!member) return reply.code(403).send({ error: "not_member" });
     if (!(await allowed())) return reply.code(403).send({ error: "local_accounts_off" });
-    if (!(await handleFree(body.data.handle))) return reply.code(409).send({ error: "handle_taken" });
+    const { handle, backup, challengeId, newPublicKey, signature, newSignature } = body.data;
+    const message = (domain: string, nonce: string) => localClaimMessage(domain, nonce, handle, newPublicKey, backup.ciphertext);
+    const nonce = await checkChallenge(challenges, config, reply, challengeId, s.publicKey, signature, message);
+    if (!nonce) return;
+    if (!(await signatureValid(newPublicKey, newSignature, message(config.PUBLIC_DOMAIN, nonce)))) return reply.code(401).send({ error: "signature_invalid" });
+    if (!(await handleFree(handle))) return reply.code(409).send({ error: "handle_taken" });
     try {
-      await db.insert(localAccounts).values({ userId: s.userId, handle: body.data.handle, ...stored(body.data.backup) });
+      await db.transaction(async (tx) => {
+        await tx.update(users).set({ publicKey: newPublicKey, handle: null, handleCheckedAt: null }).where(eq(users.id, s.userId));
+        await tx.insert(localAccounts).values({ userId: s.userId, handle, ...stored(backup) });
+      });
     } catch (err) {
+      // The handle, or the new key already belongs to somebody here.
       if (isUniqueViolation(err)) return reply.code(409).send({ error: "handle_taken" });
       throw err;
     }
-    presence.rename(s.userId, { displayName: s.displayName, publicKey: s.publicKey, handle: s.handle, localHandle: body.data.handle });
+    presence.rename(s.userId, { displayName: s.displayName, publicKey: newPublicKey, handle: null, localHandle: handle });
     await broadcastStructure(db, hub, ["members"]);
-    req.log.info({ userId: s.userId, handle: body.data.handle }, "Serverkonto nachregistriert");
-    return { ok: true, localHandle: body.data.handle };
+    req.log.info({ userId: s.userId, handle }, "Serverkonto nachregistriert, auf einen neuen Schluessel umgezogen");
+    return { ok: true, localHandle: handle };
   });
 
   // Signing in on another device, step 1: salt and iterations (without the iv) so the client can derive the auth key.

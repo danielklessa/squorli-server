@@ -10,6 +10,9 @@ import { SETTINGS_ID } from "./state";
 /** For this long the cached directory state counts as fresh; after that GET /api/me refreshes it (name changed on the account page). */
 const REFRESH_AFTER_MS = 5 * 60_000;
 /** Periodic reconciliation of all users (names changed on the account page arrive without a reload this way). */
+/** A user's signature from a sign-in here, passed on to the directory as the proof of a membership (`chatLoginMessage`). */
+export type LoginProof = { nonce: string; signature: string };
+
 export const SYNC_INTERVAL_MS = 5 * 60_000;
 const SYNC_CHUNK = 200;
 const TIMEOUT_MS = 2500;
@@ -102,16 +105,16 @@ export class DirectoryClient {
    * (the server list on the account page and in the client's rail); with `member = false` it records nothing and drops an entry
    * it has (22 September 2026: a sign-in refused for want of an invite had listed the server for that account).
    */
-  async refresh(user: { id: string; publicKey: string; displayName: string | null }, member = true): Promise<DirectoryProfile | null> {
+  async refresh(user: { id: string; publicKey: string; displayName: string | null }, member = true, proof: LoginProof | null = null): Promise<DirectoryProfile | null> {
     const url = this.config.DIRECTORY_URL;
     if (!url) return null;
     try {
       if (!this.token) await this.register();
-      let res = await this.lookup(url, user.publicKey, member);
+      let res = await this.lookup(url, user.publicKey, member, proof);
       if (res.status === 401 && this.token) {
         // Token expired (24 h) or directory reinstalled: re-register once.
         this.token = null;
-        if (await this.register()) res = await this.lookup(url, user.publicKey, member);
+        if (await this.register()) res = await this.lookup(url, user.publicKey, member, proof);
       }
       if (res.status === 401 || res.status === 403) {
         // Without a valid token, at least the handle (which is public).
@@ -239,9 +242,11 @@ export class DirectoryClient {
       body: JSON.stringify({ publicKeys }), signal: AbortSignal.timeout(8000),
     });
   }
-  private lookup(url: string, publicKey: string, member: boolean): Promise<Response> {
+  /** `proof`: the user's signature from this sign-in; without it the directory refreshes an existing entry but adds none. */
+  private lookup(url: string, publicKey: string, member: boolean, proof: LoginProof | null = null): Promise<Response> {
     const headers: Record<string, string> = this.token ? { authorization: `Bearer ${this.token}` } : {};
-    const q = this.token ? `?server=${encodeURIComponent(this.host)}${member ? "" : "&member=0"}` : "";
+    const withProof = member && proof ? `&nonce=${proof.nonce}&sig=${proof.signature}` : "";
+    const q = this.token ? `?server=${encodeURIComponent(this.host)}${member ? "" : "&member=0"}${withProof}` : "";
     return fetch(`${url}/api/keys/${publicKey}${q}`, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
   }
 }

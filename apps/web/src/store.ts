@@ -307,27 +307,33 @@ export class Store {
     conn.state = { ...conn.state, connection: "logging-in", error: null, removed: null };
     this.publish(conn);
     let id: Identity;
-    try { id = await conn.api.localRestore(handle, password); }
+    let legacy = false;
+    try { ({ id, legacy } = await conn.api.localRestore(handle, password)); }
     catch (err) { this.failed(conn, err); }
     this.rememberServerAccount(host, id, handle.trim().toLowerCase(), null);
     try { await conn.login(await this.signDomainOf(conn), invite); }
     catch (err) { this.dropServerAccount(host); throw err; }
+    // A backup from before 25 September 2026 is not bound to this server's host (backup.ts): encrypt it anew, bound, now
+    // that the password is at hand (the same password; the server keeps nothing else).
+    if (legacy) void conn.api.localChangePassword(id, handle.trim().toLowerCase(), password, password).catch(() => { /* next sign-in tries again */ });
   }
   /**
-   * A member from before server accounts (`me.registrationRequired`) registers the key they are signed in with. When that is
-   * the main identity, the key is kept for this server as its server account from now on (with the session it has).
+   * A member from before server accounts (`me.registrationRequired`) registers a server account on a fresh key for this server
+   * (security review of 25 September 2026: the key they are signed in with, often the main identity, stays on the device);
+   * the membership moves to the new key, the session stays. An older server cannot move it: then no claim at all.
    */
   async claimLocal(host: string, handle: string, password: string): Promise<void> {
     const conn = this.conns.get(host);
     const id = this.identityFor(host);
     if (!conn || !id) return;
-    try { await conn.api.localClaim(id, handle, password); }
+    const health = await conn.refreshHealth();
+    if (!health?.localClaimRekey) this.failed(conn, new Error(t("err.claimNeedsUpdate")));
+    const fresh = await newIdentity();
+    try { await conn.api.localClaim(id, fresh, await this.signDomainOf(conn), handle, password); }
     catch (err) { this.failed(conn, err); }
-    if (!this.serverAccount(host)) {
-      const token = conn.api.getToken();
-      this.storeToken(host, null);
-      this.rememberServerAccount(host, id, handle.trim().toLowerCase(), token);
-    }
+    const token = conn.api.getToken();
+    this.storeToken(host, null);
+    this.rememberServerAccount(host, fresh, handle.trim().toLowerCase(), token);
     await conn.refreshMe();
   }
   /** Such a member registers a directory handle for the key instead; the server sees it at the next sign-in. */
@@ -438,7 +444,10 @@ export class Store {
       if (host === this.homeHost || s.leaveRequestedAt || this.conns.has(host)) continue;
       const conn = this.createConnection(host, directoryServerUrl(host));
       this.set({ servers: { ...this.state.servers, [host]: conn.state } });
-      void this.connectForeign(conn);
+      // By itself only to a server this device has signed in to before (a stored session or a server account); one the list
+      // names that this device does not know shows in the rail and connects at the first click (security review of 25
+      // September 2026: the list is the directory's word, a server that slipped in must not get a sign-in unasked).
+      if (this.storedToken(host) || this.serverAccount(host)) void this.connectForeign(conn);
     }
   }
   /** Try again (after an error or a removal); also the "join" of a server added by address, then possibly with an invite. */
