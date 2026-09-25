@@ -1,4 +1,4 @@
-import type { Friend, Member } from "@squorli/protocol";
+import { handleLabel, type Friend, type Member } from "@squorli/protocol";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { AutoGrowTextarea } from "./AutoGrowTextarea";
 import { Avatar } from "./Avatar";
@@ -44,7 +44,7 @@ export function MemberProfile({ anchor, member, isMe, friends, onClose }: { anch
 
   return (
     <ContextMenu anchor={anchor} label={m.displayName} onClose={onClose}>
-      <div className="context-identity" role="presentation"><Avatar name={m.displayName} src={m.avatarUrl} online={m.online} afk={m.afk} /><div><strong>{m.displayName}</strong>{m.handle && <div className="muted small">@{m.handle}</div>}<GameLine game={m.online ? m.game : null} /></div></div>
+      <div className="context-identity" role="presentation"><Avatar name={m.displayName} src={m.avatarUrl} online={m.online} afk={m.afk} /><div><strong>{m.displayName}</strong>{handleLabel(m) && <div className="muted small">{handleLabel(m)}</div>}<GameLine game={m.online ? m.game : null} /></div></div>
       {friends && !isMe && (
         // Arrows, Home/End and Tab belong to the line and its buttons here, not to the menu's item order or its Tab-to-close.
         <div className="member-profile-action" onKeyDown={(e) => { if (["ArrowUp", "ArrowDown", "Home", "End", "Tab"].includes(e.key)) e.stopPropagation(); }}>
@@ -57,7 +57,7 @@ export function MemberProfile({ anchor, member, isMe, friends, onClose }: { anch
           )}
           {st === null && (m.handle
             ? <button role="menuitem" className="small" onClick={() => { friends.onRequest(m.publicKey); onClose(); }}><Icon name="user-plus" /> {t("profile.sendRequest")}</button>
-            : <span className="muted small" title={t("home.noAccountHint")}>{t("members.noDirectoryAccount")}</span>)}
+            : <span className="muted small" title={t(m.localHandle ? "members.localNoDmHint" : "home.noAccountHint")}>{t(m.localHandle ? "members.localNoDm" : "members.noDirectoryAccount")}</span>)}
           {st === "pending_out" && <span className="muted small">{t("members.requestSent")}</span>}
           {st === "pending_in" && <button role="menuitem" className="small" onClick={() => { friends.onAccept(m.publicKey); onClose(); }}><Icon name="check" /> {t("profile.acceptRequest")}</button>}
           {st === "blocked" && <span className="muted small">{t("members.blocked")}</span>}

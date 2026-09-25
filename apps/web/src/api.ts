@@ -5,6 +5,7 @@ import {
   directoryRegisterMessage, directorySoundSettingsPayload, openBackup, type AccountSettings, type SealedSettings, type SoundSettings,
   MuteState, ReadStateResponse, StatusApiKeyResponse, type Attachment, type Category, type Channel, type RadioStation, type Role, type StatusApiMode,
   type DiscordImportRequest, type DiscordImportResult, type ImportPlan,
+  LocalBackupBlob, LocalBackupParamsResponse, LocalHandle, LocalHandleResponse, localRegisterMessage,
   DmBlobPutResponse, LinkLookupResponse, directoryDmBlobUrl, directoryLinkLookupPayload, OverwritesResponse, type PermissionOverwrite, type ChannelNotification, type ChannelBlock, type ChannelBlockMinutes } from "@squorli/protocol";
 import { z } from "zod";
 import { toBase64, type AvatarImage } from "./avatarImage";
@@ -64,6 +65,58 @@ export class ServerApi {
   }
   getHealth() { return this.request<Health>("GET", "/api/health", undefined, { auth: false }); }
 
+  // ---------- Server accounts (`~name`, docs/features/local-accounts.md): the key is encrypted here with the password, the
+  // server keeps only the ciphertext and the SHA-256 of the auth key, as the directory does (backup.ts).
+  async localHandleFree(rawHandle: string): Promise<boolean> {
+    const handle = LocalHandle.parse(rawHandle);
+    return LocalHandleResponse.parse(await this.request("GET", `/api/local/handles/${encodeURIComponent(handle)}`, undefined, { auth: false })).available;
+  }
+  /** Register a server account for `id` (a fresh key) and sign in with it; the signature binds handle and ciphertext to `domain`. */
+  async localRegister(id: Identity, domain: string, rawHandle: string, password: string, invite?: string): Promise<VerifyResponse> {
+    const handle = LocalHandle.parse(rawHandle);
+    const backup = await createBackup(password, id.privateKey);
+    const challenge = ChallengeResponse.parse(await this.request("POST", "/api/auth/challenge", { publicKey: id.publicKey }, { auth: false }));
+    const signature = await sign(id, localRegisterMessage(domain, challenge.nonce, handle, backup.ciphertext));
+    return VerifyResponse.parse(await this.request("POST", "/api/local/register",
+      { challengeId: challenge.challengeId, publicKey: id.publicKey, signature, handle, backup, ...(invite ? { invite } : {}) }, { auth: false }));
+  }
+  /** The auth key of a password (derived with the account's stored salt and iterations). */
+  private async localKeys(handle: string, password: string) {
+    const p = LocalBackupParamsResponse.parse(await this.request("GET", `/api/local/backup/${encodeURIComponent(handle)}/params`, undefined, { auth: false }));
+    return deriveBackupKeys(password, p.salt, p.iterations);
+  }
+  /** Signing in on another device: fetch the account's key with handle + password and open it. */
+  async localRestore(rawHandle: string, password: string): Promise<Identity> {
+    const handle = LocalHandle.parse(rawHandle);
+    const keys = await this.localKeys(handle, password);
+    const blob = LocalBackupBlob.parse(await this.request("POST", "/api/local/backup/fetch", { handle, authKey: keys.authKey }, { auth: false }));
+    let seed: string;
+    try { seed = await openBackup(keys, blob.params.iv, blob.ciphertext); }
+    catch { throw new Error(t("err.backupUndecryptable")); }
+    const restored = await identityFromPrivateKey(seed);
+    if (restored.publicKey !== blob.publicKey) throw new Error(t("err.backupMismatch"));
+    return restored;
+  }
+  /** A member from before server accounts registers the key of the session (`registrationRequired`). */
+  async localClaim(id: Identity, rawHandle: string, password: string): Promise<void> {
+    const handle = LocalHandle.parse(rawHandle);
+    await this.request("POST", "/api/local/claim", { handle, backup: await createBackup(password, id.privateKey) });
+  }
+  /** A new password: the same key, encrypted anew; the old password proves the change. */
+  async localChangePassword(id: Identity, handle: string, oldPassword: string, newPassword: string): Promise<void> {
+    const old = await this.localKeys(handle, oldPassword);
+    await this.request("PUT", "/api/local/backup", { oldAuthKey: old.authKey, backup: await createBackup(newPassword, id.privateKey) });
+  }
+  /** Delete the server account (the password proves it; the first owner cannot). */
+  async localDelete(handle: string, password: string): Promise<void> {
+    const keys = await this.localKeys(handle, password);
+    await this.request("DELETE", "/api/me", { authKey: keys.authKey });
+  }
+  /** The avatar of a server account (null = remove); the image is already cropped and encoded (avatarImage.ts). */
+  setLocalAvatar(image: AvatarImage | null) {
+    return image ? this.request("PUT", "/api/me/avatar", { mime: image.mime, data: toBase64(image.bytes) }) : this.request("DELETE", "/api/me/avatar");
+  }
+
   getMe() { return this.request<Me>("GET", "/api/me").then((m) => Me.parse(m)); }
   updateMe(displayName: string | null) { return this.request<Me>("PATCH", "/api/me", { displayName }).then((m) => Me.parse(m)); }
   // ---------- Sessions / devices (M6c)
@@ -102,7 +155,7 @@ export class ServerApi {
   rtcToken(channelId: string) { return this.request<RtcTokenResponse>("POST", "/api/rtc-token", { channelId }).then((r) => RtcTokenResponse.parse(r)); }
 
   // ---------- Admin
-  updateSettings(patch: { name?: string; openJoin?: boolean; requireAccount?: boolean; listed?: boolean; description?: string | null; radioAutoStop?: boolean; afkChannelId?: string | null; statusApi?: StatusApiMode; statusApiRoleId?: string | null }) { return this.request("PATCH", "/api/settings", patch); }
+  updateSettings(patch: { name?: string; openJoin?: boolean; localAccounts?: boolean; listed?: boolean; description?: string | null; radioAutoStop?: boolean; afkChannelId?: string | null; statusApi?: StatusApiMode; statusApiRoleId?: string | null }) { return this.request("PATCH", "/api/settings", patch); }
   /** Status API (docs/features/status-api.md): the key for mode "key" (MANAGE_SERVER), and a fresh one that replaces it. */
   getStatusApiKey() { return this.request<StatusApiKeyResponse>("GET", "/api/settings/status-api-key").then((r) => StatusApiKeyResponse.parse(r)); }
   regenerateStatusApiKey() { return this.request<StatusApiKeyResponse>("POST", "/api/settings/status-api-key").then((r) => StatusApiKeyResponse.parse(r)); }
@@ -179,6 +232,7 @@ export async function explainLoginError(err: unknown, api: ServerApi, here: stri
     case "invite_required": return t("err.inviteRequired");
     case "invite_invalid": return t("err.inviteInvalid");
     case "account_required": return t("err.accountRequired");
+    case "registration_required": return t("err.registrationRequired");
     case "banned": return `${t("err.banned")}${typeof err.body.reason === "string" && err.body.reason ? `: ${err.body.reason}` : "."}`;
     default: return err.message;
   }
@@ -186,8 +240,10 @@ export async function explainLoginError(err: unknown, api: ServerApi, here: stri
 
 export type Health = {
   ok: boolean; domain: string; protocolVersion: number; directoryUrl: string | null; serverName: string | null; iconUrl: string | null;
-  /** Sign-in only with a directory account (Admin > Server); the server reports false if it does not use a directory. */
+  /** Until server accounts: sign-in only with a directory account. Servers since then always report true. */
   requireAccount: boolean;
+  /** Server accounts (`~name`) may be registered here. Missing on servers from before them. */
+  localAccounts?: boolean;
   /** New members need an invite code (the server is not open). Missing on servers older than 19 September 2026. */
   inviteRequired?: boolean;
   /** Server version (package.json), shown at the bottom of the login next to the Squorli note. */
@@ -342,6 +398,23 @@ export async function directoryAccountStatus(dirUrl: string, id: Identity): Prom
   const signature = await sign(id, directoryActionMessage(health.host, "account-status", ch.nonce));
   return AccountStatus.parse(await directoryFetch(dirUrl, "POST", "/api/account/status", { publicKey: id.publicKey, challengeId: ch.challengeId, signature }));
 }
+/** Errors of the server accounts' routes as a sentence (`local.*` keys); anything else like a sign-in error. */
+export function explainLocalError(err: unknown): string {
+  if (err instanceof ApiError) {
+    switch (err.code) {
+      case "handle_taken": case "local_accounts_off": case "has_account": case "auth_invalid": case "unknown_account": case "rate_limited": case "founder": case "bad_handle": case "use_directory": case "too_large": case "bad_type":
+        return t(`local.${err.code}`);
+      case "invite_required": return t("err.inviteRequired");
+      case "invite_invalid": return t("err.inviteInvalid");
+      case "banned": return `${t("err.banned")}${typeof err.body.reason === "string" && err.body.reason ? `: ${err.body.reason}` : "."}`;
+      default: return err.message;
+    }
+  }
+  if (err instanceof Error && err.name === "ZodError") return t("dir.zod");
+  if (err instanceof TypeError) return t("err.serverUnreachable");
+  return err instanceof Error ? err.message : String(err);
+}
+
 export function explainDirectoryError(err: unknown): string {
   if (err instanceof ApiError) {
     switch (err.code) {

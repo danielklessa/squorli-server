@@ -4,7 +4,8 @@ import type { FastifyInstance } from "fastify";
 import { requireMember } from "../auth/session";
 import { can, canSetRolesOf, canTouchRole, outranks, type Actor } from "../authz";
 import type { Db } from "../db";
-import { bans, categoryOverwrites, channelOverwrites, channels, memberRoles, members, roles, users } from "../db/schema";
+import { bans, categoryOverwrites, channelOverwrites, channels, localAccounts, memberRoles, members, roles, users } from "../db/schema";
+import { localJoin, nameColumns } from "../names";
 import type { Hub } from "../hub";
 import type { LivekitAdmin } from "../livekit/admin";
 import { syncVoiceAccessOf } from "../livekit/sync";
@@ -100,7 +101,7 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     if (!can(m.actor, perm) && !(room !== undefined && hasPermission(visibility.masksOf(m.userId).get(room) ?? 0, perm))) { reply.code(403).send({ error: "forbidden" }); return null; }
     if (target.userId === m.userId) { reply.code(400).send({ error: "self" }); return null; }
     if (!outranks(m.actor, target)) { reply.code(403).send({ error: "target_above_you" }); return null; }
-    const [me] = await db.select({ publicKey: users.publicKey, displayName: users.displayName, handle: users.handle }).from(users).where(eq(users.id, m.userId)).limit(1);
+    const [me] = await db.select(nameColumns).from(users).leftJoin(localAccounts, localJoin).where(eq(users.id, m.userId)).limit(1);
     return { m, target, by: me ? displayNameOf(me) : "Moderator" };
   }
 
@@ -179,8 +180,8 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     if (!m) return;
     if (!can(m.actor, Permission.BAN_MEMBERS)) return reply.code(403).send({ error: "forbidden" });
     const rows = await db
-      .select({ userId: bans.userId, reason: bans.reason, bannedBy: bans.bannedBy, createdAt: bans.createdAt, publicKey: users.publicKey, displayName: users.displayName })
-      .from(bans).innerJoin(users, eq(users.id, bans.userId)).orderBy(desc(bans.createdAt));
+      .select({ userId: bans.userId, reason: bans.reason, bannedBy: bans.bannedBy, createdAt: bans.createdAt, ...nameColumns })
+      .from(bans).innerJoin(users, eq(users.id, bans.userId)).leftJoin(localAccounts, localJoin).orderBy(desc(bans.createdAt));
     const out: Ban[] = rows.map((r) => ({ userId: r.userId, displayName: displayNameOf(r), reason: r.reason, bannedBy: r.bannedBy, createdAt: r.createdAt.toISOString() }));
     return out;
   });

@@ -19,6 +19,7 @@ export * from "./import";
 export * from "./channels";
 export * from "./votekick";
 export * from "./channelBlocks";
+export * from "./localAccounts";
 export { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { DisplayName } from "./directory";
@@ -47,6 +48,11 @@ export const VerifyResponse = z.object({
   sessionToken: z.string(),
   userId: Uuid,
   expiresAt: Iso,
+  /**
+   * A member from before server accounts whose key has neither a directory handle nor a server account (docs/features/local-accounts.md):
+   * the session works for GET /api/me and POST /api/local/claim only until they register. Default for servers from before it.
+   */
+  registrationRequired: z.boolean().default(false),
 });
 /** Error codes from /api/auth/verify that the client handles specially. */
 export const VerifyErrorCode = z.enum(["challenge_invalid", "signature_invalid", "invite_required", "invite_invalid", "banned"]);
@@ -67,6 +73,10 @@ export const Me = z.object({
   handle: z.string().nullable(),
   /** Avatar from the directory account (address of the image incl. cache version), null = none, no directory or a server from before it. */
   avatarUrl: z.string().url().nullable().default(null),
+  /** Handle of the server account (`~name`, docs/features/local-accounts.md), null = none. Default for servers from before it. */
+  localHandle: z.string().nullable().default(null),
+  /** The member has no account yet and must register before anything else works (see VerifyResponse). */
+  registrationRequired: z.boolean().default(false),
 });
 export const UpdateMeRequest = z.object({ displayName: DisplayName.nullable() });
 
@@ -84,8 +94,8 @@ export const SessionInfo = z.object({
 export type SessionInfo = z.infer<typeof SessionInfo>;
 
 /** Display name with a fallback to the first characters of the key. */
-export function displayNameOf(u: { displayName: string | null; publicKey: string; handle?: string | null }): string {
-  return u.displayName ?? (u.handle ? `@${u.handle}` : `anon-${u.publicKey.slice(0, 6)}`);
+export function displayNameOf(u: { displayName: string | null; publicKey: string; handle?: string | null; localHandle?: string | null }): string {
+  return u.displayName ?? (u.handle ? `@${u.handle}` : u.localHandle ? `~${u.localHandle}` : `anon-${u.publicKey.slice(0, 6)}`);
 }
 
 // ---------- Server structure ----------
@@ -108,12 +118,18 @@ export const ServerSettings = z.object({
   /** Server icon from the admin area (with a version parameter for caching), null = none. The client also uses it as the favicon. */
   iconUrl: z.string().nullable(),
   /**
-   * true = sign-in only with an account at the directory (the key must have a handle there); owners are exempt.
-   * No effect without DIRECTORY_URL (the server cannot check an account).
+   * Until 25 September 2026: sign-in only with a directory account. Since server accounts every sign-in needs an account (a
+   * directory handle or a server account), so servers send true for both; kept for clients from before.
    */
   requireAccount: z.boolean(),
-  /** true = REQUIRE_ACCOUNT is pinned by configuration; the admin area then cannot change requireAccount (409 locked_by_config). */
   requireAccountLocked: z.boolean(),
+  /**
+   * Server accounts (`~name`, docs/features/local-accounts.md) may be registered here. Always true without a directory.
+   * Optional = feature flag: a server from before it does not send the field.
+   */
+  localAccounts: z.boolean().optional(),
+  /** true = fixed (no directory, or LOCAL_ACCOUNTS in the configuration); PATCH answers 409 locked_by_config. */
+  localAccountsLocked: z.boolean().optional(),
   /** M6d: list in the directory service's public server directory (with a description); no effect without DIRECTORY_URL. */
   listed: z.boolean(),
   description: z.string().trim().max(200).nullable(),
@@ -144,7 +160,7 @@ export const ServerSettings = z.object({
    */
   statusApiRoleId: Uuid.nullable().optional(),
 });
-export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true, requireAccount: true, listed: true, description: true, radioAutoStop: true, afkChannelId: true, statusApi: true, statusApiRoleId: true }).partial();
+export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true, localAccounts: true, listed: true, description: true, radioAutoStop: true, afkChannelId: true, statusApi: true, statusApiRoleId: true }).partial();
 /** The key of the status API in mode "key" (MANAGE_SERVER only); null = none yet (made when the mode is switched to "key"). */
 export const StatusApiKeyResponse = z.object({ key: z.string().nullable() });
 /** How long a voice channel may stay empty before its radio is turned off (ServerSettings.radioAutoStop). */
@@ -395,6 +411,8 @@ export const Member = z.object({
   handle: z.string().nullable(),
   /** Avatar from the directory account (address of the image incl. cache version), null = none; shown instead of the initials. Default for servers from before it. */
   avatarUrl: z.string().url().nullable().default(null),
+  /** Handle of the server account (`~name`), null = none. Default for servers from before it. */
+  localHandle: z.string().nullable().default(null),
   /** Owner (several possible): always has every permission, sits at the very top, cannot be kicked or banned. */
   isOwner: z.boolean(),
 });
@@ -544,6 +562,8 @@ export const StatusChannel = z.object({
 /** A member sitting in a voice channel; members outside every voice channel are not part of the status (user's decision). */
 export const StatusMember = z.object({
   userId: Uuid, displayName: z.string(), handle: z.string().nullable(), avatarUrl: z.string().url().nullable(),
+  /** Handle of the server account (`~name`), null = none. */
+  localHandle: z.string().nullable().default(null),
   afk: z.boolean(), isOwner: z.boolean(),
   /** The voice channel the member sits in with their mute state. */
   voice: VoiceStatus.extend({ channelId: Uuid }),

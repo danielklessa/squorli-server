@@ -332,7 +332,7 @@ configure() {
   fi
   choose c "$(t "Squorli Directory (globale Handles, Freunde, verschlüsselte Direktnachrichten)?" "Squorli Directory (global handles, friends, encrypted direct messages)?")" "$dd" \
     "$(t "Ja, $DEFAULT_DIRECTORY" "Yes, $DEFAULT_DIRECTORY")" \
-    "$(t "Nein, der Server arbeitet für sich allein" "No, the server works on its own")" \
+    "$(t "Nein, der Server arbeitet für sich allein (eigene Konten: ~name)" "No, the server works on its own (its own accounts: ~name)")" \
     "$(t "Ein anderes Directory" "Another directory")"
   case "$c" in
     1) DIRECTORY="$DEFAULT_DIRECTORY" ;;
@@ -350,7 +350,7 @@ configure() {
 
   say_owner_hint
   while :; do
-    ask OWNER "$(t "Öffentlicher Schlüssel des Besitzers (64 Hex-Zeichen, leer = wer sich zuerst anmeldet)" "Owner's public key (64 hex characters, empty = whoever signs in first)")" "$d_owner"
+    ask OWNER "$(t "Öffentlicher Schlüssel des Besitzers (64 Hex-Zeichen, leer = wer sich zuerst mit Konto anmeldet)" "Owner's public key (64 hex characters, empty = whoever signs in first with an account)")" "$d_owner"
     OWNER="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
     [ -z "$OWNER" ] && break
     [[ "$OWNER" =~ ^[0-9a-f]{64}$ ]] && break
@@ -378,9 +378,12 @@ configure() {
 
 say_owner_hint() {
   printf '\n'
-  note "$(t "Wer sich als Erster anmeldet, wird Besitzer. Den eigenen Schlüssel zeigt der Client unter Einstellungen > Konto;" \
-    "Whoever signs in first becomes the owner. The client shows your own key under Settings > Account;")"
-  note "$(t "ohne ihn bitte direkt nach dem Start selbst als Erster anmelden." "without it, sign in yourself first right after the start.")"
+  note "$(t "Jede Anmeldung braucht ein Konto: ein Squorli-Konto (@name) oder ein Serverkonto dieses Servers (~name)." \
+    "Every sign-in needs an account: a Squorli account (@name) or a server account of this server (~name).")"
+  note "$(t "Wer sich als Erster mit Konto anmeldet oder als Erster ein Serverkonto erstellt, wird Besitzer. Den Schlüssel eines" \
+    "Whoever signs in first with an account, or creates the first server account, becomes the owner. The key of a")"
+  note "$(t "Squorli-Kontos zeigt der Client unter Einstellungen > Konto; ohne ihn bitte direkt nach dem Start selbst als Erster anmelden." \
+    "Squorli account is shown under Settings > Account; without it, sign in yourself first right after the start.")"
 }
 
 check_dns() {
@@ -670,7 +673,11 @@ finish() {
   fi
   [ "$DOMAIN" = localhost ] || printf '%s %shttps://%s%s\n' "$(t "Adresse:" "Address:")" "$B" "$DOMAIN" "$R"
   if [ -z "$OWNER" ] && [ "$MODE" = fresh ]; then
-    printf '%s%s%s\n' "$YEL" "$(t "Wer sich als Erster anmeldet, wird Besitzer: jetzt gleich selbst anmelden." "Whoever signs in first becomes the owner: sign in yourself right now.")" "$R"
+    if [ -n "$DIRECTORY" ]; then
+      printf '%s%s%s\n' "$YEL" "$(t "Wer sich als Erster mit Konto anmeldet, wird Besitzer: jetzt gleich selbst anmelden (mit @name, oder ein Serverkonto erstellen, wenn du es in der Verwaltung erlaubst)." "Whoever signs in first with an account becomes the owner: sign in yourself right now (with @name).")" "$R"
+    else
+      printf '%s%s%s\n' "$YEL" "$(t "Wer als Erster ein Serverkonto erstellt, wird Besitzer: jetzt gleich selbst registrieren (~name und Passwort)." "Whoever creates the first server account becomes the owner: register yourself right now (~name and password).")" "$R"
+    fi
   fi
   printf '%s\n' "$(t "Verwalten:" "Manage:")" \
     "  $HELPER status      $(t "Container anzeigen" "show containers")" \

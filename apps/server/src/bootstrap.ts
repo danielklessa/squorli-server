@@ -52,7 +52,7 @@ export async function bootstrap(db: Db, config: Config, log: FastifyBaseLogger) 
   if (s?.ownerId) await db.update(members).set({ isOwner: true }).where(and(eq(members.userId, s.ownerId), eq(members.isOwner, false)));
   if (!s?.ownerId) {
     log.warn(config.OWNER_PUBLIC_KEY
-      ? `Kein Eigentuemer: der Schluessel ${config.OWNER_PUBLIC_KEY.slice(0, 8)}... wird es beim naechsten Login.`
-      : "Kein Eigentuemer: der naechste Nutzer, der sich anmeldet, wird Eigentuemer (OWNER_PUBLIC_KEY setzt das fest).");
+      ? `Kein Eigentuemer: der Schluessel ${config.OWNER_PUBLIC_KEY.slice(0, 8)}... wird es beim naechsten Login (mit Verzeichnis-Handle oder nach der Registrierung eines ~Serverkontos).`
+      : "Kein Eigentuemer: wer sich als Erstes mit Verzeichnis-Handle anmeldet oder ein ~Serverkonto registriert, wird Eigentuemer (OWNER_PUBLIC_KEY setzt das fest).");
   }
 }

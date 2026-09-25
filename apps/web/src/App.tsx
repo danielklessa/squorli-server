@@ -8,6 +8,7 @@ import { DebugPanel } from "./DebugPanel";
 import { HomeMain, HomeSidebar } from "./Home";
 import { DesktopLogin } from "./DesktopLogin";
 import { LoginScreen } from "./LoginScreen";
+import { ClaimAccount, CreateAccount, LocalRegisterForm, SignInForm } from "./AccountForms";
 import { MemberList } from "./MemberList";
 import { VoteKickModal, VoteKickPanel } from "./VoteKickPanel";
 import { blockMinutes, voteKickChannel, voteKickPerson } from "./voteKick";
@@ -35,7 +36,7 @@ import { quickSharePick } from "./screenPick";
 import { TitleBar } from "./TitleBar";
 import { loadVoiceSettings, saveVoiceSettings } from "./voice/settings";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
-import { Permission, directoryAvatarUrl, directoryServerIconUrl, directoryServerUrl, displayNameOf, hasPermission, type Member, type ServerState } from "@squorli/protocol";
+import { Permission, directoryAvatarUrl, directoryServerIconUrl, directoryServerUrl, displayNameOf, handleLabel, hasPermission, type Member, type ServerState } from "@squorli/protocol";
 import { joinErrorText, voteKickErrorText } from "./apiErrorText";
 import { ChannelDialog, type ChannelDialogTarget } from "./ChannelDialog";
 import { Store, activeState, homeState, type ServerConnState, type State } from "./store";
@@ -550,7 +551,9 @@ export function App() {
   const me = view?.server.members.find((m) => m.userId === view.active.userId);
   // Own avatar: the directory account knows it first (an upload from the settings updates it at once, the member list follows
   // with the directory's push); without an account whatever the open server says.
-  const myAvatarUrl = state.directoryUrl && state.directoryAccount
+  // A server signed in with a server account shows that account's picture (kept by the server), not the directory's.
+  const onServerAccount = !!active && !!state.serverAccounts[active.host];
+  const myAvatarUrl = onServerAccount ? active?.me?.avatarUrl ?? null : state.directoryUrl && state.directoryAccount
     ? directoryAvatarUrl(state.directoryUrl, state.directoryAccount.publicKey, state.directoryAccount.avatarUpdatedAt)
     : me ? me.avatarUrl : active?.me?.avatarUrl ?? null;
   const canStream = !!server && hasPermission(server.myPermissions, Permission.STREAM_VIDEO);
@@ -660,6 +663,9 @@ export function App() {
   }]));
   // Rail context menu: delete your account on that server, requested through the directory (own confirmation dialog, no browser dialogs).
   const leaveServer = async (host: string, name: string) => {
+    // A server account is deleted on its server with its password (Einstellungen > Konto), not through the directory.
+    const key = store.hostFor(host);
+    if (state.serverAccounts[key]) { store.openServer(host); setSettingsTab("account"); return; }
     const ok = await askConfirm({ title: t("rail.leaveTitle", { name }), text: t("rail.leaveText"), confirmLabel: t("common.delete"), danger: true });
     if (!ok) return;
     try {
@@ -689,7 +695,8 @@ export function App() {
         onDiscover={state.directoryUrl ? () => setShowBrowser(true) : null} onLeave={(host, name) => { void leaveServer(host, name); }}
         onMute={(key, muted) => { void store.connection(key)?.setServerMuted(muted).catch(() => {}); }}
         onReorder={(hosts) => { saveVoiceSettings({ ...loadVoiceSettings(), serverOrder: hosts }); }}
-        home={homeAvailable ? { open: homeOpen, badge: homeBadge, onToggle: () => { setMobileContent(false); store.openHome(!homeOpen); } } : null} />}
+        home={homeAvailable ? { open: homeOpen, badge: homeBadge, onToggle: () => { setMobileContent(false); store.openHome(!homeOpen); } } : null}
+        serverAccounts={state.serverAccounts} onSignOutAccount={(key) => { if (key === voiceHost) void client.leave(); store.logoutServerAccount(key); }} />}
       {showBrowser && state.directoryUrl && <ServerBrowser directoryUrl={state.directoryUrl} currentHost={homeless ? active?.serverDomain ?? null : home?.serverDomain ?? null} onClose={() => setShowBrowser(false)}
         onOpen={homeless ? (host) => { setShowBrowser(false); setStageOpen(false); void store.addServer(host); } : null} />}
       <div className="left" id="app-navigation">
@@ -703,7 +710,7 @@ export function App() {
           onOpenMembers={mobile ? () => setMobileMembers(true) : null}
         /> : <nav className="sidebar"><header className="server-head"><img className="brand-mark" src="/brand/squorli-icon-small.svg" alt="" width="22" height="22" /><strong>{active?.serverName ?? active?.host ?? "Squorli"}</strong></header></nav>}
         <VoiceDock client={client} voice={voice} channel={voiceChannel} serverName={voiceHost && voiceHost !== activeHost ? voiceServer?.server?.settings.name ?? voiceHost : null}
-          displayName={me?.displayName ?? active?.me?.displayName ?? home?.me?.displayName ?? state.directoryAccount?.displayName ?? (state.directoryAccount ? `@${state.directoryAccount.handle}` : "…")} avatarUrl={myAvatarUrl} onLeave={leaveVoice} onOpenProfile={setMiniProfile} onOpenSettings={() => setSettingsTab("profile")} pttSuspended={capturingPttKey}
+          displayName={me?.displayName ?? active?.me?.displayName ?? home?.me?.displayName ?? state.directoryAccount?.displayName ?? (active?.me ? handleLabel(active.me) : null) ?? (state.directoryAccount ? `@${state.directoryAccount.handle}` : "…")} avatarUrl={myAvatarUrl} onLeave={leaveVoice} onOpenProfile={setMiniProfile} onOpenSettings={() => setSettingsTab("profile")} pttSuspended={capturingPttKey}
           onOpenStage={stageWindow.popped ? stageWindow.focus : voiceChannel && !showStage && voiceHost ? () => { store.openServer(voiceHost === state.homeHost ? homeDirHost : voiceHost); setStageOpen(true); setMobileContent(true); } : null}
           canStream={!!voiceServer?.server && hasPermission(permsIn(voiceServer.server, voice.channelId), Permission.STREAM_VIDEO) && (voiceChannel?.allowVideo ?? true)} locked={!!voiceLock} onToggleCamera={toggleCamera}
           quickShare={runningGame && voice.status === "connected" && !voice.screenOn ? { name: runningGame.name, onShare: () => { quickShare.current = runningGame.id; void client.setScreenShareEnabled(true).finally(() => { quickShare.current = null; }); } } : null}
@@ -718,7 +725,7 @@ export function App() {
         ) : !active ? (
           <NoServers directoryUrl={state.directoryUrl} account={state.directoryAccount ?? null} onDiscover={() => setShowBrowser(true)} onAdd={() => { void addServer(); }} onLogout={() => { void client.leave(); store.logout(); }} />
         ) : !view ? (
-          <ServerStatus s={active} onRetry={(invite) => store.retryServer(active.host, invite)} onClose={() => store.closeServer(active.host)}
+          <ServerStatus s={active} store={store} state={state} onRetry={(invite) => store.retryServer(active.host, invite)} onClose={() => store.closeServer(active.host)}
             join={homeless && !active.me ? state.joinInvites[active.host] ?? "" : null} />
         ) : showStage && voiceChannel ? (
           stage(false)
@@ -757,7 +764,7 @@ export function App() {
         }} />}
       {voteKick && votePerson && voteKick.canVote && voteAsked !== voteKick.vote.id && <VoteKickModal state={voteKick} person={votePerson} onVote={castVote} onClose={() => setVoteAsked(voteKick.vote.id)} />}
       {!homeOpen && view && <MemberList api={view.conn.api} members={view.server.members} roles={view.server.roles} myUserId={view.active.userId!} myPermissions={view.server.myPermissions} channelPermissions={view.server.myChannelPermissions} ownerId={view.server.settings.ownerId}
-        voice={view.active.voice} channels={view.server.channels} friends={friendsMenu} onClose={mobile ? () => setMobileMembers(false) : null}
+        voice={view.active.voice} channels={view.server.channels} friends={state.serverAccounts[view.active.host] ? null : friendsMenu} onClose={mobile ? () => setMobileMembers(false) : null}
         voteKickAllowed={view.active.voteKickAllowed} onVoteKick={(userId, channelId) => startVoteKick(view.active.host, channelId, userId)}
         voteKickBox={voiceHost === activeHost ? <VoteKickPanel state={voteKick} result={voteKickResult} person={votePerson} onVote={castVote} /> : null} />}
 
@@ -767,17 +774,23 @@ export function App() {
         onPick={(pick) => { screenPick.resolve(pick); setScreenPick(null); }} onCancel={() => { screenPick.resolve(null); setScreenPick(null); }} />)}
       {cameraPick && inPickWindow(<CameraPicker cameras={cameraPick} initial={voiceSettings.cameraDeviceId} initialBlur={voiceSettings.cameraBlur} win={pickWindow ?? window} onPick={(id, b) => { void pickCamera(id, b); }} onCancel={() => setCameraPick(null)} />)}
       {miniProfile && active?.me && (
-        <MiniProfile anchor={miniProfile} displayName={me?.displayName ?? active.me.displayName ?? "…"} avatarUrl={myAvatarUrl} storedName={active.me.displayName} handle={active.me.handle}
+        <MiniProfile anchor={miniProfile} displayName={me?.displayName ?? active.me.displayName ?? "…"} avatarUrl={myAvatarUrl} storedName={active.me.displayName} handle={handleLabel(active.me)}
           serverName={server?.settings.name ?? active.serverName} withDirectory={!!state.directoryAccount && !!active.serverDomain}
           onSave={(n) => store.setServerDisplayName(n)} onOpenSettings={() => setSettingsTab("profile")} onClose={() => setMiniProfile(null)} />
       )}
       {settingsTab && (homeless || (active?.me && conn)) && (
         <SettingsDialog api={active?.me && conn ? conn.api : null} me={active?.me ?? null} publicKey={state.identity?.publicKey ?? null} displayName={me?.displayName ?? active?.me?.displayName ?? state.directoryAccount?.displayName ?? "…"} avatarUrl={myAvatarUrl} directoryUrl={state.directoryUrl} directoryAccount={state.directoryAccount}
           serverDomain={active?.serverDomain ?? null} clientVersion={platform.app?.version ?? home?.serverVersion ?? null} syncError={state.settingsSyncError} sealed={state.settingsSealed} client={client} voice={voice} games={games} hotkeyStatus={hotkeyStatus} initialTab={settingsTab}
-          onSaveServerName={(n) => store.setServerDisplayName(n)} onSaveGlobalName={(n) => store.setDirectoryName(null, n)} onSetAvatar={state.directoryAccount && state.directoryAvatars ? (image) => store.setAvatar(image) : null} onSetLocale={(pref) => store.setLocale(pref)} localePending={state.localeReloadPending}
+          onSaveServerName={(n) => store.setServerDisplayName(n)} onSaveGlobalName={(n) => store.setDirectoryName(null, n)} onSetAvatar={(active?.me?.localHandle && !active.me.handle) || (state.directoryAccount && state.directoryAvatars) ? (image) => store.setAvatar(image) : null} onSetLocale={(pref) => store.setLocale(pref)} localePending={state.localeReloadPending}
           onCapturingKey={setCapturingPttKey} onClose={() => setSettingsTab(null)}
           onLogout={() => { setSettingsTab(null); void client.leave(); store.logout(); }}
-          onForget={() => { setSettingsTab(null); void client.leave(); void store.forgetIdentity(); }} />
+          onForget={() => { setSettingsTab(null); void client.leave(); void store.forgetIdentity(); }}
+          onDirectorySignIn={homeless && !state.directoryAccount && state.directoryUrl ? () => { setSettingsTab(null); store.openAccountLogin(); } : null}
+          serverAccount={active?.me?.localHandle && !active.me.handle ? {
+            serverName: server?.settings.name ?? active.serverName ?? active.host,
+            onChangePassword: (oldPw, newPw) => store.changeLocalPassword(oldPw, newPw),
+            onDelete: async (pw) => { if (voiceHost === active.host) await client.leave(); setSettingsTab(null); await store.deleteLocalAccount(pw); },
+          } : null} />
       )}
     </div>
     </GameLibraryContext.Provider>
@@ -789,30 +802,51 @@ export function App() {
  * `join` (client without a home server, not signed in there): the invite code that came with the address, "" = none. The view
  * then waits for a click before signing in, because that reveals the public key and creates an account on that server.
  */
-function ServerStatus({ s, onRetry, onClose, join }: { s: ServerConnState; onRetry: (invite?: string) => void; onClose: () => void; join: string | null }) {
+function ServerStatus({ s, store, state, onRetry, onClose, join }: { s: ServerConnState; store: Store; state: State; onRetry: (invite?: string) => void; onClose: () => void; join: string | null }) {
   const busy = s.connection === "logging-in" || s.connection === "connecting" || s.connection === "reconnecting";
   const name = s.serverName ?? s.host;
   const [invite, setInvite] = useState(join ?? "");
   useEffect(() => setInvite(join ?? ""), [s.host, join]);
   const firstContact = join !== null && !s.error && !s.removed;
+  const claim = s.me?.registrationRequired === true;
+  // Which account to join with (docs/features/local-accounts.md): the directory account in one click where the server knows
+  // that directory, a server account of its own (sign in or create) where the server allows them. Never a bare key.
+  const accountForms = !busy && !claim && !s.removed && (join !== null || s.accountNeeded);
+  const directoryHere = !!s.directoryUrl && s.directoryUrl === state.directoryUrl;
+  const handle = directoryHere ? state.directoryAccount?.handle ?? null : null;
+  const localAccounts = s.localAccounts || (!s.directoryUrl && s.serverVersion !== null);
+  const code = () => invite.trim() || undefined;
+  const conn = store.connection(s.host);
   return (
     <section className="chat empty server-status">
       <div className="stack">
         <h2>{name}</h2>
         {busy && <p className="muted">{t("status.connecting", { host: s.host })}</p>}
         {s.removed && <p className="error">{s.removed.reason === "banned" ? t("status.banned") : t("status.removed")}{s.removed.message ? `: ${s.removed.message}` : "."}</p>}
-        {s.error && <p className="error">{s.error}</p>}
-        {!busy && firstContact && <p className="muted">{t("join.hint", { host: s.host })}</p>}
-        {!busy && join !== null && (
+        {!claim && s.error && <p className="error">{s.error}</p>}
+        {claim && <ClaimAccount serverName={name} directoryUrl={directoryHere ? s.directoryUrl : null} localAccounts={localAccounts} emailRequired={state.directoryEmailRequired} error={s.error}
+          onClaimLocal={(h, pw) => store.claimLocal(s.host, h, pw)} onClaimDirectory={(h, email, c) => store.claimDirectory(s.host, h, email, c)}
+          onLogout={onClose} checkFree={conn ? (h) => conn.api.localHandleFree(h) : null} />}
+        {accountForms && firstContact && <p className="muted">{t(handle ? "join.hintAccount" : "join.hintNoAccount", { host: s.host })}</p>}
+        {accountForms && s.accountNeeded && <p className="muted">{t("login.accountNeeded")}</p>}
+        {!busy && (join !== null || s.accountNeeded) && !claim && (
           <label className="stack">
             <span>{t("join.invite")}</span>
             <input value={invite} onChange={(e) => setInvite(e.target.value)} placeholder={t("login.invitePlaceholder")} maxLength={32}
-              onKeyDown={(e) => { if (e.key === "Enter") onRetry(invite.trim() || undefined); }} />
+              onKeyDown={(e) => { if (e.key === "Enter" && handle) onRetry(code()); }} />
           </label>
         )}
+        {accountForms && handle && <button className="login-primary" onClick={() => onRetry(code())}>{t("join.asHandle", { handle })}</button>}
+        {accountForms && <>
+          {localAccounts && <SignInForm idPrefix={`join-${s.host}`} hasDirectory={false} localAccounts={localAccounts} busy={busy}
+            onDirectory={async () => {}} onLocal={(h, pw) => store.loginLocal(s.host, h, pw, code())} onEmailCode={null} />}
+          <CreateAccount directoryUrl={s.directoryUrl} localAccounts={localAccounts} busy={busy}
+            openExternal={platform.home ? null : (url) => platform.links.openExternal(url)}
+            local={<LocalRegisterForm idPrefix={`join-${s.host}`} busy={busy} checkFree={conn ? (h) => conn.api.localHandleFree(h) : null} onRegister={(h, pw) => store.registerLocal(s.host, h, pw, code())} />} />
+        </>}
         {!busy && (
           <div className="row">
-            <button onClick={() => onRetry(join !== null ? invite.trim() || undefined : undefined)}>{firstContact ? t("join.join") : t("common.retry")}</button>
+            {!accountForms && !claim && <button onClick={() => onRetry(join !== null ? code() : undefined)}>{t("common.retry")}</button>}
             {platform.home
               ? <a className="link-btn" href={directoryServerUrl(s.host)}>{t("status.openDirect")}</a>
               : <button className="secondary" onClick={() => platform.links.openExternal(directoryServerUrl(s.host))}>{t("status.openInBrowser")}</button>}

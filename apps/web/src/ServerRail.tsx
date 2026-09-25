@@ -34,7 +34,7 @@ const DRAG_SCROLL_STEP_PX = 10;
  * so the menu is the way on a phone.
  * At the bottom: "discover servers" opens the public server directory.
  */
-export function ServerRail({ servers, serverState, activeKey, onSelect, onDiscover, onAdd, onLeave, onMute, onReorder, home }: {
+export function ServerRail({ servers, serverState, activeKey, onSelect, onDiscover, onAdd, onLeave, onMute, onReorder, home, serverAccounts, onSignOutAccount }: {
   servers: RailServer[]; serverState: RailState; activeKey: string | null; onSelect: (key: string, host: string) => void;
   /** Open the public server directory; null = the client knows no directory. */
   onDiscover: (() => void) | null;
@@ -48,6 +48,10 @@ export function ServerRail({ servers, serverState, activeKey, onSelect, onDiscov
   onReorder: ((hosts: string[]) => void) | null;
   /** M7: home view (friends + direct messages); null = no directory socket (no account). badge = incoming requests + unread DMs. */
   home: { open: boolean; badge: number; onToggle: () => void } | null;
+  /** Servers this client signs in to with a server account (`~name`, docs/features/local-accounts.md): key -> handle. */
+  serverAccounts: Record<string, string>;
+  /** Sign out of the server account of `key` on this device (the key is forgotten, name and password bring it back). */
+  onSignOutAccount: (key: string) => void;
 }) {
   const [menu, setMenu] = useState<Menu | null>(null);
   const railRef = useRef<HTMLElement>(null);
@@ -158,7 +162,7 @@ export function ServerRail({ servers, serverState, activeKey, onSelect, onDiscov
       {onDiscover && <button className="rail-item discover" title={t("rail.discover")} onClick={onDiscover}><Icon name="compass" /></button>}
       {menu && (
         <div className="rail-menu" role="menu" style={{ left: menu.x, top: menu.y }} onPointerDown={(e) => e.stopPropagation()}>
-          <div className="muted small rail-menu-head">{menu.name}<br />{menu.host}</div>
+          <div className="muted small rail-menu-head">{menu.name}<br />{menu.host}{serverAccounts[menu.key] && <><br />~{serverAccounts[menu.key]}</>}</div>
           <button role="menuitem" className="secondary small" onClick={() => { setMenu(null); onSelect(menu.key, menu.host); }}><Icon name="external-link" /> {t("common.open")}</button>
           {sortable && (
             <>
@@ -171,6 +175,7 @@ export function ServerRail({ servers, serverState, activeKey, onSelect, onDiscov
               <Icon name={serverState[menu.key]?.muted ? "bell" : "bell-off"} /> {serverState[menu.key]?.muted ? t("rail.unmute") : t("rail.mute")}
             </button>
           )}
+          {serverAccounts[menu.key] && <button role="menuitem" className="secondary small" onClick={() => { setMenu(null); onSignOutAccount(menu.key); }}><Icon name="log-out" /> {t("rail.signOutAccount")}</button>}
           <button role="menuitem" className="danger small" onClick={() => { setMenu(null); onLeave(menu.host, menu.name); }}><Icon name="user-x" /> {t("rail.menuLeave")}</button>
         </div>
       )}

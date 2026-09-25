@@ -3,7 +3,6 @@ import type { de } from "./de";
 /** Texts that read differently in the desktop app; see `app.de.ts`. */
 export const appEn: Partial<Record<keyof typeof de, string>> = {
   "login.createDirectoryHint": "Opens the directory at {host} in your browser. Create your account there, then sign in here in the app.",
-  "login.localHint": "You do not need a username, password or e-mail address. Your access is saved on this device. If you clear the app data or switch devices, you cannot restore this access without a backup.",
   "login.savedHint": "Your account is saved on this device. You can connect directly without entering your password again.",
   "lang.auto": "System language",
   "login.replaceKeyText": "@{handle} is already set up on this device. Signing in with an account replaces that key.",

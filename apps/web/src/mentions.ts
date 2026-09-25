@@ -11,7 +11,9 @@ import { parseMarkdown, type Block, type Inline } from "./markdown";
  * mention and the live counter agrees with the server's. No false alarms when writing either: a typed name only becomes
  * a mention when exactly one member carries it; with equal names only the one chosen in the suggestion list.
  */
-export type Mentionable = { userId: string; displayName: string; handle: string | null };
+export type Mentionable = { userId: string; displayName: string; handle: string | null; localHandle?: string | null };
+/** The handle a member is found by: the directory's, else the server account's (`~name`, docs/features/local-accounts.md). */
+const findHandle = (m: Mentionable) => m.handle ?? m.localHandle ?? null;
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const tokenRe = new RegExp(`<@(${UUID})>`, "g");
@@ -21,8 +23,8 @@ const wordRe = /[\p{L}\p{N}_]/u;
 
 export { mentionToken };
 
-/** How a member is written after the "@": the display name; a name that is itself "@handle" does not get a second "@". */
-export const mentionLabel = (m: Mentionable) => m.displayName.replace(/^@+/, "");
+/** How a member is written after the "@": the display name; a name that is itself "@handle" or "~handle" loses that prefix. */
+export const mentionLabel = (m: Mentionable) => m.displayName.replace(/^[@~]+/, "");
 
 /** Chosen in the suggestion list: label -> userId, decides when two members carry the same name. */
 export type Picked = Map<string, string>;
@@ -37,7 +39,7 @@ export function encodeMentions(text: string, members: readonly Mentionable[], pi
   const chosen = new Map<string, string>(), owners = new Map<string, Set<string>>();
   for (const [label, userId] of picked) if (label && members.some((m) => m.userId === userId)) chosen.set(label.toLowerCase(), userId);
   const own = (label: string, userId: string) => { const key = label.toLowerCase(); if (key) owners.set(key, (owners.get(key) ?? new Set()).add(userId)); };
-  for (const m of members) { own(mentionLabel(m), m.userId); if (m.handle) own(m.handle, m.userId); }
+  for (const m of members) { own(mentionLabel(m), m.userId); const h = findHandle(m); if (h) own(h, m.userId); }
   const names: { key: string; userId: string | null }[] = [...new Set([...chosen.keys(), ...owners.keys()])]
     .map((key) => ({ key, userId: chosen.get(key) ?? (owners.get(key)!.size === 1 ? [...owners.get(key)!][0]! : null) }));
   names.sort((a, b) => b.key.length - a.key.length);
@@ -108,7 +110,7 @@ export function mentionQueryAt(text: string, caret: number): { start: number; qu
 
 /** Members for a query: names or handles starting with it first, then those containing it; alphabetical inside both (the rule is rankMatch of entityPicker.ts, shared with the channel dialog's picker). */
 export function suggestMembers<T extends Mentionable>(members: readonly T[], query: string, limit = 8): T[] {
-  const rank = (m: T) => rankMatch(mentionLabel(m), m.handle ?? null, query);
+  const rank = (m: T) => rankMatch(mentionLabel(m), findHandle(m), query);
   return members.map((m) => ({ m, r: rank(m) })).filter((x) => x.r >= 0)
     .sort((a, b) => a.r - b.r || mentionLabel(a.m).localeCompare(mentionLabel(b.m))).slice(0, limit).map((x) => x.m);
 }

@@ -1,4 +1,4 @@
-import type { Member, Role } from "@squorli/protocol";
+import { handleLabel, type Member, type Role } from "@squorli/protocol";
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "./Avatar";
 import { ContextMenu, type MenuAnchor } from "./ContextMenu";
@@ -39,7 +39,7 @@ export function EntityPicker({ anchor, roles, members, exclude, onPick, onClose 
             <li key={entryKey(e)} role="option" aria-selected={i === cursor} className={i === cursor ? "active" : ""} onMouseEnter={() => setCursor(i)} onMouseDown={(ev) => ev.preventDefault()} onClick={() => pick(e)}>
               {e.kind === "role"
                 ? <><span className="role-dot" style={e.role.color ? { background: e.role.color } : undefined} /><span className="entity-name">{e.role.name}</span><span className="muted small">{t("chan.role")}</span></>
-                : <><Avatar name={e.member.displayName} src={e.member.avatarUrl} size="small" /><span className="entity-name">{e.member.displayName}</span>{e.member.handle && <span className="muted small">@{e.member.handle}</span>}</>}
+                : <><Avatar name={e.member.displayName} src={e.member.avatarUrl} size="small" /><span className="entity-name">{e.member.displayName}</span>{handleLabel(e.member) && <span className="muted small">{handleLabel(e.member)}</span>}</>}
               <Icon name="plus" />
             </li>
           ))}

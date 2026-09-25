@@ -225,6 +225,13 @@
       "when": 1790248655005,
       "tag": "0031_unknown_wolf_cub",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1790327876998,
+      "tag": "0032_silly_mimic",
+      "breakpoints": true
     }
   ]
 }

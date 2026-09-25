@@ -79,7 +79,7 @@ Check: `https://PUBLIC_DOMAIN/api/health` shows `domain` and `serverKey`; `https
 
 ## First start
 
-The first user who logs in becomes the owner (or the key given in `OWNER_PUBLIC_KEY`). After that the server is closed: further users need an invite link (`/invite/<code>`), which the owner creates in the admin panel (gear icon), or the server is set to "open" there.
+Every sign-in needs an account: a Squorli account from the directory (`@name`) or a server account that exists on this server only (`~name`, name and password, usable on any device). A server without a directory is an isolated instance whose accounts are all server accounts; a server with a directory offers them next to Squorli accounts when the admin panel allows it (Administration > Server, or `LOCAL_ACCOUNTS`). The password of a server account encrypts the account's key on the user's device; the server stores only the result and can neither read nor reset it. Server accounts have no friends and no direct messages for now. The first user who signs in with an account, or registers the first server account, becomes the owner (or the key given in `OWNER_PUBLIC_KEY`, which can only be a Squorli account's key). After that the server is closed: further users need an invite link (`/invite/<code>`), which the owner creates in the admin panel (gear icon), or the server is set to "open" there.
 
 New members are guests (view and voice only). Admins grant the member role via the member list, which unlocks writing, files, camera and screen share.
 
@@ -94,14 +94,14 @@ All variables are documented in [.env.example](.env.example). The most relevant 
 | Variable | Purpose |
 |---|---|
 | `SERVER_NAME` | Initial name of the server (changeable in the admin panel) |
-| `OWNER_PUBLIC_KEY` | Public key (64 hex) that becomes owner on first login |
+| `OWNER_PUBLIC_KEY` | Public key (64 hex) of a Squorli account that becomes owner on its first login; empty = the first user who signs in with an account |
 | `MAX_UPLOAD_MB` | Upper limit for attachments, default 25 |
 | `LINK_PREVIEWS` | `true` (default): links in messages get a preview (title, description, picture; YouTube videos play in the chat). The server fetches the linked pages itself, from public hosts only, and serves the pictures from its data volume, so readers never contact the linked host. `false` turns previews and these outgoing requests off |
 | `LIVEKIT_NODE_IP` | Public IP of the host; empty = LiveKit detects it via STUN |
 | `LIVEKIT_PUBLIC_URL` | Only if clients should not reach LiveKit via `https://PUBLIC_DOMAIN/rtc` |
 | `DIRECTORY_URL` | `https://directory.squorli.com` or your own directory; empty = no directory |
 | `DIRECTORY_PROOF_URL` | Only if the directory cannot reach `https://PUBLIC_DOMAIN/api/health` directly |
-| `REQUIRE_ACCOUNT` | `true` forces login with a directory handle (owners exempt), `false` forces it off, empty = admin panel decides |
+| `LOCAL_ACCOUNTS` | Server accounts (`~name`): `true`/`false` fixes whether they may be registered, empty = admin panel decides (default off). Always on without a directory. (`REQUIRE_ACCOUNT` is gone: an account is always required.) |
 | `TRUSTED_PROXIES` | External mode: IPs/CIDRs whose `X-Forwarded-*` headers are trusted (default: private ranges) |
 | `PROXY_BIND_IP` | External mode with the proxy on another host: address on which 3000 and 7880 listen |
 | `LIVEKIT_TCP_PORT` / `LIVEKIT_UDP_PORT` | Media ports on the host (default 7881 / 7882), when another service already uses them; LiveKit announces them to the clients, so forward the same numbers |
@@ -133,7 +133,7 @@ TURN for clients in networks that block UDP and direct TCP is prepared but off b
 `deploy/portainer.yml` is a self-contained stack for Portainer (web editor or git repository, path `deploy/portainer.yml`): external mode with a reverse proxy on another host, no `env_file`, no build, no bind mounts. The LiveKit config is inlined via `LIVEKIT_CONFIG` (keep it in step with `deploy/livekit/livekit.yaml`).
 
 1. Stacks > Add stack > paste `deploy/portainer.yml`.
-2. Enter the environment variables: `PUBLIC_DOMAIN`, `POSTGRES_PASSWORD`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` (required); `APP_IMAGE=ghcr.io/danielklessa/squorli-server:latest` (set explicitly, pin a tag or digest for production); optionally `LIVEKIT_NODE_IP`, `DIRECTORY_URL`, `TRUSTED_PROXIES`, `PROXY_BIND_IP` (default `0.0.0.0`, then restrict via firewall), `REQUIRE_ACCOUNT`, `SERVER_NAME`, `OWNER_PUBLIC_KEY`, `MAX_UPLOAD_MB`, `LIVEKIT_PUBLIC_URL`, `DIRECTORY_PROOF_URL`, `APP_PORT`, `LIVEKIT_HTTP_PORT`, `LIVEKIT_TCP_PORT`, `LIVEKIT_UDP_PORT`. Meaning as in [Configuration](#configuration).
+2. Enter the environment variables: `PUBLIC_DOMAIN`, `POSTGRES_PASSWORD`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` (required); `APP_IMAGE=ghcr.io/danielklessa/squorli-server:latest` (set explicitly, pin a tag or digest for production); optionally `LIVEKIT_NODE_IP`, `DIRECTORY_URL`, `TRUSTED_PROXIES`, `PROXY_BIND_IP` (default `0.0.0.0`, then restrict via firewall), `LOCAL_ACCOUNTS`, `SERVER_NAME`, `OWNER_PUBLIC_KEY`, `MAX_UPLOAD_MB`, `LIVEKIT_PUBLIC_URL`, `DIRECTORY_PROOF_URL`, `APP_PORT`, `LIVEKIT_HTTP_PORT`, `LIVEKIT_TCP_PORT`, `LIVEKIT_UDP_PORT`. Meaning as in [Configuration](#configuration).
 3. Set up the proxy and firewall as in [Reverse proxy](#reverse-proxy).
 4. Check `https://PUBLIC_DOMAIN/api/health` and `https://PUBLIC_DOMAIN/rtc/validate` (401).
 
@@ -186,7 +186,7 @@ curl -fL https://raw.githubusercontent.com/danielklessa/squorli-server/main/depl
 curl -fL https://raw.githubusercontent.com/danielklessa/squorli-server/main/deploy/proxies/nginx.ports.yml -o deploy/proxies/nginx.ports.yml
 ```
 
-Run the download step only once in a fresh directory; repeating it overwrites configuration. Edit .env, replace the hostname and secrets, set PROXY_MODE=bundled and APP_IMAGE=ghcr.io/danielklessa/squorli-server:latest. Generate separate secrets with `openssl rand -hex 32`. Reserve the first login with OWNER_PUBLIC_KEY or restrict access until you claim ownership. The nginx overlay is only needed for an external proxy.
+Run the download step only once in a fresh directory; repeating it overwrites configuration. Edit .env, replace the hostname and secrets, set PROXY_MODE=bundled and APP_IMAGE=ghcr.io/danielklessa/squorli-server:latest. Generate separate secrets with `openssl rand -hex 32`. Reserve the first login with OWNER_PUBLIC_KEY (a Squorli account's key) or sign in first yourself (without a directory: create the first server account) right after the start. The nginx overlay is only needed for an external proxy.
 
 ```bash
 cd deploy

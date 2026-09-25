@@ -4,11 +4,12 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { timingSafeEqual } from "node:crypto";
 import type { Config } from "../config";
 import type { Db } from "../db";
-import { members, serverSettings, users } from "../db/schema";
+import { localAccounts, members, serverSettings, users } from "../db/schema";
 import type { Hub } from "../hub";
 import { SETTINGS_ID, loadCategories, loadChannels, loadSettings } from "../state";
 import { roleView, visibility } from "../visibility";
 import type { VoicePresence } from "../voice/presence";
+import { avatarOf } from "../names";
 
 /** One answer serves every request of the same moment: a widget on a busy page must not turn into a query per visitor. */
 const CACHE_MS = 1000;
@@ -31,8 +32,8 @@ export async function registerStatusRoutes(app: FastifyInstance, db: Db, hub: Hu
     // choice (`statusApiRoleId`, user's wish of 23 September 2026); null = the default role, i.e. a plain visitor.
     const [settings, allCategories, allChannels, rows, ctx] = await Promise.all([
       loadSettings(db), loadCategories(db), loadChannels(db),
-      db.select({ userId: members.userId, isOwner: members.isOwner, publicKey: users.publicKey, displayName: users.displayName, handle: users.handle, avatarUrl: users.avatarUrl })
-        .from(members).innerJoin(users, eq(users.id, members.userId)).orderBy(asc(members.joinedAt)),
+      db.select({ userId: members.userId, isOwner: members.isOwner, publicKey: users.publicKey, displayName: users.displayName, handle: users.handle, avatarUrl: users.avatarUrl, localHandle: localAccounts.handle, localAvatarAt: localAccounts.avatarUpdatedAt })
+        .from(members).innerJoin(users, eq(users.id, members.userId)).leftJoin(localAccounts, eq(localAccounts.userId, members.userId)).orderBy(asc(members.joinedAt)),
       visibility.refresh(db),
     ]);
     const view = roleView(ctx, roleId);
@@ -43,9 +44,9 @@ export async function registerStatusRoutes(app: FastifyInstance, db: Db, hub: Hu
       const seat = presence.statusOfUser(r.userId);
       if (!seat || !view.channels.has(seat.channelId)) continue;
       statusMembers.push({
-        userId: r.userId, displayName: displayNameOf(r), handle: r.handle,
+        userId: r.userId, displayName: displayNameOf(r), handle: r.handle, localHandle: r.localHandle,
         // The directory account's picture, public there like the handle (user's decision: no extra consent for it).
-        avatarUrl: r.avatarUrl,
+        avatarUrl: avatarOf(r),
         afk: hub.isAfk(r.userId), isOwner: settings.ownerId === r.userId || r.isOwner,
         voice: seat,
       });

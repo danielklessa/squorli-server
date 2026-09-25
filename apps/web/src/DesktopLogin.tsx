@@ -11,8 +11,10 @@ import { loginView, type LoginChoice } from "./loginView";
 /**
  * Login of a client without a home server (the desktop app, docs/features/desktop.md). The directory account comes first:
  * handle + password fetch the key from the directory (code with an active authenticator), then the account's servers are
- * connected and the one viewed last is shown. Below it: go on with this device's key (servers without a directory need no
- * account). The web client's login (`LoginScreen.tsx`) signs in on the server that serves the page instead.
+ * connected and the one viewed last is shown. Below it: go on with server accounts only (docs/features/local-accounts.md):
+ * servers are added by address and each one wants an account of its own (`~name`), made or signed in to in its join view;
+ * signing in with the directory account later keeps them. The web client's login (`LoginScreen.tsx`) signs in on the server
+ * that serves the page instead.
  */
 export function DesktopLogin({ store, state }: { store: Store; state: State }) {
   const busy = state.clientLogin.busy;
@@ -65,7 +67,7 @@ export function DesktopLogin({ store, state }: { store: Store; state: State }) {
         {state.directoryUrl && <>
           <nav className="login-choices" aria-label={t("login.accessChoice")}>
             <button type="button" className="secondary" aria-pressed={showAccount} disabled={busy} onClick={() => setChoice("account")}>{t("login.withAccount")}</button>
-            <button type="button" className="secondary" aria-pressed={showDevice} disabled={busy} onClick={() => setChoice("device")}>{t(account ? "login.savedAccount" : "login.continueLocal")}</button>
+            <button type="button" className="secondary" aria-pressed={showDevice} disabled={busy} onClick={() => setChoice("device")}>{t(account ? "login.savedAccount" : "desktopLogin.serverAccountsOnly")}</button>
           </nav>
           <div className="login-create-row">
             <a href={state.directoryUrl} target="_blank" rel="noreferrer" onClick={(e) => { e.preventDefault(); platform.links.openExternal(state.directoryUrl!); }}>{t("login.createAccount")}</a>
@@ -105,18 +107,18 @@ export function DesktopLogin({ store, state }: { store: Store; state: State }) {
         )}
 
         {showDevice && <div className="stack handle-box">
-          <h2>{t(account ? "login.savedAccount" : "login.continueLocal")}</h2>
-          <p className="muted small">{t(account ? "login.savedHint" : "login.localHint")}</p>
+          <h2>{t(account ? "login.savedAccount" : "desktopLogin.serverAccountsOnly")}</h2>
+          <p className="muted small">{t(account ? "login.savedHint" : "desktopLogin.serverAccountsHint")}</p>
           {account
             ? <p>{t("login.handle")}: <strong>@{account.handle}</strong> <span className="muted small">{t("login.verifiedAt", { host: dirHost ?? "" })}</span></p>
-            : <span className="muted small">{t("desktopLogin.deviceKeyHint")}</span>}
+            : null}
           {state.directoryError && <p className="error small">{state.directoryError}</p>}
           <details className="login-details">
             <summary>{t("desktopLogin.deviceKey")}</summary>
             <code className="key">{state.identity?.publicKey ?? "…"}</code>
             <button className="secondary" onClick={() => void store.forgetIdentity()} disabled={busy}>{t("login.forgetIdentity")}</button>
           </details>
-          <button className="login-primary" onClick={() => store.continueWithDeviceKey()} disabled={!state.identity || busy}>{account ? t("desktopLogin.continueAs", { handle: account.handle }) : t("login.continueLocal")}</button>
+          <button className="login-primary" onClick={() => store.continueWithDeviceKey()} disabled={!state.identity || busy}>{account ? t("desktopLogin.continueAs", { handle: account.handle }) : t("desktopLogin.serverAccountsOnly")}</button>
         </div>}
         {!showDevice && state.directoryError && <p className="error small">{state.directoryError}</p>}
       </div>

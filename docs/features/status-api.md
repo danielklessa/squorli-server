@@ -35,7 +35,7 @@ Compatibility: no `PROTOCOL_VERSION` bump. `VoiceMember` defaults the four field
 ### Not built, open
 
 - No rate limit on the route beyond the one-second cache; a public API on a busy server is the admin's choice.
-- No env variable to pin the mode at deployment (the admin area decides; `REQUIRE_ACCOUNT` has such a pin, this one could get one on request).
+- No env variable to pin the mode at deployment (the admin area decides; `LOCAL_ACCOUNTS` has such a pin, this one could get one on request).
 - The website's documentation (`../squorli-website`) does not mention the API yet.
 - The mobile join sheet (`MobileVoicePreview`) still lists names only, without the mute icons.
 

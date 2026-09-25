@@ -1,19 +1,82 @@
-import { ChallengeRequest, VerifyRequest, challengeMessage, labelFromUserAgent } from "@squorli/protocol";
+import { ChallengeRequest, VerifyRequest, challengeMessage, labelFromUserAgent, type VerifyResponse } from "@squorli/protocol";
 import * as ed from "@noble/ed25519";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { randomBytes } from "node:crypto";
 import type { Config } from "../config";
 import type { Db } from "../db";
-import { bans, invites, memberRoles, members, roles, serverSettings, sessions, users } from "../db/schema";
+import { bans, invites, localAccounts, memberRoles, members, roles, serverSettings, sessions, users } from "../db/schema";
 import type { Hub } from "../hub";
 import { SETTINGS_ID, broadcastStructure, loadSettings } from "../state";
 import type { DirectoryClient } from "../directory";
+import type { VoicePresence } from "../voice/presence";
 import { ChallengeStore } from "./challenges";
+import { registerLocalAccountRoutes } from "./local";
 
 const hexToBytes = (h: string) => Uint8Array.from(Buffer.from(h, "hex"));
 
-export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: Config, hub: Hub, directory: DirectoryClient) {
+/** Check a signature over a message built from the consumed challenge's nonce; sends 401 itself and returns false otherwise. */
+export async function checkChallenge(challenges: ChallengeStore, config: Config, reply: FastifyReply, challengeId: string, publicKey: string, signature: string, message: (domain: string, nonce: string) => string): Promise<boolean> {
+  const nonce = challenges.consume(challengeId, publicKey);
+  if (!nonce) { await reply.code(401).send({ error: "challenge_invalid" }); return false; }
+  const msg = new TextEncoder().encode(message(config.PUBLIC_DOMAIN, nonce));
+  const ok = await ed.verifyAsync(hexToBytes(signature), msg, hexToBytes(publicKey)).catch(() => false);
+  if (!ok) { await reply.code(401).send({ error: "signature_invalid" }); return false; }
+  return true;
+}
+
+/** The first sign-in with an account becomes the owner, while none exists (and OWNER_PUBLIC_KEY, if set, matches). */
+export async function isFirstEver(db: Db, config: Config, publicKey: string): Promise<boolean> {
+  const settings = await loadSettings(db);
+  return settings.ownerId === null && (config.OWNER_PUBLIC_KEY === undefined || config.OWNER_PUBLIC_KEY === publicKey);
+}
+
+/**
+ * Admit a user who has an account (directory handle or server account) and proved their key: ban check, membership (existing
+ * member, open server, invite, or the first owner), owner, session. Sends the error itself and returns null on a refusal.
+ */
+export async function admit(
+  db: Db, config: Config, hub: Hub, directory: DirectoryClient, req: FastifyRequest, reply: FastifyReply,
+  user: { id: string; publicKey: string; displayName: string | null }, invite: string | undefined, registrationRequired = false,
+): Promise<VerifyResponse | null> {
+  const [ban] = await db.select().from(bans).where(eq(bans.userId, user.id)).limit(1);
+  if (ban) { await reply.code(403).send({ error: "banned", reason: ban.reason }); return null; }
+  const [member] = await db.select().from(members).where(eq(members.userId, user.id)).limit(1);
+  const settings = await loadSettings(db);
+  const firstEver = await isFirstEver(db, config, user.publicKey);
+
+  // Membership: existing member, open server, or a valid invite.
+  if (!member) {
+    if (!settings.openJoin && !firstEver) {
+      if (!invite) { await reply.code(403).send({ error: "invite_required" }); return null; }
+      const used = await consumeInvite(db, invite);
+      if (!used) { await reply.code(403).send({ error: "invite_invalid" }); return null; }
+    }
+    await db.insert(members).values({ userId: user.id }).onConflictDoNothing();
+    req.log.info({ userId: user.id, via: invite ? "invite" : firstEver ? "owner" : "open" }, "neues Mitglied");
+    // Now a member: the directory may list this server for the account.
+    void directory.refresh(user, true);
+  }
+
+  // Determine the owner: the first sign-in with an account while none exists.
+  if (firstEver) {
+    await db.update(serverSettings).set({ ownerId: user.id }).where(and(eq(serverSettings.id, SETTINGS_ID), isNull(serverSettings.ownerId)));
+    await db.update(members).set({ isOwner: true }).where(eq(members.userId, user.id));
+    const [admin] = await db.select({ id: roles.id }).from(roles).where(eq(roles.name, "Admin")).limit(1);
+    if (admin) await db.insert(memberRoles).values({ userId: user.id, roleId: admin.id }).onConflictDoNothing();
+    req.log.warn({ userId: user.id, publicKey: user.publicKey.slice(0, 8) }, "Eigentuemer festgelegt");
+  }
+
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + config.SESSION_TTL_DAYS * 86_400_000);
+  // Device label for the session list (M6c); the client cannot set it, only the browser reveals it.
+  await db.insert(sessions).values({ token, userId: user.id, expiresAt, label: labelFromUserAgent(req.headers["user-agent"]), lastUsedAt: new Date() });
+
+  if (!member) await broadcastStructure(db, hub, ["members", "settings"]);
+  return { sessionToken: token, userId: user.id, expiresAt: expiresAt.toISOString(), registrationRequired };
+}
+
+export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: Config, hub: Hub, directory: DirectoryClient, presence: VoicePresence) {
   const challenges = new ChallengeStore();
   const sweeper = setInterval(() => challenges.sweep(), 30_000);
   app.addHook("onClose", async () => clearInterval(sweeper));
@@ -28,72 +91,39 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db, config: C
     const body = VerifyRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
     const { challengeId, publicKey, signature, invite } = body.data;
+    if (!(await checkChallenge(challenges, config, reply, challengeId, publicKey, signature, challengeMessage))) return;
 
-    const nonce = challenges.consume(challengeId, publicKey);
-    if (!nonce) return reply.code(401).send({ error: "challenge_invalid" });
-
-    const msg = new TextEncoder().encode(challengeMessage(config.PUBLIC_DOMAIN, nonce));
-    const ok = await ed.verifyAsync(hexToBytes(signature), msg, hexToBytes(publicKey)).catch(() => false);
-    if (!ok) return reply.code(401).send({ error: "signature_invalid" });
-
-    // Create or load the user. First sign-in = registration.
-    const [user] = await db
-      .insert(users)
-      .values({ publicKey })
-      .onConflictDoUpdate({ target: users.publicKey, set: { lastSeenAt: new Date() } })
-      .returning();
+    // No temporary users (docs/features/local-accounts.md): a key needs a directory handle or a server account here. A key
+    // this server has never seen gets a row only while the directory is asked, and loses it again when it has no account.
+    const [known] = await db.select({ id: users.id }).from(users).where(eq(users.publicKey, publicKey)).limit(1);
+    const [user] = await db.insert(users).values({ publicKey }).onConflictDoUpdate({ target: users.publicKey, set: { lastSeenAt: new Date() } }).returning();
     if (!user) return reply.code(500).send({ error: "user_upsert_failed" });
-
-    const [ban] = await db.select().from(bans).where(eq(bans.userId, user.id)).limit(1);
-    if (ban) return reply.code(403).send({ error: "banned", reason: ban.reason });
-
-    const [member] = await db.select().from(members).where(eq(members.userId, user.id)).limit(1);
-    // Look up the verified handle and display name from the directory (M6); an outage of the service is not a sign-in error.
-    // Only a member's lookup counts as a sign-in there: a refused sign-in must not put this server on the account's list.
+    const [member] = await db.select({ userId: members.userId }).from(members).where(eq(members.userId, user.id)).limit(1);
+    // Look up the verified handle and display name from the directory (M6); an outage of the service is not a sign-in error
+    // (the last cached handle counts). Only a member's lookup counts as a sign-in there.
     const profile = await directory.refresh({ id: user.id, publicKey, displayName: user.displayName }, !!member);
-    const settings = await loadSettings(db);
-    const firstEver = settings.ownerId === null && (config.OWNER_PUBLIC_KEY === undefined || config.OWNER_PUBLIC_KEY === publicKey);
-    // Account required (admin): the key needs a handle at the directory. Owners and the first sign-in are
-    // exempt (no lockout). If the directory is currently unreachable, the last cached handle counts.
-    if (settings.requireAccount && config.DIRECTORY_URL && !member?.isOwner && !firstEver) {
-      const handle = profile ? profile.handle : user.handle;
-      if (!handle) return reply.code(403).send({ error: "account_required" });
-    }
-
-    // Membership: existing member, open server, or a valid invite.
-    if (!member) {
-      if (!settings.openJoin && !firstEver) {
-        if (!invite) return reply.code(403).send({ error: "invite_required" });
-        const used = await consumeInvite(db, invite);
-        if (!used) return reply.code(403).send({ error: "invite_invalid" });
+    const handle = profile ? profile.handle : user.handle;
+    const [local] = await db.select({ handle: localAccounts.handle }).from(localAccounts).where(eq(localAccounts.userId, user.id)).limit(1);
+    if (!handle && !local) {
+      // A member from before server accounts keeps their key, messages and roles: they sign in, but must register first.
+      if (member) {
+        const res = await admit(db, config, hub, directory, req, reply, user, invite, true);
+        if (res) req.log.info({ userId: user.id }, "Mitglied ohne Konto: Registrierung verlangt");
+        return res ?? undefined;
       }
-      await db.insert(members).values({ userId: user.id }).onConflictDoNothing();
-      req.log.info({ userId: user.id, via: invite ? "invite" : firstEver ? "owner" : "open" }, "neues Mitglied");
-      // Now a member: the directory may list this server for the account (the lookup above said "no member").
-      void directory.refresh({ id: user.id, publicKey, displayName: user.displayName }, true);
+      if (!known) await db.delete(users).where(eq(users.id, user.id));
+      const settings = await loadSettings(db);
+      return reply.code(403).send({ error: "registration_required", localAccounts: settings.localAccounts === true });
     }
-
-    // Determine the owner: the first matching sign-in while none exists.
-    if (firstEver) {
-      await db.update(serverSettings).set({ ownerId: user.id }).where(and(eq(serverSettings.id, SETTINGS_ID), isNull(serverSettings.ownerId)));
-      await db.update(members).set({ isOwner: true }).where(eq(members.userId, user.id));
-      const [admin] = await db.select({ id: roles.id }).from(roles).where(eq(roles.name, "Admin")).limit(1);
-      if (admin) await db.insert(memberRoles).values({ userId: user.id, roleId: admin.id }).onConflictDoNothing();
-      req.log.warn({ userId: user.id, publicKey: publicKey.slice(0, 8) }, "Eigentuemer festgelegt");
-    }
-
-    const token = randomBytes(32).toString("base64url");
-    const expiresAt = new Date(Date.now() + config.SESSION_TTL_DAYS * 86_400_000);
-    // Device label for the session list (M6c); the client cannot set it, only the browser reveals it.
-    await db.insert(sessions).values({ token, userId: user.id, expiresAt, label: labelFromUserAgent(req.headers["user-agent"]), lastUsedAt: new Date() });
-
-    if (!member) await broadcastStructure(db, hub, ["members", "settings"]);
-    return { sessionToken: token, userId: user.id, expiresAt: expiresAt.toISOString() };
+    const res = await admit(db, config, hub, directory, req, reply, { id: user.id, publicKey, displayName: profile?.displayName ?? user.displayName }, invite);
+    return res ?? undefined;
   });
+
+  await registerLocalAccountRoutes(app, db, config, hub, directory, presence, challenges);
 }
 
 /** Check and consume an invite (atomically). true = valid and counted. */
-async function consumeInvite(db: Db, code: string): Promise<boolean> {
+export async function consumeInvite(db: Db, code: string): Promise<boolean> {
   const updated = await db
     .update(invites)
     .set({ uses: sql`${invites.uses} + 1` })

@@ -82,12 +82,14 @@ function ServerTab({ api, server, directoryUrl, run, save }: { api: ServerApi; s
         <input type="checkbox" checked={server.settings.openJoin} onChange={(e) => run(() => api.updateSettings({ openJoin: e.target.checked }))} />
         {t("admin.openJoin")}
       </label>
-      <label className="check">
-        <input type="checkbox" checked={server.settings.requireAccount} disabled={!directoryUrl || server.settings.requireAccountLocked} onChange={(e) => run(() => api.updateSettings({ requireAccount: e.target.checked }))} />
-        {t("admin.requireAccount")}
-      </label>
-      {!directoryUrl && <span className="muted small">{t("admin.noDirectoryAccounts")}</span>}
-      {directoryUrl && server.settings.requireAccountLocked && <span className="muted small">{t("admin.requireAccountLocked")}</span>}
+      {/* Server accounts (docs/features/local-accounts.md): a server from before them does not send the field. */}
+      {server.settings.localAccounts !== undefined && <>
+        <label className="check">
+          <input type="checkbox" checked={server.settings.localAccounts} disabled={server.settings.localAccountsLocked === true} onChange={(e) => run(() => api.updateSettings({ localAccounts: e.target.checked }))} />
+          {t("admin.localAccounts")}
+        </label>
+        <span className="muted small">{t(!directoryUrl ? "admin.localAccountsNoDirectory" : server.settings.localAccountsLocked ? "admin.localAccountsLocked" : "admin.localAccountsHint")}</span>
+      </>}
       <h3>{t("admin.directoryHeading")}</h3>
       <label className="check">
         <input type="checkbox" checked={server.settings.listed} disabled={!directoryUrl} onChange={(e) => run(() => api.updateSettings({ listed: e.target.checked }))} />

@@ -40,7 +40,8 @@ import { registerStatusRoutes } from "./routes/status";
 import { deleteUserAccount, type DeleteUserResult } from "./users/deleteUser";
 import { registerUserRoutes } from "./users/routes";
 import { DirectoryClient, SYNC_INTERVAL_MS } from "./directory";
-import { broadcastStructure, loadChannels, loadSettings, setRequireAccountForced } from "./state";
+import { broadcastStructure, loadChannels, loadSettings, setLocalAccountsConfig } from "./state";
+import { setPublicOrigin } from "./names";
 import { visibility } from "./visibility";
 import { AfkMover } from "./voice/afk";
 import { moveGrants } from "./voice/confine";
@@ -120,8 +121,9 @@ async function main() {
     serverKey: directory?.serverKey ?? null,
     /** Server name and icon for the page title and favicon even before sign-in (both are also visible in the invite preview). */
     /** `inviteRequired`: new members need an invite code (the server is not open), so the login shows the field from the start. No secret: a sign-in without a code answers `invite_required` anyway. */
-    ...(await loadSettings(db).then((st) => ({ serverName: st.name, iconUrl: st.iconUrl, requireAccount: st.requireAccount && !!config.DIRECTORY_URL, inviteRequired: !st.openJoin }))
-      .catch(() => ({ serverName: null, iconUrl: null, requireAccount: false, inviteRequired: false }))),
+    /** `localAccounts`: server accounts (`~name`) may be registered here; `requireAccount` is always true since then (every sign-in needs an account). */
+    ...(await loadSettings(db).then((st) => ({ serverName: st.name, iconUrl: st.iconUrl, requireAccount: true, inviteRequired: !st.openJoin, localAccounts: st.localAccounts === true }))
+      .catch(() => ({ serverName: null, iconUrl: null, requireAccount: true, inviteRequired: false, localAccounts: false }))),
     version: VERSION,
     /** Directory service (M6) that this server recognizes; the client registers handles there. null = none. */
     directoryUrl: config.DIRECTORY_URL ?? null,
@@ -131,8 +133,10 @@ async function main() {
     time: new Date().toISOString(),
   }));
 
-  setRequireAccountForced(config.REQUIRE_ACCOUNT ?? null);
-  if (config.REQUIRE_ACCOUNT !== undefined && !config.DIRECTORY_URL) app.log.warn("REQUIRE_ACCOUNT gesetzt, aber ohne DIRECTORY_URL wirkungslos (kein Verzeichnis, keine Kontopruefung)");
+  setLocalAccountsConfig({ directory: !!config.DIRECTORY_URL, forced: config.LOCAL_ACCOUNTS ?? null });
+  setPublicOrigin(config.publicOrigin);
+  if (config.REQUIRE_ACCOUNT !== undefined) app.log.warn("REQUIRE_ACCOUNT ist veraltet und wirkungslos: jede Anmeldung braucht seit den Serverkonten ein Konto (Verzeichnis-Handle oder ~Serverkonto)");
+  if (config.LOCAL_ACCOUNTS === false && !config.DIRECTORY_URL) app.log.warn("LOCAL_ACCOUNTS=false ohne DIRECTORY_URL wirkungslos: ohne Verzeichnis sind Serverkonten der einzige Weg hinein");
   await bootstrap(db, config, app.log);
   directory = new DirectoryClient(db, config, app.log);
   await directory.init();
@@ -197,7 +201,7 @@ async function main() {
 
   // Uploads (attachments, server icon): one file per request, size per MAX_UPLOAD_MB.
   await app.register(multipart, { limits: { fileSize: Math.round(config.MAX_UPLOAD_MB * 1024 * 1024), files: 1 } });
-  await registerAuthRoutes(app, db, config, hub, directory);
+  await registerAuthRoutes(app, db, config, hub, directory, presence);
   await registerUserRoutes(app, db, directory, hub, presence);
   await registerSettingsRoutes(app, db, hub, config, directory, { presence, lk, onRadioChange: syncRadioMeta });
   await registerStatusRoutes(app, db, hub, presence, config);

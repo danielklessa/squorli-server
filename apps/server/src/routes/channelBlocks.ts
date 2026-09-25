@@ -5,7 +5,8 @@ import { requireMember } from "../auth/session";
 import { outranks } from "../authz";
 import { canIn, channelActor } from "../channelGuard";
 import type { Db } from "../db";
-import { users } from "../db/schema";
+import { localAccounts, users } from "../db/schema";
+import { localJoin, nameColumns } from "../names";
 import type { Hub } from "../hub";
 import type { LivekitAdmin } from "../livekit/admin";
 import { actorOf } from "../state";
@@ -28,7 +29,7 @@ const UserParams = { type: "object", properties: { id: { type: "string", format:
 export async function registerChannelBlockRoutes(app: FastifyInstance, db: Db, hub: Hub, presence: VoicePresence, lk: LivekitAdmin) {
   async function onWire(entries: BlockEntry[]): Promise<ChannelBlock[]> {
     const ids = [...new Set(entries.flatMap((e) => (e.blockedBy ? [e.blockedBy] : [])))];
-    const names = new Map((ids.length ? await db.select({ id: users.id, publicKey: users.publicKey, displayName: users.displayName, handle: users.handle }).from(users).where(inArray(users.id, ids)) : []).map((u) => [u.id, displayNameOf(u)]));
+    const names = new Map((ids.length ? await db.select({ id: users.id, ...nameColumns }).from(users).leftJoin(localAccounts, localJoin).where(inArray(users.id, ids)) : []).map((u) => [u.id, displayNameOf(u)]));
     return entries.map((e) => ({
       channelId: e.channelId, userId: e.userId, until: e.until === null ? null : new Date(e.until).toISOString(), source: e.source,
       blockedBy: e.blockedBy ? names.get(e.blockedBy) ?? null : null, createdAt: new Date(e.createdAt).toISOString(),

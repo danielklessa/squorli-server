@@ -19,3 +19,19 @@ describe("server login choices", () => {
     expect(loginView(false, false, false, "account")).toMatchObject({ mode: "device" });
   });
 });
+
+describe("a server's login with server accounts", () => {
+  it("lets a typed prefix decide", async () => {
+    const { loginPrefix } = await import("./loginView");
+    expect(loginPrefix("@anna")).toBe("directory");
+    expect(loginPrefix(" ~anna")).toBe("local");
+    expect(loginPrefix("anna")).toBeNull();
+  });
+  it("puts the directory's account first and the server account in a second tab", async () => {
+    const { createTabs } = await import("./loginView");
+    expect(createTabs(true, true)).toEqual(["directory", "local"]);
+    expect(createTabs(true, false)).toEqual(["directory"]);
+    expect(createTabs(false, false)).toEqual(["local"]);
+    expect(createTabs(false, true)).toEqual(["local"]);
+  });
+});

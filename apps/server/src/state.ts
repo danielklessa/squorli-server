@@ -2,22 +2,30 @@ import { displayNameOf, hasPermission, twitchChannelOf, youtubeVideoOf, type Cat
 import { asc, eq, inArray } from "drizzle-orm";
 import { effectivePermissions, type Actor } from "./authz";
 import type { Db } from "./db";
-import { categories, channels, memberRoles, members, radioStations, roles, serverSettings, users } from "./db/schema";
+import { categories, channels, localAccounts, memberRoles, members, radioStations, roles, serverSettings, users } from "./db/schema";
 import type { Hub } from "./hub";
 import { visibility, type PermissionContext } from "./visibility";
+import { avatarOf } from "./names";
 
 export const SETTINGS_ID = "server";
 
-/** REQUIRE_ACCOUNT from the configuration: null = the admin area decides, otherwise pinned (index.ts sets it at startup). */
-let requireAccountForced: boolean | null = null;
-export function setRequireAccountForced(v: boolean | null): void { requireAccountForced = v; }
+/**
+ * Server accounts (docs/features/local-accounts.md): without a directory they are always allowed, else LOCAL_ACCOUNTS pins the
+ * switch or the admin area decides (index.ts sets both at startup).
+ */
+let localAccountsForced: boolean | null = null;
+export function setLocalAccountsConfig(opts: { directory: boolean; forced: boolean | null }): void {
+  localAccountsForced = opts.directory ? opts.forced : true;
+}
 
 export async function loadSettings(db: Db): Promise<ServerSettings> {
   const [row] = await db.select().from(serverSettings).where(eq(serverSettings.id, SETTINGS_ID)).limit(1);
   if (!row) throw new Error("server_settings fehlt (Bootstrap nicht gelaufen)");
   return {
     name: row.name, openJoin: row.openJoin, ownerId: row.ownerId,
-    requireAccount: requireAccountForced ?? row.requireAccount, requireAccountLocked: requireAccountForced !== null,
+    // Every sign-in needs an account since 25 September 2026; both stay for clients from before.
+    requireAccount: true, requireAccountLocked: true,
+    localAccounts: localAccountsForced ?? row.localAccounts, localAccountsLocked: localAccountsForced !== null,
     listed: row.listed, description: row.description, radioAutoStop: row.radioAutoStop,
     afkChannelId: row.afkChannelId,
     iconUrl: row.iconMime && row.iconUpdatedAt ? `/api/server-icon?v=${row.iconUpdatedAt.getTime()}` : null,
@@ -69,9 +77,10 @@ export async function loadRoles(db: Db): Promise<Role[]> {
 
 export async function loadMembers(db: Db, hub: Hub): Promise<Member[]> {
   const rows = await db
-    .select({ userId: members.userId, joinedAt: members.joinedAt, streamBlocked: members.streamBlocked, isOwner: members.isOwner, publicKey: users.publicKey, displayName: users.displayName, handle: users.handle, avatarUrl: users.avatarUrl })
+    .select({ userId: members.userId, joinedAt: members.joinedAt, streamBlocked: members.streamBlocked, isOwner: members.isOwner, publicKey: users.publicKey, displayName: users.displayName, handle: users.handle, avatarUrl: users.avatarUrl, localHandle: localAccounts.handle, localAvatarAt: localAccounts.avatarUpdatedAt })
     .from(members)
     .innerJoin(users, eq(users.id, members.userId))
+    .leftJoin(localAccounts, eq(localAccounts.userId, members.userId))
     .orderBy(asc(members.joinedAt));
   const links = rows.length
     ? await db.select().from(memberRoles).where(inArray(memberRoles.userId, rows.map((r) => r.userId)))
@@ -89,7 +98,8 @@ export async function loadMembers(db: Db, hub: Hub): Promise<Member[]> {
     game: hub.gameOf(r.userId),
     streamBlocked: r.streamBlocked,
     handle: r.handle,
-    avatarUrl: r.avatarUrl,
+    avatarUrl: avatarOf(r),
+    localHandle: r.localHandle,
     isOwner: r.isOwner,
   }));
 }

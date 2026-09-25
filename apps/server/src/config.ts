@@ -39,10 +39,15 @@ const Env = z.object({
    */
   DIRECTORY_PROOF_URL: z.string().url().optional(),
   /**
-   * Pin "account required" at deployment time: true/false overrides the setting from the admin area (which is then
-   * locked). Empty = the admin area decides. Only takes effect together with DIRECTORY_URL.
+   * Deprecated since 25 September 2026: every sign-in needs an account now (a directory handle or a server account,
+   * docs/features/local-accounts.md). Still parsed so an old .env does not stop the server; the startup log warns.
    */
   REQUIRE_ACCOUNT: z.enum(["true", "false", "1", "0"]).transform((v) => v === "true" || v === "1").optional(),
+  /**
+   * Server accounts (`~name`, docs/features/local-accounts.md): true/false pins whether they may be registered here (the admin
+   * area's switch is then locked). Empty = the admin area decides. Without DIRECTORY_URL they are always allowed.
+   */
+  LOCAL_ACCOUNTS: z.enum(["true", "false", "1", "0"]).transform((v) => v === "true" || v === "1").optional(),
   /**
    * For tests only (the smoke test cannot wait two minutes): how long a voice channel may be empty before its radio is
    * turned off. Not for operators: the admin area tells people "two minutes" (protocol RADIO_IDLE_STOP_MS).

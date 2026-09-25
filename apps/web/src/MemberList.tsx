@@ -1,5 +1,5 @@
 import { Avatar } from "./Avatar";
-import { Permission, hasPermission, type Channel, type Member, type Role, type VoiceMember } from "@squorli/protocol";
+import { Permission, handleLabel, hasPermission, type Channel, type Member, type Role, type VoiceMember } from "@squorli/protocol";
 import { useState, type MouseEvent, type ReactNode } from "react";
 import { ContextMenu, ContextSubmenu, type MenuAnchor } from "./ContextMenu";
 import type { ServerApi } from "./api";
@@ -103,7 +103,7 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
                 <li key={m.userId} className={`member ${m.online ? "" : "offline"}`}>
                   <button className="member-btn" aria-haspopup="menu" aria-expanded={open?.userId === m.userId} onContextMenu={(e) => openMenu(e, m.userId)} onClick={(e) => (platform.mobile ? openMenu(e, m.userId) : openProfile(e, m.userId))}>
                     <Avatar name={m.displayName} src={m.avatarUrl} online={m.online} afk={m.afk} />
-                    <span className="member-identity"><span style={r?.color ? { color: r.color } : undefined}>{m.displayName}</span><GameLine game={m.online ? m.game : null} fallback={(m.handle || isMe) && <small>{m.handle && `@${m.handle}`}{m.handle && isMe && " "}{isMe && t("members.you")}</small>} /></span>
+                    <span className="member-identity"><span style={r?.color ? { color: r.color } : undefined}>{m.displayName}</span><GameLine game={m.online ? m.game : null} fallback={(handleLabel(m) || isMe) && <small>{handleLabel(m)}{handleLabel(m) && isMe && " "}{isMe && t("members.you")}</small>} /></span>
                     {m.online && m.afk && <Icon name="moon" className="afk" title={t("members.afk")} />}
                     {m.isOwner && <Icon name="crown" className="owner" title={t("members.owner")} />}
                     {m.streamBlocked && <Icon name="video-off" className="muted" title={t("members.streamBlocked")} />}
@@ -124,7 +124,7 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
         return (
           <ContextMenu anchor={open} label={m.displayName} onClose={closeMenu}>
             <div className="context-identity" role="presentation"><Avatar name={m.displayName} src={m.avatarUrl} online={m.online} afk={m.afk} /><div><strong>{m.displayName}</strong><GameLine game={m.online ? m.game : null} /></div></div>
-            <div className="muted small">{m.handle && <><strong>@{m.handle}</strong> · </>}{m.publicKey.slice(0, 16)}…</div>
+            <div className="muted small">{handleLabel(m) && <><strong>{handleLabel(m)}</strong> · </>}{m.publicKey.slice(0, 16)}…</div>
             {friends && !isMe && (() => {
               // M7: add friend / write a message. Without a handle the member has no directory account, so friendship is not possible.
               const st = friends.stateOf(m.publicKey);
@@ -137,7 +137,7 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
                   {st === "blocked" && <span className="muted small">{t("members.blocked")}</span>}
                   {st === null && (m.handle
                     ? <button role="menuitem" className="secondary small" onClick={() => { closeMenu(); friends.onRequest(m.publicKey); }}><Icon name="user-plus" /> {t("home.addFriend")}</button>
-                    : <span className="muted small" title={t("home.noAccountHint")}>{t("members.noDirectoryAccount")}</span>)}
+                    : <span className="muted small" title={t(m.localHandle ? "members.localNoDmHint" : "home.noAccountHint")}>{t(m.localHandle ? "members.localNoDm" : "members.noDirectoryAccount")}</span>)}
                 </div>
               );
             })()}

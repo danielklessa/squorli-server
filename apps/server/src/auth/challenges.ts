@@ -29,3 +29,34 @@ export class ChallengeStore {
     for (const [id, item] of this.items) if (item.expiresAt < now) this.items.delete(id);
   }
 }
+
+/** Counting window per key (client IP, handle): `limit` hits per `windowMs`, as at the directory. */
+export class RateLimiter {
+  private readonly hits = new Map<string, number[]>();
+  constructor(private readonly limit: number, private readonly windowMs = 60_000) {}
+
+  allow(key: string): boolean {
+    if (this.blocked(key)) return false;
+    this.hit(key);
+    return true;
+  }
+  /** Check only, without counting (failed attempts count through hit()). */
+  blocked(key: string): boolean {
+    const now = Date.now();
+    const list = (this.hits.get(key) ?? []).filter((t) => now - t < this.windowMs);
+    if (list.length) this.hits.set(key, list); else this.hits.delete(key);
+    return list.length >= this.limit;
+  }
+  hit(key: string) {
+    const list = this.hits.get(key) ?? [];
+    list.push(Date.now());
+    this.hits.set(key, list);
+  }
+  sweep() {
+    const now = Date.now();
+    for (const [k, list] of this.hits) {
+      const kept = list.filter((t) => now - t < this.windowMs);
+      if (kept.length) this.hits.set(k, kept); else this.hits.delete(k);
+    }
+  }
+}

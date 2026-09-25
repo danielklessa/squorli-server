@@ -7,7 +7,7 @@ import { LOCALES, locale, t } from "./i18n";
 import { DOWNLOAD_URL } from "./appUpdates";
 import { platform } from "./platform";
 import { formatDeepLink, parseDeepLink } from "./platform/deepLink";
-import { loginView, type LoginChoice } from "./loginView";
+import { ClaimAccount, CreateAccount, LocalRegisterForm, SignInForm } from "./AccountForms";
 import { PasswordInput } from "./PasswordInput";
 
 /** Invite code from /invite/<code> or ?invite=<code>. */
@@ -18,8 +18,10 @@ export function inviteFromUrl(): string | null {
 }
 
 /**
- * Account sign-in and local access are separate views; registration belongs to the directory.
- * If the device key already has a handle, continuing with that account comes first.
+ * Login of the server that serves the page (docs/features/local-accounts.md, 25 September 2026). There are no temporary users:
+ * every sign-in is an account. One sign-in form whose prefix decides (`@name` = the directory account, `~name` = a server
+ * account of this server); a key that has a directory handle already continues with one click. Creating an account has tabs:
+ * the directory's account first where the server has one, the server account where the server allows it.
  */
 export function LoginScreen({ store, state }: { store: Store; state: State }) {
   // Only a client with a home server shows this login (App.tsx); one without has DesktopLogin.tsx.
@@ -29,25 +31,13 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
   const [preview, setPreview] = useState<InvitePreview | null>(null);
   const busy = home.connection === "logging-in" || home.connection === "connecting";
   const dirHost = state.directoryUrl ? new URL(state.directoryUrl).host : null;
+  // The server account this browser keeps for this server wins: the server signs in with its key (store.identityFor).
+  const savedLocal = state.serverAccounts[home.host] ?? null;
+  const saved = savedLocal ? null : state.directoryAccount;
 
-  // Existing account: create a password backup when it is still missing.
+  // Existing directory account: create a password backup when it is still missing.
   const [backupPw, setBackupPw] = useState("");
   const [backupBusy, setBackupBusy] = useState(false);
-  // Account: handle + password, plus a code when the authenticator is active (M6c)
-  const [accHandle, setAccHandle] = useState("");
-  const [accPw, setAccPw] = useState("");
-  const [accCode, setAccCode] = useState("");
-  const [needCode, setNeedCode] = useState(false);
-  // Code by e-mail: offered when the directory says (after the correct password) that the account has a confirmed address.
-  const [emailOffered, setEmailOffered] = useState(false);
-  const [emailNote, setEmailNote] = useState<string | null>(null);
-  const [emailBusy, setEmailBusy] = useState(false);
-  const [choice, setChoice] = useState<LoginChoice | null>(null);
-
-  // Account required (admin): a browser key without a handle is not offered at all (no box, no toggle);
-  // if it has a verified handle it is an account and may sign in as before.
-  const { mode, accountRequired, deviceAllowed, showDevice, showAccount } =
-    loginView(!!state.directoryUrl, !!state.directoryAccount, home.requireAccount, choice);
 
   useEffect(() => {
     const code = invite.trim();
@@ -63,40 +53,35 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
   function onLoginError(err: unknown) {
     const code = (err as { code?: string | null }).code;
     if (code === "invite_required" || code === "invite_invalid") setNeedInvite(true);
-    if (code === "totp_required") { setNeedCode(true); setEmailOffered((err as { body?: { email?: unknown } }).body?.email === true); }
+    throw err;
   }
-  async function sendEmailCode() {
-    const url = state.directoryUrl;
-    if (!url) return;
-    setEmailBusy(true); setEmailNote(null);
-    try {
-      const r = await api.directoryEmailCode(url, accHandle.trim().replace(/^@/, ""), accPw);
-      setEmailNote(t("login.emailCodeSent", { to: r.sentTo }));
-    } catch (err) { setEmailNote(api.explainDirectoryError(err)); }
-    finally { setEmailBusy(false); }
-  }
+  const inviteCode = () => invite.trim() || undefined;
 
-  async function go() {
-    try { await store.login(invite.trim() || undefined); afterLogin(); }
-    catch (err) { onLoginError(err); }
+  async function continueSaved() {
+    try { await store.login(inviteCode()); afterLogin(); }
+    catch (err) { try { onLoginError(err); } catch { /* shown by the server's state */ } }
   }
-
-  async function goAccount() {
-    if (state.directoryAccount) {
+  async function signInDirectory(handle: string, password: string, code?: string) {
+    // Another directory account replaces this browser's key; the same handle only fetches the key it already has.
+    if (saved && saved.handle.toLowerCase() !== handle.toLowerCase()) {
       const ok = await askConfirm({
         title: t("login.replaceKeyTitle"),
-        text: t(state.directoryAccount.hasBackup ? "login.replaceKeyText" : "login.replaceKeyTextNoBackup", { handle: state.directoryAccount.handle }),
+        text: t(saved.hasBackup ? "login.replaceKeyText" : "login.replaceKeyTextNoBackup", { handle: saved.handle }),
         confirmLabel: t("login.replace"), danger: true,
       });
       if (!ok) return;
     }
-    try {
-      await store.loginWithHandle(accHandle.trim().replace(/^@/, ""), accPw, invite.trim() || undefined, accCode.trim() || undefined);
-      setAccPw(""); setAccCode(""); setNeedCode(false); setEmailOffered(false); setEmailNote(null);
-      afterLogin();
-    } catch (err) { onLoginError(err); }
+    try { await store.loginWithHandle(handle, password, inviteCode(), code); afterLogin(); }
+    catch (err) { onLoginError(err); }
   }
-
+  async function signInLocal(handle: string, password: string) {
+    try { await store.loginLocal(home.host, handle, password, inviteCode()); afterLogin(); }
+    catch (err) { onLoginError(err); }
+  }
+  async function registerLocal(handle: string, password: string) {
+    try { await store.registerLocal(home.host, handle, password, inviteCode()); afterLogin(); }
+    catch (err) { onLoginError(err); }
+  }
   async function backup() {
     setBackupBusy(true);
     try { if (await store.createBackup(backupPw)) setBackupPw(""); } finally { setBackupBusy(false); }
@@ -115,73 +100,28 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
   })();
 
   const showInvite = needInvite || !!invite || home.inviteRequired;
+  const claim = home.me?.registrationRequired === true;
+  // Without a directory every account here is a server account; the server reports it as allowed then.
+  const localAccounts = home.localAccounts || !state.directoryUrl;
 
-  const accountBox = showAccount && (
+  const savedBox = saved && !claim && (
     <div className="stack handle-box">
-      <h2>{t("login.withAccount")}</h2>
-      <span className="muted small">{t("login.withAccountHint", { host: dirHost ?? "" })}</span>
-      <div className="login-fields">
-        <label className="stack"><span>{t("login.username")}</span>
-          <span className="login-handle-field">
-            <span className="muted" aria-hidden="true">@</span>
-            <input value={accHandle} onChange={(e) => setAccHandle(e.target.value.trimStart().replace(/^@+/, ""))} placeholder={t("login.handleExample")} maxLength={33} autoComplete="username" autoCapitalize="none" spellCheck={false} disabled={busy} aria-describedby="login-handle-hint" />
-          </span>
-          <small id="login-handle-hint" className="muted">{t("login.usernameHint")}</small>
-        </label>
-        <label className="stack"><span>{t("login.password")}</span>
-          <PasswordInput value={accPw} onChange={(e) => setAccPw(e.target.value)} autoComplete="current-password" disabled={busy}
-          onKeyDown={(e) => { if (e.key === "Enter") void goAccount(); }} />
-        </label>
-      </div>
-      {needCode && (
-        <div className="login-fields">
-          <label className="stack"><span>{t("login.codePlaceholder")}</span>
-          <input value={accCode} onChange={(e) => setAccCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" maxLength={20} autoFocus disabled={busy}
-            onKeyDown={(e) => { if (e.key === "Enter") void goAccount(); }} />
-          </label>
-          {emailOffered && <button type="button" className="secondary" onClick={() => void sendEmailCode()} disabled={busy || emailBusy}>{emailBusy ? t("login.emailCodeSending") : t("login.emailCode")}</button>}
-        </div>
-      )}
-      {needCode && emailNote && <span className="muted small">{emailNote}</span>}
-      <button className="login-primary" onClick={() => void goAccount()} disabled={busy || accHandle.trim().length < 3 || accPw.length < BACKUP_MIN_PASSWORD || (needCode && accCode.trim().length < 6)}>{busy ? t("login.connecting") : t("login.signIn")}</button>
-      <p className="muted small"><a href={`${state.directoryUrl ?? ""}/?handle=${encodeURIComponent(accHandle.trim().replace(/^@/, ""))}`} target="_blank" rel="noreferrer">{t("login.manageAccount")}</a> {t("login.manageAccountHint")}</p>
-    </div>
-  );
-
-  const deviceBox = showDevice && (
-    <div className="stack handle-box">
-      <h2>{t(state.directoryAccount ? "login.savedAccount" : "login.continueLocal")}</h2>
-      <p className="muted small">{t(state.directoryAccount ? "login.savedHint" : "login.localHint")}</p>
-      {state.directoryUrl ? (
-        state.directoryAccount ? (
-          <>
-            <p>{t("login.handle")}: <strong>@{state.directoryAccount.handle}</strong> <span className="muted small">{t("login.verifiedAt", { host: dirHost ?? "" })}</span></p>
-            {state.directoryAccount.hasBackup ? (
-              <span className="muted small">{t("login.backupPresent", { handle: state.directoryAccount.handle })}</span>
-            ) : (
-              <>
-                <label className="stack"><span>{t("login.setPasswordFor", { handle: state.directoryAccount.handle })}</span>
-                  <PasswordInput value={backupPw} onChange={(e) => setBackupPw(e.target.value)} placeholder={t("login.passwordMin", { n: BACKUP_MIN_PASSWORD })} autoComplete="new-password" disabled={backupBusy}
-                    onKeyDown={(e) => { if (e.key === "Enter") void backup(); }} />
-                </label>
-                  <button className="secondary" onClick={() => void backup()} disabled={backupBusy || backupPw.length < BACKUP_MIN_PASSWORD}>{backupBusy ? t("login.saving") : t("login.setPassword")}</button>
-                <span className="muted small">{t("login.backupHint")}</span>
-              </>
-            )}
-          </>
-        ) : (
-          state.directoryAccount === undefined ? <span className="muted small">{t("login.queryingDirectory")}</span> : null
-        )
+      <h2>{t("login.savedAccount")}</h2>
+      <p>{t("login.handle")}: <strong>@{saved.handle}</strong> <span className="muted small">{t("login.verifiedAt", { host: dirHost ?? "" })}</span></p>
+      {saved.hasBackup ? (
+        <span className="muted small">{t("login.backupPresent", { handle: saved.handle })}</span>
       ) : (
-        <span className="muted small">{t("login.noDirectory")}</span>
+        <>
+          <label className="stack"><span>{t("login.setPasswordFor", { handle: saved.handle })}</span>
+            <PasswordInput value={backupPw} onChange={(e) => setBackupPw(e.target.value)} placeholder={t("login.passwordMin", { n: BACKUP_MIN_PASSWORD })} autoComplete="new-password" disabled={backupBusy}
+              onKeyDown={(e) => { if (e.key === "Enter") void backup(); }} />
+          </label>
+          <button className="secondary" onClick={() => void backup()} disabled={backupBusy || backupPw.length < BACKUP_MIN_PASSWORD}>{backupBusy ? t("login.saving") : t("login.setPassword")}</button>
+          <span className="muted small">{t("login.backupHint")}</span>
+        </>
       )}
-      <details className="login-details">
-        <summary>{t("login.deviceKey")}</summary>
-        <code className="key">{state.identity?.publicKey ?? "…"}</code>
-        <button type="button" className="secondary" onClick={() => void store.forgetIdentity()} disabled={busy}>{t("login.forgetIdentity")}</button>
-      </details>
-      <button className="login-primary" onClick={() => void go()} disabled={!state.identity || busy}>{busy ? t("login.connecting") : t(state.directoryAccount ? "login.signInConnect" : "login.continueLocal")}</button>
-      {state.directoryError && <p className="error small">{state.directoryError}</p>}
+      <button className="login-primary" onClick={() => void continueSaved()} disabled={!state.identity || busy}>{busy ? t("login.connecting") : t("desktopLogin.continueAs", { handle: saved.handle })}</button>
+      {state.directoryAccount && <p className="muted small"><a href={`${state.directoryUrl ?? ""}/?handle=${encodeURIComponent(saved.handle)}`} target="_blank" rel="noreferrer">{t("login.manageAccount")}</a> {t("login.manageAccountHint")}</p>}
     </div>
   );
 
@@ -204,31 +144,48 @@ export function LoginScreen({ store, state }: { store: Store; state: State }) {
             {home.removed.message ? `: ${home.removed.message}` : "."}
           </p>
         )}
-        {home.error && <p className="error">{home.error}</p>}
+        {!claim && home.error && <p className="error">{home.error}</p>}
+        {!claim && home.accountNeeded && <p className="muted">{t("login.accountNeeded")}</p>}
 
-        {state.directoryUrl && <nav className="login-choices" aria-label={t("login.accessChoice")}>
-          <button type="button" className="secondary" aria-pressed={showAccount} disabled={busy || backupBusy} onClick={() => setChoice("account")}>{t("login.withAccount")}</button>
-          {deviceAllowed && <button type="button" className="secondary" aria-pressed={mode === "device"} disabled={busy || backupBusy} onClick={() => setChoice("device")}>{t(state.directoryAccount ? "login.savedAccount" : "login.continueLocal")}</button>}
-        </nav>}
-        {state.directoryUrl && <div className="login-create-row">
-          <a href={state.directoryUrl} target="_blank" rel="noreferrer">{t("login.createAccount")}</a>
-          <p className="muted small">{t("login.createDirectoryHint", { host: dirHost ?? "" })}</p>
-        </div>}
-        {/* Always there when the server takes new members by invite only (user's wish, 19 September 2026); it holds the code of an invite link. */}
-        {showInvite && (
-          <label className="stack">
-            <span>{t("login.inviteCode")}</span>
-            <input value={invite} maxLength={32} onChange={(e) => setInvite(e.target.value)} placeholder={t("login.invitePlaceholder")} autoFocus={needInvite && !invite} />
-            {home.inviteRequired && <span className="muted small">{t("login.inviteRequiredHint")}</span>}
-          </label>
-        )}
-        {accountBox}{deviceBox}
-        {accountRequired && !deviceAllowed && <p className="muted small">{t("login.accountRequired")}</p>}
-        {!showDevice && state.directoryError && <p className="error small">{state.directoryError}</p>}
-
-        <div className="row">
-          {!showInvite && <button className="secondary" onClick={() => setNeedInvite(true)}>{t("login.haveInvite")}</button>}
-        </div>
+        {claim ? (
+          <ClaimAccount serverName={home.serverName ?? home.host} directoryUrl={state.directoryUrl} localAccounts={localAccounts} emailRequired={state.directoryEmailRequired} error={home.error}
+            onClaimLocal={(handle, pw) => store.claimLocal(home.host, handle, pw)} onClaimDirectory={(handle, email, code) => store.claimDirectory(home.host, handle, email, code)}
+            onLogout={() => store.logout()} checkFree={(h) => store.home!.api.localHandleFree(h)} />
+        ) : <>
+          {/* Always there when the server takes new members by invite only (user's wish, 19 September 2026); it holds the code of an invite link. */}
+          {showInvite && (
+            <label className="stack">
+              <span>{t("login.inviteCode")}</span>
+              <input value={invite} maxLength={32} onChange={(e) => setInvite(e.target.value)} placeholder={t("login.invitePlaceholder")} autoFocus={needInvite && !invite} />
+              {home.inviteRequired && <span className="muted small">{t("login.inviteRequiredHint")}</span>}
+            </label>
+          )}
+          {savedBox}
+          {savedLocal && (
+            <div className="stack handle-box">
+              <h2>{t("login.savedAccount")}</h2>
+              <p>{t("login.handle")}: <strong>~{savedLocal}</strong> <span className="muted small">{t("login.localAccountOf", { server: home.serverName ?? home.host })}</span></p>
+              <button className="login-primary" onClick={() => void continueSaved()} disabled={busy}>{busy ? t("login.connecting") : t("login.continueAsLocal", { handle: savedLocal })}</button>
+            </div>
+          )}
+          <SignInForm idPrefix="login" hasDirectory={!!state.directoryUrl} localAccounts={localAccounts} busy={busy}
+            onDirectory={signInDirectory} onLocal={signInLocal}
+            onEmailCode={state.directoryUrl ? async (handle, pw) => {
+              try { return t("login.emailCodeSent", { to: (await api.directoryEmailCode(state.directoryUrl!, handle, pw)).sentTo }); }
+              catch (err) { return api.explainDirectoryError(err); }
+            } : null} />
+          <CreateAccount directoryUrl={state.directoryUrl} localAccounts={localAccounts} busy={busy} openExternal={null}
+            local={<LocalRegisterForm idPrefix="login" busy={busy} checkFree={(h) => store.home!.api.localHandleFree(h)} onRegister={registerLocal} />} />
+          {state.directoryError && <p className="error small">{state.directoryError}</p>}
+          <details className="login-details">
+            <summary>{t("login.deviceKey")}</summary>
+            <code className="key">{state.identity?.publicKey ?? "…"}</code>
+            <button type="button" className="secondary" onClick={() => void store.forgetIdentity()} disabled={busy}>{t("login.forgetIdentity")}</button>
+          </details>
+          <div className="row">
+            {!showInvite && <button className="secondary" onClick={() => setNeedInvite(true)}>{t("login.haveInvite")}</button>}
+          </div>
+        </>}
       </div>
       {appLink && <p className="login-app muted small">{t("login.appHint")} <a href={appLink}>{t("login.openInApp")}</a> · <a href={DOWNLOAD_URL} target="_blank" rel="noreferrer">{t("login.getApp")}</a></p>}
       <footer className="login-foot">

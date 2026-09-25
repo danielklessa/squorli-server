@@ -179,6 +179,12 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 .rail-people { position: absolute; left: -4px; bottom: -4px; width: 1.1rem; height: 1.1rem; border-radius: 50%; background: var(--bg4); color: var(--ok); font-size: 0.7rem; display: inline-flex; align-items: center; justify-content: center; border: 2px solid var(--bg); }
 .rail-unread { position: absolute; left: -0.55rem; top: 50%; width: 0.35rem; height: 0.7rem; margin-top: -0.35rem; border-radius: 0 4px 4px 0; background: var(--text); }
 .server-status .stack { max-width: 32rem; margin: auto; padding: 1rem; }
+/* The join view with the account forms (docs/features/local-accounts.md) is taller than the area: it scrolls, and auto margins
+   centre it only while it fits (justify-content: center would cut its top off). */
+.chat.empty.server-status { justify-content: flex-start; overflow-y: auto; }
+.server-status > .stack { width: min(34rem, 100%); }
+.server-status .stack .stack:not(.handle-box) { max-width: none; margin: 0; padding: 0; }
+.server-status .handle-box { max-width: none; margin: 0; }
 .server-status h2 { margin: 0; }
 /* Right-click menu on a rail entry (positioned at the pointer, above the columns) */
 .rail-menu { position: fixed; z-index: 9; min-width: 14rem; display: flex; flex-direction: column; gap: 0.35rem; background: var(--bg4); border: 1px solid var(--line); border-radius: var(--r); padding: 0.6rem 0.8rem; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
@@ -739,10 +745,14 @@ button.icon.on { color: var(--brand); }
 .login-languages button[aria-pressed="true"] { border-color: var(--brand); background: var(--sel); }
 .login-password-field { position: relative; display: block; min-width: 0; }
 .login-handle-field { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
-.auth-login .login-handle-field input { flex: 1; width: 0; }
-.auth-login .login-password-field input { width: 100%; min-height: 52px; padding-right: 56px; }
-.auth-login .login-password-field button { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; min-height: 44px; background: transparent; }
-.auth-login .login-password-field button:hover { background: var(--bg4); }
+.auth-login .login-handle-field input, .server-status .login-handle-field input { flex: 1; width: 0; }
+.server-status .handle-box { display: flex; flex-direction: column; padding: 1.25rem; gap: 0.9rem; }
+.server-status .handle-box input, .server-status .login-password-field { width: 100%; min-width: 0; }
+/* The prefix in front of the sign-in name switches between the directory (@) and the server account (~) with a click. */
+.login-prefix { min-width: 2.25rem; min-height: 2.25rem; padding: 0 0.5rem; border: 1px solid var(--line); background: var(--bg4); color: var(--text); font-weight: 600; }
+.auth-login .login-password-field input, .server-status .login-password-field input, .settings-body .login-password-field input { width: 100%; min-height: 52px; padding-right: 56px; }
+.auth-login .login-password-field button, .server-status .login-password-field button, .settings-body .login-password-field button { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; min-height: 44px; background: transparent; }
+.auth-login .login-password-field button:hover, .server-status .login-password-field button:hover, .settings-body .login-password-field button:hover { background: var(--bg4); }
 .login-details { border-top: 1px solid var(--line); padding-top: 1rem; }
 .login-details summary { cursor: pointer; color: var(--muted); }
 .login-details > :not(summary) { margin-top: 0.75rem; }

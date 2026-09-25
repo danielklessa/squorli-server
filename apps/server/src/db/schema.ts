@@ -22,6 +22,23 @@ export const users = pgTable("users", {
   avatarUrl: text("avatar_url"),
 });
 
+/**
+ * Server account (`~name`, docs/features/local-accounts.md, 25 September 2026): a handle of this server bound to a key, with the
+ * key's seed encrypted by the client (the password never reaches the server; `auth_hash` = SHA-256 of the auth key that grants
+ * fetching the blob, as at the directory). Also the avatar of such an account, which this server stores itself (DATA_DIR/avatars).
+ */
+export const localAccounts = pgTable("local_accounts", {
+  userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  handle: text("handle").notNull().unique(),
+  backupParams: jsonb("backup_params").$type<{ kdf: "pbkdf2-sha256"; iterations: number; salt: string; iv: string }>().notNull(),
+  ciphertext: text("ciphertext").notNull(),
+  authHash: text("auth_hash").notNull(),
+  avatarMime: text("avatar_mime"),
+  avatarUpdatedAt: ts("avatar_updated_at"),
+  createdAt: ts("created_at").notNull().defaultNow(),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
+
 export const sessions = pgTable("sessions", {
   token: text("token").primaryKey(),
   /** Public identifier for device management (M6c); the token stays secret. */
@@ -40,8 +57,10 @@ export const serverSettings = pgTable("server_settings", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   openJoin: boolean("open_join").notNull().default(false),
-  /** Sign-in only with a directory account (handle); owners exempt. No effect without DIRECTORY_URL. */
+  /** Until 25 September 2026 "only with a directory account"; since server accounts an account is always required, the column is unused. */
   requireAccount: boolean("require_account").notNull().default(false),
+  /** Server accounts may be registered (always, whatever this says, when there is no directory). */
+  localAccounts: boolean("local_accounts").notNull().default(false),
   /** M6d: list in the server directory, with a description (both are sent to the directory at registration). */
   listed: boolean("listed").notNull().default(false),
   description: text("description"),

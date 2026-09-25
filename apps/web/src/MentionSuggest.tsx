@@ -1,4 +1,4 @@
-import type { Member } from "@squorli/protocol";
+import { handleLabel, type Member } from "@squorli/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject, type ReactNode } from "react";
 import { Avatar } from "./Avatar";
 import { mentionLabel, mentionQueryAt, suggestMembers, type Picked } from "./mentions";
@@ -72,7 +72,7 @@ export function useMentionSuggest({ inputRef, value, onChange, members, below = 
         // mousedown, not click: the input must keep the focus (and its caret).
         <li key={m.userId} role="option" aria-selected={i === index} className={i === index ? "active" : ""} onMouseDown={(e) => { e.preventDefault(); accept(m); }} onMouseEnter={() => setIndex(i)}>
           <Avatar name={m.displayName} src={m.avatarUrl} /><span className="mention-suggest-name">{mentionLabel(m)}</span>
-          {m.handle && m.handle !== mentionLabel(m) && <span className="muted small">@{m.handle}</span>}
+          {handleLabel(m) && (m.handle ?? m.localHandle) !== mentionLabel(m) && <span className="muted small">{handleLabel(m)}</span>}
         </li>
       ))}
     </ul>

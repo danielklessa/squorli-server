@@ -69,7 +69,7 @@ export class VoicePresence<Conn = unknown> {
   }
 
   /** Update a user's display name across all of their connections. */
-  rename(userId: string, u: { displayName: string | null; publicKey: string; handle?: string | null }): void {
+  rename(userId: string, u: { displayName: string | null; publicKey: string; handle?: string | null; localHandle?: string | null }): void {
     const touched = new Set<string>();
     for (const entry of this.byConn.values()) {
       if (entry.member.userId !== userId) continue;

@@ -38,13 +38,33 @@ async function newKey() {
 const [, health] = await api("GET", "/api/health");
 const DOMAIN = health.domain ?? "localhost";
 
-async function login(key, invite, userAgent) {
+/** The plain sign-in (challenge + signature); since server accounts a key without an account gets 403 registration_required. */
+async function verify(key, invite, userAgent) {
   const [, ch] = await api("POST", "/api/auth/challenge", { publicKey: key.publicKey });
   const msg = `community-chat-login\n${DOMAIN}\n${ch.nonce}`;
   const signature = hex(await ed.signAsync(new TextEncoder().encode(msg), key.priv));
   const [status, body] = await api("POST", "/api/auth/verify", { challengeId: ch.challengeId, publicKey: key.publicKey, signature, ...(invite ? { invite } : {}) },
     undefined, false, userAgent ? { "user-agent": userAgent } : {});
   return { status, body, token: body.sessionToken, userId: body.userId };
+}
+// Server accounts (docs/features/local-accounts.md): the test's backup is no real encryption, the server never opens it anyway.
+const localHandleOf = (key) => `s${key.publicKey.slice(0, 12)}`;
+const authKeyOf = (key, salt = "") => createHash("sha256").update(`auth:${salt}${key.publicKey}`).digest("hex");
+const backupOf = (key, salt = "") => ({ ciphertext: Buffer.from(key.priv).toString("base64"), params: { kdf: "pbkdf2-sha256", iterations: 100_000, salt: "00".repeat(16), iv: "00".repeat(12) }, authKey: authKeyOf(key, salt) });
+async function register(key, invite, userAgent, handle = localHandleOf(key)) {
+  const [, ch] = await api("POST", "/api/auth/challenge", { publicKey: key.publicKey });
+  const backup = backupOf(key);
+  const msg = `squorli-local-register\n${DOMAIN}\n${ch.nonce}\n${handle}\n${backup.ciphertext}`;
+  const signature = hex(await ed.signAsync(new TextEncoder().encode(msg), key.priv));
+  const [status, body] = await api("POST", "/api/local/register", { challengeId: ch.challengeId, publicKey: key.publicKey, signature, handle, backup, ...(invite ? { invite } : {}) },
+    undefined, false, userAgent ? { "user-agent": userAgent } : {});
+  return { status, body, token: body.sessionToken, userId: body.userId };
+}
+/** Sign in; a key without an account registers a server account first (a new member of this test). */
+async function login(key, invite, userAgent) {
+  const r = await verify(key, invite, userAgent);
+  if (r.status === 403 && r.body.error === "registration_required") return register(key, invite, userAgent);
+  return r;
 }
 
 // WebSocket client with an event buffer
@@ -118,6 +138,8 @@ if (owner.status !== 200) {
   process.exitCode = 1;
   throw new Error("abgebrochen");
 }
+// With a directory the other keys of this test register server accounts, which are off there by default.
+if (health.directoryUrl) await api("PATCH", "/api/settings", { localAccounts: true }, owner.token);
 const [, ownerState] = await api("GET", "/api/state", undefined, owner.token);
 check("owner login + state", ownerState.settings?.ownerId === owner.userId && (ownerState.myPermissions & P.ADMINISTRATOR) !== 0, `owner ${owner.userId.slice(0, 8)}`);
 const [, health0] = await api("GET", "/api/health");
@@ -268,21 +290,83 @@ check("member re-login without invite", B2.status === 200);
 const [sImpB] = await api("POST", "/api/import/discord/preview", { code: "https://discord.new/abc" }, B.token);
 check("import: needs the rights to manage channels and roles", sImpB === 403, `${sImpB}`);
 
-// ---------- Account required (admin): without a handle at the directory, 403 account_required; without a directory the option has no effect.
-const [sra] = await api("PATCH", "/api/settings", { requireAccount: true }, owner.token);
+// ---------- Server accounts (docs/features/local-accounts.md): no temporary users; `~name` with an encrypted key backup.
 const [, hra] = await api("GET", "/api/health");
-const [, stRa] = await api("GET", "/api/state", undefined, owner.token);
-check("require account: not locked by config in this run", stRa.settings.requireAccountLocked === false);
-check("require account: patch, in state, in health (only with directory), version present", sra === 200 && stRa.settings.requireAccount === true
-  && hra.requireAccount === !!hra.directoryUrl && typeof hra.version === "string" && hra.version.length > 0);
-const keyNoAcc = await newKey();
-const [, invRa] = await api("POST", "/api/invites", { maxUses: 1 }, owner.token);
-const noAcc = await login(keyNoAcc, invRa.code);
-if (hra.directoryUrl) check("require account: key without handle rejected", noAcc.status === 403 && noAcc.body.error === "account_required", `${noAcc.status} ${noAcc.body.error ?? ""}`);
-else check("require account: without directory no effect", noAcc.status === 200, `${noAcc.status}`);
-const ownerRa = await login(ownerKey);
-check("require account: owner exempt, existing member without account", ownerRa.status === 200 && (await login(keyB)).status === (hra.directoryUrl ? 403 : 200));
-await api("PATCH", "/api/settings", { requireAccount: false }, owner.token);
+const [, stLa] = await api("GET", "/api/state", undefined, owner.token);
+check("server accounts: on in health and state, requireAccount true for old clients, version present", hra.localAccounts === true && hra.requireAccount === true
+  && stLa.settings.localAccounts === true && stLa.settings.localAccountsLocked === !hra.directoryUrl && typeof hra.version === "string" && hra.version.length > 0);
+if (!hra.directoryUrl) {
+  const [sLock, lock] = await api("PATCH", "/api/settings", { localAccounts: false }, owner.token);
+  check("server accounts: cannot be switched off without a directory", sLock === 409 && lock.error === "locked_by_config", `${sLock} ${lock.error ?? ""}`);
+  const [sOwnAv, ownAv] = await api("PUT", "/api/me/avatar", { mime: "image/png", data: Buffer.from("89504e470d0a1a0a0000", "hex").toString("base64") }, owner.token);
+  check("server accounts: the owner registered a server account (no directory) and may set an avatar", sOwnAv === 200, `${sOwnAv} ${ownAv.error ?? ""}`);
+  await api("DELETE", "/api/me/avatar", undefined, owner.token);
+  const [sFounder, founder] = await api("DELETE", "/api/me", { authKey: authKeyOf(ownerKey) }, owner.token);
+  check("server accounts: the first owner cannot delete their account", sFounder === 409 && founder.error === "founder", `${sFounder} ${founder.error ?? ""}`);
+} else {
+  const [sOwnAv, ownAv] = await api("PUT", "/api/me/avatar", { mime: "image/png", data: Buffer.from("89504e470d0a1a0a0000", "hex").toString("base64") }, owner.token);
+  check("server accounts: a directory account sets its avatar at the directory", sOwnAv === 409 && ownAv.error === "use_directory");
+  await api("PATCH", "/api/settings", { localAccounts: false }, owner.token);
+  const off = await register(await newKey(), undefined, undefined, `off.${Date.now().toString(36)}`);
+  check("server accounts: switched off -> 403 local_accounts_off", off.status === 403 && off.body.error === "local_accounts_off", `${off.status} ${off.body.error ?? ""}`);
+  await api("PATCH", "/api/settings", { localAccounts: true }, owner.token);
+}
+const keyL = await newKey();
+const [, invL] = await api("POST", "/api/invites", { maxUses: 3 }, owner.token);
+const plain = await verify(keyL, invL.code);
+check("server accounts: a key without an account -> 403 registration_required", plain.status === 403 && plain.body.error === "registration_required" && plain.body.localAccounts === true, `${plain.status} ${plain.body.error ?? ""}`);
+const handleL = `smoke.${keyL.publicKey.slice(0, 8)}`;
+const [, free1] = await api("GET", `/api/local/handles/${handleL}`);
+const L = await register(keyL, invL.code, undefined, handleL);
+const [, free2] = await api("GET", `/api/local/handles/~${handleL}`);
+check("server accounts: register -> session, the handle is taken afterwards", L.status === 200 && typeof L.token === "string" && free1.available === true && free2.available === false, `${L.status} ${JSON.stringify(L.body)}`);
+const dup = await register(await newKey(), invL.code, undefined, handleL);
+check("server accounts: the same handle again -> 409 handle_taken", dup.status === 409 && dup.body.error === "handle_taken", `${dup.status} ${dup.body.error ?? ""}`);
+const again = await register(keyL, invL.code, undefined, `x${handleL}`);
+check("server accounts: a key with an account cannot register another", again.status === 409 && again.body.error === "has_account", `${again.status} ${again.body.error ?? ""}`);
+const [, meL] = await api("GET", "/api/me", undefined, L.token);
+const [, stL] = await api("GET", "/api/state", undefined, owner.token);
+const memL = stL.members.find((m) => m.userId === L.userId);
+check("server accounts: ~handle in /api/me and the member list, the name falls back to it", meL.localHandle === handleL && meL.registrationRequired === false
+  && memL?.localHandle === handleL && memL?.displayName === `~${handleL}` && memL?.handle === null, JSON.stringify(memL));
+const Lv = await verify(keyL);
+check("server accounts: signing in again with the key alone", Lv.status === 200 && Lv.body.registrationRequired === false, `${Lv.status}`);
+// Signing in on another device: the parameters, then the blob for the auth key.
+const [sPar, par] = await api("GET", `/api/local/backup/${handleL}/params`);
+const [sBad, bad] = await api("POST", "/api/local/backup/fetch", { handle: handleL, authKey: "00".repeat(32) });
+const [sBlob, blob] = await api("POST", "/api/local/backup/fetch", { handle: handleL, authKey: authKeyOf(keyL) });
+check("server accounts: backup parameters, wrong password 401, the blob for the right one", sPar === 200 && par.iterations === 100000 && !("iv" in par) && sBad === 401 && bad.error === "auth_invalid"
+  && sBlob === 200 && blob.publicKey === keyL.publicKey && blob.ciphertext === backupOf(keyL).ciphertext && blob.params.iv === "00".repeat(12), `${sPar} ${sBad} ${sBlob}`);
+const [sUnk] = await api("GET", "/api/local/backup/nobody.here/params");
+check("server accounts: an unknown handle -> 404", sUnk === 404, `${sUnk}`);
+const [sPw1] = await api("PUT", "/api/local/backup", { oldAuthKey: "11".repeat(32), backup: backupOf(keyL, "new") }, L.token);
+const [sPw2] = await api("PUT", "/api/local/backup", { oldAuthKey: authKeyOf(keyL), backup: backupOf(keyL, "new") }, L.token);
+const [sOld] = await api("POST", "/api/local/backup/fetch", { handle: handleL, authKey: authKeyOf(keyL) });
+const [sNew] = await api("POST", "/api/local/backup/fetch", { handle: handleL, authKey: authKeyOf(keyL, "new") });
+check("server accounts: a new password needs the old one", sPw1 === 401 && sPw2 === 200 && sOld === 401 && sNew === 200, `${sPw1} ${sPw2} ${sOld} ${sNew}`);
+// The avatar of a server account lives on this server.
+const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+const [sAv] = await api("PUT", "/api/me/avatar", { mime: "image/png", data: png.toString("base64") }, L.token);
+const [, stAv] = await api("GET", "/api/state", undefined, owner.token);
+const avUrl = stAv.members.find((m) => m.userId === L.userId)?.avatarUrl;
+const avRes = avUrl ? await fetch(avUrl.replace(/^https?:\/\/[^/]+/, BASE)) : null;
+check("server accounts: avatar upload -> in the member list, public without a token", sAv === 200 && typeof avUrl === "string" && avUrl.includes(`/api/avatars/${L.userId}?v=`)
+  && avRes?.status === 200 && avRes.headers.get("content-type") === "image/png" && avRes.headers.get("x-content-type-options") === "nosniff", `${sAv} ${avUrl} ${avRes?.status}`);
+const [sSvg] = await api("PUT", "/api/me/avatar", { mime: "image/png", data: Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>").toString("base64") }, L.token);
+check("server accounts: an avatar that is no picture -> 400", sSvg === 400, `${sSvg}`);
+const [sAvDel] = await api("DELETE", "/api/me/avatar", undefined, L.token);
+const [, stAv2] = await api("GET", "/api/state", undefined, owner.token);
+check("server accounts: avatar removed", sAvDel === 200 && stAv2.members.find((m) => m.userId === L.userId)?.avatarUrl === null, `${sAvDel}`);
+// Deleting the account: needs the password, frees the handle, ends the session.
+const [sDelBad] = await api("DELETE", "/api/me", { authKey: "22".repeat(32) }, L.token);
+const [sDel] = await api("DELETE", "/api/me", { authKey: authKeyOf(keyL, "new") }, L.token);
+const [, free3] = await api("GET", `/api/local/handles/${handleL}`);
+const [sAfter] = await api("GET", "/api/me", undefined, L.token);
+check("server accounts: delete with the password, the handle is free again, the session gone", sDelBad === 401 && sDel === 200 && free3.available === true && sAfter === 401, `${sDelBad} ${sDel} ${sAfter}`);
+// Wrong passwords are limited per handle (and per address): the last check of the section, the address is blocked for a minute.
+let limited = null;
+for (let i = 0; i < 12 && limited === null; i++) { const [sl] = await api("POST", "/api/local/backup/fetch", { handle: localHandleOf(keyB), authKey: "33".repeat(32) }); if (sl === 429) limited = i; }
+check("server accounts: wrong passwords are rate limited", limited !== null, `after ${limited}`);
 
 // ---------- Server directory (M6d): listing + description; with a directory the server re-registers and appears in its list
 const [sld] = await api("PATCH", "/api/settings", { listed: true, description: "Rauchtest im Verzeichnis" }, owner.token);

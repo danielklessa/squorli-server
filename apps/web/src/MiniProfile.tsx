@@ -38,7 +38,7 @@ export function MiniProfile({ anchor, displayName, avatarUrl, serverName, handle
     <ContextMenu anchor={anchor} label={t("mini.title")} onClose={onClose}>
       <div className="context-identity">
         <Avatar name={name.trim() || displayName} src={avatarUrl} size="medium" />
-        <div><strong>{name.trim() || displayName}</strong><span className="muted small">{handle ? `@${handle}` : t("profile.noHandle")}</span></div>
+        <div><strong>{name.trim() || displayName}</strong><span className="muted small">{handle ?? t("profile.noHandle")}</span></div>
       </div>
       <div className="mini-profile stack">
         <label className="stack">

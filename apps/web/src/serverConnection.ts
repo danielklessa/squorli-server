@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, ServerEvent, VOTEKICK_RESULT_MS, type ClientEvent, type GamePresence, type Me, type Message, type ServerState, type VoiceMember, type VoiceStatus, type VoteKickResult } from "@squorli/protocol";
+import { PROTOCOL_VERSION, ServerEvent, VOTEKICK_RESULT_MS, type ClientEvent, type GamePresence, type Me, type Message, type ServerState, type VoiceMember, type VerifyResponse, type VoiceStatus, type VoteKickResult } from "@squorli/protocol";
 import { ServerApi, explainLoginError, type Health } from "./api";
 import type { VoteKickState } from "./voteKick";
 import type { Identity } from "./identity";
@@ -62,8 +62,12 @@ export type ServerConnState = {
   iconUrl: string | null;
   /** This server's PUBLIC_DOMAIN (from /api/health): its key in the directory and the domain of the login signature for foreign servers. */
   serverDomain: string | null;
-  /** Sign-in only with a directory account (from /api/health). */
+  /** Sign-in only with a directory account (from /api/health; servers since the server accounts always say true). */
   requireAccount: boolean;
+  /** Server accounts (`~name`) may be registered here (from /api/health). */
+  localAccounts: boolean;
+  /** The last sign-in said this key has no account here (403 registration_required): the login shows the account forms. */
+  accountNeeded: boolean;
   /** New members need an invite code (from /api/health; false for servers that do not say). */
   inviteRequired: boolean;
   serverVersion: string | null;
@@ -143,7 +147,7 @@ export class ServerConnection {
     this.state = {
       host, base, me: null, userId: null, connection: "idle", error: null, removed: null, server: null,
       voice: {}, voteKickAllowed: {}, voteKick: null, voteKickResult: null, radioTitles: {}, clockOffset: 0, messages: {}, typing: {}, currentChannelId: null, unread: {}, mentions: {}, muted: {}, serverMuted: false, readSync: false, log: [],
-      serverName: null, iconUrl: null, serverDomain: null, requireAccount: false, inviteRequired: false, serverVersion: null, directoryUrl: null,
+      serverName: null, iconUrl: null, serverDomain: null, requireAccount: false, localAccounts: false, accountNeeded: false, inviteRequired: false, serverVersion: null, directoryUrl: null,
     };
     // Token rejected by the server (expired, signed out from another device): do not keep running with a dead token.
     // Back in front of this tab: another device may have read channels meanwhile (normally `read.update` says so right away).
@@ -160,7 +164,7 @@ export class ServerConnection {
     const health = await this.api.getHealth().catch(() => null);
     this.set({
       serverName: health?.serverName ?? null, iconUrl: health?.iconUrl ? this.api.abs(health.iconUrl) : null, serverDomain: health?.domain?.toLowerCase() ?? null,
-      directoryUrl: health?.directoryUrl ?? null, requireAccount: !!health?.directoryUrl && health?.requireAccount === true, inviteRequired: health?.inviteRequired === true, serverVersion: health?.version ?? null,
+      directoryUrl: health?.directoryUrl ?? null, requireAccount: !!health?.directoryUrl && health?.requireAccount === true, localAccounts: health?.localAccounts === true, inviteRequired: health?.inviteRequired === true, serverVersion: health?.version ?? null,
     });
     return health;
   }
@@ -171,9 +175,27 @@ export class ServerConnection {
     this.set({ connection: "connecting", error: null });
     const me = await this.api.getMe().catch(() => null);
     if (!me) { this.api.setToken(null); this.set({ connection: "idle" }); return false; }
-    this.set({ me, userId: me.userId });
-    this.connect();
+    this.enter(me);
     return true;
+  }
+
+  /** Signed in: connect, unless the member must register first (a member from before server accounts, docs/features/local-accounts.md). */
+  private enter(me: Me) {
+    this.set({ me, userId: me.userId, accountNeeded: false });
+    if (me.registrationRequired) { this.set({ connection: "idle", error: null }); return; }
+    this.connect();
+  }
+
+  /** Take a session the store got elsewhere (the registration of a server account answers like a sign-in). */
+  async adopt(session: VerifyResponse): Promise<void> {
+    this.api.setToken(session.sessionToken);
+    this.hooks.onToken(session.sessionToken);
+    this.enter(await this.api.getMe());
+  }
+
+  /** After registering an account for this session: read /api/me again and connect. */
+  async refreshMe(): Promise<void> {
+    this.enter(await this.api.getMe());
   }
 
   /** Sign in (challenge-response) with a signature over `domain`, optionally with an invite, then connect the WebSocket. */
@@ -182,15 +204,12 @@ export class ServerConnection {
     if (!id) return;
     this.set({ connection: "logging-in", error: null, removed: null });
     try {
-      const session = await this.api.login(id, domain, invite);
-      this.api.setToken(session.sessionToken);
-      this.hooks.onToken(session.sessionToken);
-      const me = await this.api.getMe();
-      this.set({ me, userId: me.userId });
-      this.connect();
+      await this.adopt(await this.api.login(id, domain, invite));
     } catch (err) {
       const code = err instanceof Error && "code" in err ? (err as { code: string | null }).code : null;
-      this.set({ connection: "error", error: await explainLoginError(err, this.api, domain) });
+      // No account for this key: not an error the user did, but the next step (the account forms).
+      if (code === "registration_required") this.set({ connection: "idle", error: null, accountNeeded: true });
+      else this.set({ connection: "error", error: await explainLoginError(err, this.api, domain) });
       throw Object.assign(new Error("login failed"), { code });
     }
   }
@@ -220,7 +239,7 @@ export class ServerConnection {
     this.ackTimers.clear(); this.acked = {}; this.liveLatest = {}; this.serverRead = false;
     if (this.recountTimer !== null) { clearTimeout(this.recountTimer); this.recountTimer = null; }
     this.voiceChannelId = null;
-    this.set({ me: null, userId: null, connection: "idle", server: null, messages: {}, voice: {}, currentChannelId: null, unread: {}, mentions: {}, muted: {}, serverMuted: false, readSync: false, removed: null, error });
+    this.set({ me: null, userId: null, accountNeeded: false, connection: "idle", server: null, messages: {}, voice: {}, currentChannelId: null, unread: {}, mentions: {}, muted: {}, serverMuted: false, readSync: false, removed: null, error });
   }
 
   /** Close the connection without forgetting the session (e.g. on an identity switch). */
@@ -257,6 +276,8 @@ export class ServerConnection {
       // 4011 = session signed out from another device (M6c), 4012 = account deleted via the directory: do not reconnect, go back to the login.
       if (ev.code === 4011 && this.wantConnection) return this.sessionLost(t("err.sessionRevoked"));
       if (ev.code === 4012 && this.wantConnection) return this.sessionLost(t("err.accountDeleted"));
+      // 4013 = the member has no account yet (docs/features/local-accounts.md): no reconnect, the account forms instead.
+      if (ev.code === 4013 && this.wantConnection) { this.close(); void this.refreshMe().catch(() => {}); return; }
       if (!this.wantConnection) return;
       this.set({ connection: "reconnecting" });
       this.reconnectTimer = window.setTimeout(() => this.connect(), this.reconnectDelay);
@@ -473,7 +494,9 @@ export class ServerConnection {
         this.set({ removed: { reason: e.reason, message: e.message }, connection: "idle", server: null, messages: {}, voice: {} });
         break;
       case "error":
-        if (e.code === "unauthorized") {
+        if (e.code === "unauthorized" && e.message === "registration required") {
+          // The close 4013 that follows shows the account forms; the session stays.
+        } else if (e.code === "unauthorized") {
           // Token invalid or membership lost: do not stay in the chat with a dead socket.
           this.sessionLost(e.message === "not a member" ? t("err.notMember") : t("err.sessionInvalid"));
         } else if (e.code === "protocol_version") {

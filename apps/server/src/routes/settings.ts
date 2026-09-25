@@ -62,9 +62,9 @@ export async function registerSettingsRoutes(app: FastifyInstance, db: Db, hub: 
     if (!can(m.actor, Permission.MANAGE_SERVER)) return reply.code(403).send({ error: "forbidden" });
     const body = UpdateSettingsRequest.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
-    // REQUIRE_ACCOUNT pinned by configuration: the admin area may not change it.
+    // Server accounts pinned by configuration or by the missing directory: the admin area may not change it.
     const before = await loadSettings(db);
-    if (body.data.requireAccount !== undefined && before.requireAccountLocked) return reply.code(409).send({ error: "locked_by_config" });
+    if (body.data.localAccounts !== undefined && before.localAccountsLocked) return reply.code(409).send({ error: "locked_by_config" });
     const afkChannelId = body.data.afkChannelId;
     if (afkChannelId) {
       const [ch] = await db.select({ kind: channels.kind, sticky: channels.sticky }).from(channels).where(eq(channels.id, afkChannelId)).limit(1);

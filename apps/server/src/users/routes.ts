@@ -1,7 +1,8 @@
 import { UpdateMeRequest, Uuid, type Me, type SessionInfo } from "@squorli/protocol";
 import { and, desc, eq, lt, ne, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import { requireSession } from "../auth/session";
+import { hasAccount, requireSession } from "../auth/session";
+import { avatarOf } from "../names";
 import type { Db } from "../db";
 import { directoryStale, type DirectoryClient } from "../directory";
 import { members, sessions, users } from "../db/schema";
@@ -22,11 +23,11 @@ export async function registerUserRoutes(app: FastifyInstance, db: Db, directory
       const fresh = await directory.refresh({ id: s.userId, publicKey: s.publicKey, displayName: s.displayName }, !!member);
       if (fresh && (fresh.displayName !== s.displayName || fresh.handle !== s.handle || fresh.avatarUrl !== s.avatarUrl)) {
         ({ displayName, handle, avatarUrl } = fresh);
-        presence.rename(s.userId, { displayName, publicKey: s.publicKey, handle });
+        presence.rename(s.userId, { displayName, publicKey: s.publicKey, handle, localHandle: s.localHandle });
         await broadcastStructure(db, hub, ["members"]);
       }
     }
-    const me: Me = { userId: s.userId, publicKey: s.publicKey, displayName, handle, avatarUrl };
+    const me: Me = { userId: s.userId, publicKey: s.publicKey, displayName, handle, avatarUrl: avatarOf({ ...s, handle, avatarUrl }), localHandle: s.localHandle, registrationRequired: !hasAccount({ handle, localHandle: s.localHandle }) };
     return me;
   });
 
@@ -38,10 +39,10 @@ export async function registerUserRoutes(app: FastifyInstance, db: Db, directory
 
     await db.update(users).set({ displayName: body.data.displayName }).where(eq(users.id, s.userId));
     // Anyone currently sitting in a voice channel should appear there with the new name immediately.
-    presence.rename(s.userId, { displayName: body.data.displayName, publicKey: s.publicKey, handle: s.handle });
+    presence.rename(s.userId, { displayName: body.data.displayName, publicKey: s.publicKey, handle: s.handle, localHandle: s.localHandle });
     await broadcastStructure(db, hub, ["members"]);
 
-    const me: Me = { userId: s.userId, publicKey: s.publicKey, displayName: body.data.displayName, handle: s.handle, avatarUrl: s.avatarUrl };
+    const me: Me = { userId: s.userId, publicKey: s.publicKey, displayName: body.data.displayName, handle: s.handle, avatarUrl: avatarOf(s), localHandle: s.localHandle, registrationRequired: !hasAccount(s) };
     return me;
   });
 

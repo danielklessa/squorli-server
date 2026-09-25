@@ -2,7 +2,7 @@ import { ClientEvent, PROTOCOL_VERSION, Permission, displayNameOf, type GamePres
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { WebSocket } from "ws";
-import { resolveSession } from "../auth/session";
+import { CLOSE_REGISTRATION_REQUIRED, hasAccount, resolveSession } from "../auth/session";
 import { can } from "../authz";
 import type { Db } from "../db";
 import { channels, users } from "../db/schema";
@@ -84,6 +84,12 @@ export async function registerWs(app: FastifyInstance, db: Db, hub: Hub, presenc
         if (!session || !actor) {
           send({ type: "error", code: "unauthorized", message: session ? "not a member" : "session invalid" });
           return socket.close(4003, "unauthorized");
+        }
+        // A member from before server accounts without any account (docs/features/local-accounts.md): registration first.
+        // Its own close code, so a current client does not drop the session (it does not open the socket before registering).
+        if (!hasAccount(session)) {
+          send({ type: "error", code: "unauthorized", message: "registration required" });
+          return socket.close(CLOSE_REGISTRATION_REQUIRED, "registration_required");
         }
         userId = session.userId;
         clearTimeout(helloTimeout);

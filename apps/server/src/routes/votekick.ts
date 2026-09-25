@@ -3,7 +3,8 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { channelActor } from "../channelGuard";
 import type { Db } from "../db";
-import { users } from "../db/schema";
+import { localAccounts, users } from "../db/schema";
+import { localJoin, nameColumns } from "../names";
 import type { Hub } from "../hub";
 import type { LivekitAdmin } from "../livekit/admin";
 import { loadSettings } from "../state";
@@ -98,8 +99,8 @@ export async function registerVoteKickRoutes(app: FastifyInstance, db: Db, hub: 
     const cooldown = voteKicks.cooldownUntil(channelId, targetId);
     if (cooldown) return reply.code(429).send({ error: "cooldown", retryAfter: Math.ceil((cooldown - Date.now()) / 1000) });
 
-    const [target] = await db.select({ publicKey: users.publicKey, displayName: users.displayName, handle: users.handle }).from(users).where(eq(users.id, targetId)).limit(1);
-    const [me] = await db.select({ publicKey: users.publicKey, displayName: users.displayName, handle: users.handle }).from(users).where(eq(users.id, c.userId)).limit(1);
+    const [target] = await db.select(nameColumns).from(users).leftJoin(localAccounts, localJoin).where(eq(users.id, targetId)).limit(1);
+    const [me] = await db.select(nameColumns).from(users).leftJoin(localAccounts, localJoin).where(eq(users.id, c.userId)).limit(1);
     if (!target || !me) return reply.code(404).send({ error: "not_found" });
     const vote = voteKicks.start({
       channelId, targetId, targetName: displayNameOf(target), startedBy: c.userId, startedByName: displayNameOf(me),

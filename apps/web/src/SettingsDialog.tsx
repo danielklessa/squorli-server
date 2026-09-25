@@ -25,6 +25,7 @@ import { saveVoiceSettings, type VoiceSettings } from "./voice/settings";
 import { VOICE_CUES, type SoundCue, type SoundSettings } from "./voice/sounds";
 import { useVoiceSettings } from "./voice/useVoiceSettings";
 import { VoiceClient, type VoiceState } from "./voice/voiceClient";
+import { LocalAccountSettings } from "./AccountForms";
 
 export type SettingsTab = "profile" | "view" | "voice" | "camera" | "sounds" | "hotkeys" | "games" | "sessions" | "account" | "app" | "licenses";
 const TABS: { id: SettingsTab; label: string; icon: string }[] = [
@@ -61,7 +62,7 @@ const fmt = fmtDateTime;
  * the directory's account page, sign out, discard identity) and licenses (our own and the third-party notices, LicensesTab.tsx). With a directory account everything except the device selection
  * is stored there (store.ts pushes every change); sessions and the name on this server belong to the server shown.
  */
-export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, directoryUrl, directoryAccount, serverDomain, clientVersion, syncError, sealed, client, voice, initialTab, games, hotkeyStatus, onSaveServerName, onSaveGlobalName, onSetAvatar, onSetLocale, localePending, onCapturingKey, onClose, onLogout, onForget }: {
+export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, directoryUrl, directoryAccount, serverDomain, clientVersion, syncError, sealed, client, voice, initialTab, games, hotkeyStatus, onSaveServerName, onSaveGlobalName, onSetAvatar, onSetLocale, localePending, onCapturingKey, onClose, onLogout, onForget, serverAccount, onDirectorySignIn }: {
   /** The server on screen and who you are there; null = none is shown (client without a home server): the dialog then has
    *  no profile and no sessions, which belong to a server, and the account page names the directory account and `publicKey`. */
   api: ServerApi | null; me: Me | null; publicKey: string | null;
@@ -90,6 +91,10 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
   /** While the push-to-talk key is being captured the dock's push-to-talk listener has to stay quiet. */
   onCapturingKey: (capturing: boolean) => void;
   onClose: () => void; onLogout: () => void; onForget: () => void;
+  /** The server shown signs in with a server account (`~name`): its password and its deletion (docs/features/local-accounts.md); null = none. */
+  /** Desktop app with server accounts only: sign in with a directory account too (the servers stay); null = not offered. */
+  onDirectorySignIn: (() => void) | null;
+  serverAccount: { serverName: string; onChangePassword: (oldPassword: string, newPassword: string) => Promise<void>; onDelete: (password: string) => Promise<void> } | null;
 }) {
   const settings = useVoiceSettings();
   const [mobileFocus] = useState(() => window.matchMedia("(max-width: 700px), (pointer: coarse)").matches);
@@ -103,6 +108,9 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
   const [tab, setTab] = useState<SettingsTab>(() => { const wanted = initialTab ?? "profile"; return tabs.some((entry) => entry.id === wanted) ? wanted : "view"; });
   const [name, setName] = useState(me?.displayName ?? "");
   const handle = me?.handle ?? directoryAccount?.handle ?? null;
+  /** A server account on the server shown (`~name`, docs/features/local-accounts.md): its password and deletion live here. */
+  const localHandle = me && !me.handle ? me.localHandle : null;
+  const shownHandle = handle ? `@${handle}` : localHandle ? `~${localHandle}` : null;
   // Desktop app: window background (mica/acrylic + opacity); null in the browser and where the system offers no material.
   const windowLook = platform.window.appearance;
   const [look, setLook] = useState<WindowAppearance | null>(() => windowLook?.state().appearance ?? null);
@@ -279,7 +287,7 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
 
             {tab === "profile" && onServer && (
               <>
-                <div className="profile-preview"><Avatar name={shownName || "?"} src={avatarUrl} size="large" /><div><strong>{shownName}</strong>{handle && <div className="muted small">@{handle}</div>}</div></div>
+                <div className="profile-preview"><Avatar name={shownName || "?"} src={avatarUrl} size="large" /><div><strong>{shownName}</strong>{shownHandle && <div className="muted small">{shownHandle}</div>}</div></div>
                 {onSetAvatar && (
                   <>
                     <h3>{t("profile.avatar")}</h3>
@@ -548,14 +556,16 @@ export function SettingsDialog({ api, me, publicKey, displayName, avatarUrl, dir
             {tab === "account" && (
               <>
                 <h3>{t("profile.identity")}</h3>
-                {handle ? <p>{t("login.handle")}: <strong>@{handle}</strong>{dirHost ? <span className="muted small"> {t("login.verifiedAt", { host: dirHost })}</span> : null}</p> : <p className="muted small">{t("profile.noHandle")}</p>}
+                {localHandle && serverAccount ? <LocalAccountSettings handle={localHandle} serverName={serverAccount.serverName} onChangePassword={serverAccount.onChangePassword} onDelete={serverAccount.onDelete} />
+                  : handle ? <p>{t("login.handle")}: <strong>@{handle}</strong>{dirHost ? <span className="muted small"> {t("login.verifiedAt", { host: dirHost })}</span> : null}</p> : <p className="muted small">{t("profile.noHandle")}</p>}
                 <span className="muted small">{t("profile.publicKey")}</span>
                 <code className="key">{me?.publicKey ?? publicKey ?? "…"}</code>
-                {directoryUrl && (
+                {directoryUrl && !localHandle && (
                   <p className="muted small">
                     <a href={`${directoryUrl}/?handle=${encodeURIComponent(handle ?? "")}`} target="_blank" rel="noreferrer">{t("profile.manageAt", { host: dirHost ?? "" })}</a>{t("profile.manageHint")}
                   </p>
                 )}
+                {onDirectorySignIn && <p className="muted small">{t("profile.directorySignInHint")} <button className="secondary small" onClick={onDirectorySignIn}>{t("profile.directorySignIn")}</button></p>}
                 <div className="row">
                   <button className="secondary" onClick={onLogout}>{t("profile.signOut")}</button>
                   <button className="danger" onClick={() => void forget()}>{t("profile.forgetIdentity")}</button>

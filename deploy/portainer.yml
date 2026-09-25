@@ -4,7 +4,7 @@
 # Enter the ${...} variables under "Environment variables" of the stack (see README.md "Portainer"):
 #   required: PUBLIC_DOMAIN, POSTGRES_PASSWORD, LIVEKIT_API_KEY, LIVEKIT_API_SECRET (32+ characters)
 #   usually:  LIVEKIT_NODE_IP (public IP of this host), DIRECTORY_URL, TRUSTED_PROXIES (IP of the proxy), PROXY_BIND_IP
-#   optional: APP_IMAGE, SERVER_NAME, OWNER_PUBLIC_KEY, MAX_UPLOAD_MB, LINK_PREVIEWS (true/false), LIVEKIT_PUBLIC_URL, DIRECTORY_PROOF_URL, REQUIRE_ACCOUNT (true/false)
+#   optional: APP_IMAGE, SERVER_NAME, OWNER_PUBLIC_KEY, MAX_UPLOAD_MB, LINK_PREVIEWS (true/false), LIVEKIT_PUBLIC_URL, DIRECTORY_PROOF_URL, LOCAL_ACCOUNTS (true/false)
 # Set APP_IMAGE=ghcr.io/danielklessa/squorli-server:latest to use the public GitHub Container Registry image.
 # This overrides the legacy registry default below; see the Portainer section in README.md.
 # Firewall: 7881/tcp + 7882/udp open to the world (media); 3000 + 7880 only for the proxy host (HTTP, no TLS).
@@ -30,7 +30,7 @@ services:
       OWNER_PUBLIC_KEY: ${OWNER_PUBLIC_KEY:-}
       DIRECTORY_URL: ${DIRECTORY_URL:-}
       DIRECTORY_PROOF_URL: ${DIRECTORY_PROOF_URL:-}
-      REQUIRE_ACCOUNT: ${REQUIRE_ACCOUNT:-}
+      LOCAL_ACCOUNTS: ${LOCAL_ACCOUNTS:-}
     volumes: [appdata:/app/data]   # attachments, server icon
     ports:
       - "${PROXY_BIND_IP:-0.0.0.0}:${APP_PORT:-3000}:3000"   # proxy: https://PUBLIC_DOMAIN -> http://<host>:3000 (with WebSocket)

@@ -18,7 +18,8 @@ type Props = {
 export function Avatar({ name, src, size = "medium", online, afk }: Props) {
   const presence = !online ? "off" : afk ? "afk" : "on";
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  const words = name.trim().split(/\s+/u).filter(Boolean);
+  // A name that is a handle ("@anna", "~anna") starts with its letters, not with the prefix.
+  const words = name.trim().replace(/^[@~]+/, "").split(/\s+/u).filter(Boolean);
   const initials = (words.length > 1
     ? [Array.from(words[0]!)[0], Array.from(words[words.length - 1]!)[0]].join("")
     : Array.from(words[0] ?? "?").slice(0, 2).join("")).toLocaleUpperCase();
