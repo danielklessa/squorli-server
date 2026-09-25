@@ -55,6 +55,7 @@ export function desktopPlatform(bridge: DesktopBridge): Platform {
     home: null,
     defaultDirectoryUrl: info.directoryUrl,
     systemIdle: "always",
+    secretStore: bridge.secrets?.available ? { get: (key) => bridge.secrets!.get(key), set: (key, value) => bridge.secrets!.set(key, value) } : null,
     // An app older than this client has no such member; one without the helper reports nothing.
     systemActivity: info.systemWatch === true && typeof bridge.onSystemActivity === "function" ? { subscribe: (cb) => bridge.onSystemActivity(cb) } : null,
     games: info.gameDetection === true && typeof bridge.scanGames === "function" ? {

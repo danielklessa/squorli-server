@@ -64,6 +64,11 @@ export interface Platform {
    */
   readonly systemIdle: "permission" | "always";
   /**
+   * Storage for the client's secrets that the operating system encrypts (desktop app: `safeStorage`); null = none, the
+   * client keeps them in localStorage (browser, an older app, Linux without a keyring). identity.ts.
+   */
+  readonly secretStore: null | { get(key: string): string | null; set(key: string, value: string | null): boolean };
+  /**
    * What only the desktop app's shell sees (its native helper, Windows): controller input, which the browser's Gamepad API
    * delivers only while the window has the focus, and whether some program keeps the display on (a playing video);
    * systemActivity.ts. null = nothing of the kind (browser, an app without the helper or older than it).

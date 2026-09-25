@@ -25,6 +25,7 @@ import { createSplash, type Splash } from "./splash";
 import { createTray, setTrayAttention, setTrayLanguage } from "./tray";
 import { startSystemWatch, systemWatchPath } from "./systemWatch";
 import { handleUpdates } from "./updates";
+import { handleSecrets } from "./secrets";
 import { desktopUserAgent } from "./userAgent";
 import { helperPath, ScreenAudioCapture } from "./windowAudio";
 import { DEFAULT_SIZE, MIN_SIZE, restoreWindowState } from "./windowState";
@@ -188,6 +189,8 @@ else {
     // Unpackaged: the build of the sibling package; packaged: electron-builder copies it next to the app (extraResources).
     const rendererRoot = app.isPackaged ? join(process.resourcesPath, "renderer") : join(__dirname, "..", "..", "web", "dist");
     serveApp(rendererRoot);
+    // The client's keys, encrypted by the system (secrets.ts); before the window: its preload asks at once.
+    handleSecrets(app.getPath("userData"), isClientFrame);
     // The embedded players' sound on the output device chosen for the web radio (the client names it by its label).
     const playerAudio = new PlayerAudioOutput(app.isPackaged ? undefined : (text) => console.log(text));
     applyPermissions(session.defaultSession, origins, () => playerAudio.granting());

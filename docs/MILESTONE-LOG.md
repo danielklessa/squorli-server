@@ -4,6 +4,7 @@ Part of the project description (entry point: root `AGENTS.md`, section 0; until
 
 | Date | Change |
 |---|---|
+| 2026-09-25 | Desktop app: the identity key and the server accounts' keys and tokens encrypted with `safeStorage` (`apps/desktop/src/main/secrets.ts`, `DesktopBridge.secrets`, `Platform.secretStore`, `setSecretStore` in `identity.ts`), moved over from localStorage at the first read. Desktop app release; no downgrade afterwards. |
 | 2026-09-25 | Radio playlists fetched through `safeGet` of `packages/link-preview` (the connected address is checked, also at redirects): closes the DNS rebinding gap of `docs/features/radio.md`. Server image only. |
 | 2026-09-25 | `VIEW_VIDEO` per channel: the server resolves it per seated member through the overwrites (`VoiceMember.viewVideo`, optional, no version bump) and resends every occupied `voice.state` after permission changes; senders restrict their camera and screen by it (`channelVideoAccess`, `mayViewIn`). Closes the known gap of `docs/features/channel-permissions.md`. Server image and desktop app release. |
 | 2026-09-25 | Signed attachment links (user's decision, 7 days): `?e=&s=` with an HMAC under `server_settings.link_secret` (migration 0033), 404 without a valid one; the client forgets every history after a reconnect and reloads those older than 3 days. Closes the gap "attachments reachable by id" (`docs/features/channel-permissions.md`). Server image and desktop app release. |

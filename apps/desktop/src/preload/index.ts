@@ -46,6 +46,11 @@ const bridge: DesktopBridge = {
   onUpdateState: (cb) => subscribe<UpdateState>(IPC.updateState, cb),
   checkForUpdates: () => ipcRenderer.send(IPC.updateCheck),
   restartAndInstall: () => ipcRenderer.send(IPC.updateInstall),
+  secrets: {
+    available: ipcRenderer.sendSync(IPC.secretsAvailable) === true,
+    get: (key: string) => { const v: unknown = ipcRenderer.sendSync(IPC.secretsGet, key); return typeof v === "string" ? v : null; },
+    set: (key: string, value: string | null) => ipcRenderer.sendSync(IPC.secretsSet, key, value) === true,
+  },
 };
 
 contextBridge.exposeInMainWorld(BRIDGE_GLOBAL, bridge);

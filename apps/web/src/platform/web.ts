@@ -24,6 +24,7 @@ export function webPlatform(): Platform {
     app: null,
     home: homeless ? null : { host: window.location.host, signDomain: window.location.hostname },
     systemIdle: "permission",
+    secretStore: null,
     systemActivity: null,
     games: null,
     hotkeys: null,

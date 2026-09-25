@@ -188,7 +188,16 @@ export interface DesktopBridge {
   onUpdateState(cb: (state: UpdateState) => void): () => void;
   checkForUpdates(): void;
   restartAndInstall(): void;
+  /**
+   * The client's secrets encrypted by the operating system (`safeStorage`, shell from 25 September 2026; missing = an older
+   * shell). Synchronous. `available` false = no real encryption here (Linux without a keyring): keep localStorage.
+   * Only the keys of SECRET_KEYS are accepted.
+   */
+  readonly secrets?: { readonly available: boolean; get(key: string): string | null; set(key: string, value: string | null): boolean };
 }
+
+/** What the shell keeps encrypted for the client (identity.ts): the identity key, and the server accounts' keys and tokens. */
+export const SECRET_KEYS = ["chat.identity.v1", "chat.serverAccounts.v1"] as const;
 
 /** IPC channel names, shared by main and preload. */
 export const IPC = {
@@ -225,6 +234,9 @@ export const IPC = {
   updateState: "squorli:update-state",
   updateCheck: "squorli:update-check",
   updateInstall: "squorli:update-install",
+  secretsAvailable: "squorli:secrets-available",
+  secretsGet: "squorli:secrets-get",
+  secretsSet: "squorli:secrets-set",
 } as const;
 
 /** Name of the global the preload script exposes, and of the argument that carries `DesktopInfo` (base64 JSON). */

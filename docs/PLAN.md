@@ -60,6 +60,7 @@ Committed with server 0.1.1 the same day: `squorli restore`, the LiveKit pin, th
 - signed attachment links (migration 0033; an older client keeps working but may show broken pictures in a channel it kept open for more than a week);
 - `VIEW_VIDEO` per channel (`VoiceMember.viewVideo`; an older client keeps restricting by the server-wide roles);
 - radio playlists through the guarded fetch (server only).
+- the desktop app's keys in `safeStorage` (desktop app only; release notes: no downgrade to an older app afterwards, it would not find the key).
 
 The directory's open rollout: its `docs/PLAN.md`, 1.1.
 
@@ -67,8 +68,7 @@ The directory's open rollout: its `docs/PLAN.md`, 1.1.
 
 Challenge-response and the domain binding, session tokens (lifetime, revocation, the directory's remote sign-out), server accounts (key backup, password change, deletion), the directory token and host proof, CORS for all origins with bearer tokens, the upload and attachment routes. Result as a dated entry in `docs/VERIFIED-STATE.md`, findings as items here.
 
-Known gaps found so far, to close in the same pass:
-- **The identity key lies in `localStorage`** of the web client and the desktop app; move it to `safeStorage` in the desktop app (`docs/features/desktop.md`), the same interface later serves the phone's Keystore (`docs/PLAN-mobile.md` 3.3).
+The four known gaps of the plan cleanup are closed (25 September 2026: signed attachment links, `VIEW_VIDEO` per channel, radio playlists against DNS rebinding, the desktop app's keys in `safeStorage`; each in its feature note). What remains is the systematic pass above. A browser page cannot encrypt its key (no key store a page can reach); that stays a documented limit (`docs/features/desktop.md`).
 
 ### 2.2 Setup self-diagnosis
 
