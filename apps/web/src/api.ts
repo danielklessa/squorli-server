@@ -15,6 +15,10 @@ import { type Identity, identityFromPrivateKey, sign } from "./identity";
 import { t } from "./i18n";
 import { connectedHost } from "./serverHost";
 
+/** How long /api/health and /api/me may take before a server counts as not answering (docs/features/offline.md). */
+export const HEALTH_TIMEOUT_MS = 10_000;
+export const ME_TIMEOUT_MS = 15_000;
+
 export class ApiError extends Error {
   constructor(method: string, path: string, readonly status: number, readonly code: string | null, readonly body: Record<string, unknown>) {
     super(`${method} ${path} -> ${status}${code ? ` (${code})` : ""}`);
@@ -49,9 +53,15 @@ export class ServerApi {
   /** Resolve a relative server URL (attachments, server icon) against this server. */
   abs(url: string): string { return this.base && url.startsWith("/") ? `${this.base}${url}` : url; }
 
-  private async request<T>(method: string, path: string, body?: unknown, opts: { auth?: boolean; form?: FormData } = {}): Promise<T> {
+  /**
+   * `timeoutMs` (docs/features/offline.md): a machine that is off or a firewall that swallows packets lets a fetch hang for
+   * minutes; the requests that decide whether a server answers at all give up after this long (a `TimeoutError`, not an
+   * `ApiError`, so the session is kept and tried again).
+   */
+  private async request<T>(method: string, path: string, body?: unknown, opts: { auth?: boolean; form?: FormData; timeoutMs?: number } = {}): Promise<T> {
     const headers: Record<string, string> = {};
     const init: RequestInit = { method, headers };
+    if (opts.timeoutMs) init.signal = AbortSignal.timeout(opts.timeoutMs);
     if (opts.form) init.body = opts.form;
     else if (body !== undefined) { headers["content-type"] = "application/json"; init.body = JSON.stringify(body); }
     const withAuth = opts.auth !== false && !!this.token;
@@ -73,7 +83,7 @@ export class ServerApi {
     return VerifyResponse.parse(await this.request("POST", "/api/auth/verify",
       { challengeId: challenge.challengeId, publicKey: id.publicKey, signature, ...(invite ? { invite } : {}) }, { auth: false }));
   }
-  getHealth() { return this.request<Health>("GET", "/api/health", undefined, { auth: false }); }
+  getHealth() { return this.request<Health>("GET", "/api/health", undefined, { auth: false, timeoutMs: HEALTH_TIMEOUT_MS }); }
 
   // ---------- Server accounts (`~name`, docs/features/local-accounts.md): the key is encrypted here with the password, the
   // server keeps only the ciphertext and the SHA-256 of the auth key, as the directory does (backup.ts).
@@ -140,7 +150,7 @@ export class ServerApi {
     return image ? this.request("PUT", "/api/me/avatar", { mime: image.mime, data: toBase64(image.bytes) }) : this.request("DELETE", "/api/me/avatar");
   }
 
-  getMe() { return this.request<Me>("GET", "/api/me").then((m) => Me.parse(m)); }
+  getMe() { return this.request<Me>("GET", "/api/me", undefined, { timeoutMs: ME_TIMEOUT_MS }).then((m) => Me.parse(m)); }
   updateMe(displayName: string | null) { return this.request<Me>("PATCH", "/api/me", { displayName }).then((m) => Me.parse(m)); }
   // ---------- Sessions / devices (M6c)
   getSessions() { return this.request<SessionInfo[]>("GET", "/api/me/sessions").then((s) => z.array(SessionInfo).parse(s)); }

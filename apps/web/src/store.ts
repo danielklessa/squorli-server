@@ -452,22 +452,57 @@ export class Store {
       // names that this device does not know shows in the rail and connects at the first click (security review of 25
       // September 2026: the list is the directory's word, a server that slipped in must not get a sign-in unasked).
       if (this.storedToken(host) || this.serverAccount(host)) void this.connectForeign(conn);
+      else void this.probeServer(conn);
     }
+  }
+  /**
+   * One of the user's servers: a stored session or a server account here, added by address, or on the account's list at
+   * the directory. Such a server that does not answer gets the notice with retries (docs/features/offline.md); any other
+   * one is a first contact and waits for a click.
+   */
+  private isMine(host: string): boolean {
+    return !!this.storedToken(host) || !!this.serverAccount(host) || this.state.localHosts.includes(host) || (this.state.accountServers ?? []).some((s) => this.hostFor(s.host) === host && !s.leaveRequestedAt);
+  }
+  /**
+   * A server on the account's list this device has no session on: only its health is asked, so the rail can mark one that
+   * does not answer and the notice can show (never a sign-in without a click, security review of 25 September 2026). The
+   * probe repeats by itself while the server stays silent; once it answers, the join view waits for the click as before.
+   */
+  private async probeServer(conn: ServerConnection) {
+    const health = await conn.refreshHealth();
+    if (!health) { this.markUnreachable(conn, () => void this.probeServer(conn)); return; }
+    conn.retrySettled();
+    if (conn.state.waiting !== null || conn.state.connection === "error") { conn.state = { ...conn.state, connection: conn.state.me ? conn.state.connection : "idle", error: null, waiting: null }; this.publish(conn); }
   }
   /** Try again (after an error or a removal); also the "join" of a server added by address, then possibly with an invite. */
   retryServer(host: string, invite?: string) {
     const conn = this.conns.get(host);
-    if (conn && host !== this.homeHost) void this.connectForeign(conn, invite);
+    if (!conn || host === this.homeHost) return;
+    conn.cancelRetry();
+    void this.connectForeign(conn, invite);
   }
-  private markUnreachable(conn: ServerConnection) {
-    conn.state = { ...conn.state, connection: "error", error: t("err.serverUnreachableShort", { base: conn.state.base }) };
+  /**
+   * The server did not answer. `again` = the step to run when it is worth trying by itself (a server this device has
+   * been on, docs/features/offline.md): the state says "unreachable" and the connection schedules it; a server the user
+   * is only about to join waits for a click.
+   */
+  private markUnreachable(conn: ServerConnection, again: (() => void) | null) {
+    conn.state = { ...conn.state, connection: "error", error: t("err.serverUnreachableShort", { base: conn.state.base }), waiting: again ? "unreachable" : null };
     this.set({ servers: { ...this.state.servers, [conn.state.host]: conn.state } });
+    if (again) conn.retryLater(again);
   }
   private async connectForeign(conn: ServerConnection, invite?: string) {
+    const host = conn.state.host;
+    // One of the user's servers is tried again by itself while it is down; a first contact waits for a click.
+    const known = this.isMine(host);
+    // The first try says "checking"; a retry after "unreachable" keeps that notice on screen (the attempt itself may take the
+    // health request's whole time limit, and a status that flips back and forth would say nothing).
+    if (known && conn.state.waiting !== "unreachable") { conn.state = { ...conn.state, connection: "connecting", error: null, waiting: "checking" }; this.publish(conn); }
     const health = await conn.refreshHealth();
-    if (!health) { this.markUnreachable(conn); return; }
-    const token = this.storedToken(conn.state.host);
-    if (token && await conn.resume(token)) return;
+    if (!health) { this.markUnreachable(conn, known ? () => void this.connectForeign(conn, invite) : null); return; }
+    conn.retrySettled();
+    const token = this.storedToken(host);
+    if (token && await conn.resume(token) !== "rejected") return;
     try { await conn.login(await this.signDomainOf(conn), invite); } catch { /* the message is kept in the server's state */ }
   }
   /** Close a foreign server and remove it from the client's rail (the session stays stored). */
@@ -605,9 +640,8 @@ export class Store {
     }
     this.set({ activeHost: host, homeOpen: false, ...(target.invite ? { joinInvites: { ...this.state.joinInvites, [host]: target.invite } } : {}) });
     if (conn.state.me || conn.state.connection !== "idle") { this.rememberLast(host); return null; }
-    const mine = !!this.storedToken(host) || !!this.serverAccount(host) || this.state.localHosts.includes(host) || (this.state.accountServers ?? []).some((s) => this.hostFor(s.host) === host);
-    if (mine) { this.rememberLast(host); void this.connectForeign(conn, target.invite ?? undefined); }
-    else if (!(await conn.refreshHealth())) this.markUnreachable(conn);
+    if (this.isMine(host)) { this.rememberLast(host); void this.connectForeign(conn, target.invite ?? undefined); }
+    else if (!(await conn.refreshHealth())) this.markUnreachable(conn, null);
     return null;
   }
 

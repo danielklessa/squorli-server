@@ -10,13 +10,15 @@ export type SplashStep =
   | { step: "checking" }
   | { step: "downloading"; version: string; percent: number }
   | { step: "installing"; version: string }
-  | { step: "starting" };
+  | { step: "starting" }
+  /** Development only: the Vite dev server of `--dev-url` does not answer (index.ts loads the page again as soon as it does). */
+  | { step: "devServer"; url: string };
 
 export type SplashView = { text: string; percent: number | null; skip: string | null };
 
 const TEXTS = {
-  de: { checking: "Suche nach Updates …", downloading: "Update {v} wird geladen …", installing: "Update {v} wird installiert. Squorli startet gleich neu.", starting: "Squorli wird gestartet …", skip: "Später installieren" },
-  en: { checking: "Checking for updates …", downloading: "Downloading update {v} …", installing: "Installing update {v}. Squorli restarts in a moment.", starting: "Starting Squorli …", skip: "Install later" },
+  de: { checking: "Suche nach Updates …", downloading: "Update {v} wird geladen …", installing: "Update {v} wird installiert. Squorli startet gleich neu.", starting: "Squorli wird gestartet …", skip: "Später installieren", devServer: "Der Vite-Dev-Server unter {url} antwortet nicht. `pnpm dev` starten (der Web-Client läuft darin mit); Squorli lädt dann von selbst." },
+  en: { checking: "Checking for updates …", downloading: "Downloading update {v} …", installing: "Installing update {v}. Squorli restarts in a moment.", starting: "Starting Squorli …", skip: "Install later", devServer: "The Vite dev server at {url} does not answer. Start `pnpm dev` (it runs the web client too); Squorli then loads by itself." },
 };
 
 /** What the start window shows for a step. The download can be skipped (it goes on in the background); nothing else can. */
@@ -24,6 +26,7 @@ export function splashView(s: SplashStep, german: boolean): SplashView {
   const t = german ? TEXTS.de : TEXTS.en;
   if (s.step === "downloading") return { text: t.downloading.replace("{v}", s.version), percent: Math.max(0, Math.min(100, Math.round(s.percent))), skip: t.skip };
   if (s.step === "installing") return { text: t.installing.replace("{v}", s.version), percent: 100, skip: null };
+  if (s.step === "devServer") return { text: t.devServer.replace("{url}", s.url), percent: null, skip: null };
   return { text: s.step === "checking" ? t.checking : t.starting, percent: null, skip: null };
 }
 

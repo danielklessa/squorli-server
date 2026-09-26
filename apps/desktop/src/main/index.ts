@@ -51,7 +51,8 @@ app.setName("Squorli");
 // Windows groups task bar entries and notifications by this id; it equals the installer's appId. Unpackaged it also makes the
 // task bar show the window's icon instead of Electron's.
 if (process.platform === "win32") app.setAppUserModelId("com.squorli.desktop");
-if (devUrl) app.setPath("userData", join(app.getPath("appData"), "Squorli-dev"));
+// A test that drives the app against a dev server passes `--user-data-dir` and keeps its hands off the developer's own data.
+if (devUrl && !argValue("user-data-dir")) app.setPath("userData", join(app.getPath("appData"), "Squorli-dev"));
 app.userAgentFallback = desktopUserAgent(app.userAgentFallback, app.getVersion());
 registerAppScheme();
 
@@ -89,6 +90,8 @@ let backgroundStart = startsInBackground(process.argv, autostartBackground);
 // A client that never says so (a page that failed to load) is shown after this long anyway.
 const REVEAL_AFTER_MS = 12_000;
 let reveal: (() => void) | null = null;
+/** Development: how often the shell asks the Vite dev server of `--dev-url` again while it does not answer. */
+const DEV_SERVER_RETRY_MS = 2000;
 // Direct messages and mentions that wait, as the client counts them: a mark on the task bar icon and the tray icon.
 let attention = 0;
 function showAttention(): void {
@@ -154,10 +157,41 @@ function createWindow(splash: Splash | null = null): BrowserWindow {
     if (background) { if (!(closeToTray && tray)) win.minimize(); return; }
     // Behind the start window the client first finds out what to show (login, or the account's servers): no half-ready screen.
     if (!splash) { win.show(); return; }
-    const timer = setTimeout(() => reveal?.(), REVEAL_AFTER_MS);
-    reveal = () => { reveal = null; clearTimeout(timer); if (!win.isDestroyed()) { win.show(); win.focus(); } splash.close(); };
+    reveal = () => { reveal = null; clearRevealTimer(); if (!win.isDestroyed()) { win.show(); win.focus(); } splash.close(); };
+    if (!waitingForDevServer) startRevealTimer();
   });
-  win.webContents.on("did-fail-load", () => reveal?.());
+  // The client says its first screen is there (platform.window.ready) or this timer runs out: the window is shown either way.
+  let revealTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearRevealTimer = () => { if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; } };
+  const startRevealTimer = () => { clearRevealTimer(); revealTimer = setTimeout(() => reveal?.(), REVEAL_AFTER_MS); };
+  // Development: the Vite dev server of `--dev-url` does not answer (`pnpm dev` stopped, which also runs the web client; the
+  // user's report of 26 September 2026, an empty window without even a title bar). The start window says so and the page is
+  // loaded again as soon as the server answers; the empty window is not shown meanwhile (docs/features/desktop.md).
+  let waitingForDevServer = false;
+  let devRetry: ReturnType<typeof setTimeout> | null = null;
+  const askDevServer = () => {
+    devRetry = null;
+    if (!devUrl || win.isDestroyed()) return;
+    fetch(devUrl, { method: "HEAD" }).then((r) => {
+      if (win.isDestroyed()) return;
+      if (!r.ok) throw new Error(String(r.status));
+      waitingForDevServer = false;
+      splash?.show({ step: "starting" });
+      if (reveal) startRevealTimer();
+      void win.loadURL(devUrl);
+    }).catch(() => { devRetry = setTimeout(askDevServer, DEV_SERVER_RETRY_MS); });
+  };
+  win.webContents.on("did-fail-load", (_event, errorCode, _description, url, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return; // -3 = aborted: a newer load replaced this one
+    if (devUrl && url.startsWith(devUrl)) {
+      waitingForDevServer = true;
+      clearRevealTimer();
+      splash?.show({ step: "devServer", url: devUrl });
+      if (!devRetry) devRetry = setTimeout(askDevServer, DEV_SERVER_RETRY_MS);
+      return;
+    }
+    reveal?.();
+  });
   // The task bar button is new whenever the window was hidden: put the mark back.
   win.on("show", () => showAttention());
   // The own title bar shows the window's state (maximize or restore, dimmed while inactive).
@@ -175,7 +209,7 @@ function createWindow(splash: Splash | null = null): BrowserWindow {
   const rememberSoon = () => { if (rememberTimer) clearTimeout(rememberTimer); rememberTimer = setTimeout(remember, 800); };
   win.on("resize", rememberSoon); win.on("move", rememberSoon); win.on("close", remember);
   win.on("close", (event) => { if (closeToTray && tray && !quitting) { event.preventDefault(); win.hide(); } });
-  win.on("closed", () => { if (rememberTimer) clearTimeout(rememberTimer); if (mainWindow === win) mainWindow = null; });
+  win.on("closed", () => { if (rememberTimer) clearTimeout(rememberTimer); if (devRetry) clearTimeout(devRetry); clearRevealTimer(); if (mainWindow === win) mainWindow = null; });
   void win.loadURL(devUrl ?? `${APP_ORIGIN}/`);
   return win;
 }

@@ -20,6 +20,19 @@ export function applyHomeScreenName(serverName: string | null | undefined) {
   if (meta && meta.content !== content) meta.content = content;
 }
 
+/**
+ * The home server's name as last seen, so that the notice of a server that does not answer can name it (ServerOffline.tsx,
+ * docs/features/offline.md): /api/health does not answer then either. Only ever set to a name, never cleared by an unknown.
+ */
+const HOME_NAME_KEY = "chat.homeName.v1";
+export function rememberHomeName(name: string | null | undefined) {
+  if (!name) return;
+  try { localStorage.setItem(HOME_NAME_KEY, name); } catch { /* storage may be off */ }
+}
+export function rememberedHomeName(): string | null {
+  try { return localStorage.getItem(HOME_NAME_KEY); } catch { return null; }
+}
+
 export function applyBranding(title: string, iconUrl: string | null) {
   if (document.title !== title) document.title = title;
   let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');

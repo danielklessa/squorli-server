@@ -8,6 +8,9 @@ import { DebugPanel } from "./DebugPanel";
 import { HomeMain, HomeSidebar } from "./Home";
 import { DesktopLogin } from "./DesktopLogin";
 import { LoginScreen } from "./LoginScreen";
+import { ServerOffline } from "./ServerOffline";
+import { ServerUnreachable } from "./ServerUnreachable";
+import { reachableServers } from "./otherServers";
 import { ClaimAccount, CreateAccount, LocalRegisterForm, SignInForm } from "./AccountForms";
 import { MemberList } from "./MemberList";
 import { VoteKickModal, VoteKickPanel } from "./VoteKickPanel";
@@ -24,9 +27,9 @@ import { askConfirm, askInput, showNotice } from "./dialogs";
 import type { MenuAnchor } from "./ContextMenu";
 import { MiniProfile } from "./MiniProfile";
 import { SettingsDialog, type SettingsTab } from "./SettingsDialog";
-import { applyBranding, applyHomeScreenName } from "./branding";
+import { applyBranding, applyHomeScreenName, rememberHomeName } from "./branding";
 import { ServerBrowser } from "./ServerBrowser";
-import { ServerRail } from "./ServerRail";
+import { ServerRail, type RailServer } from "./ServerRail";
 import { buildRailServers, voiceActivity } from "./railServers";
 import { ColumnHandle } from "./ColumnHandle";
 import { loadLayout, saveLayout, type ColumnId, type Layout } from "./layout";
@@ -538,12 +541,14 @@ export function App() {
   const iconUrl = active?.server && conn ? (active.server.settings.iconUrl ? conn.api.abs(active.server.settings.iconUrl) : null) : active?.iconUrl ?? null;
   useEffect(() => applyBranding(title, iconUrl), [title, iconUrl]);
   const homeName = home?.server?.settings.name ?? home?.serverName ?? null;
-  useEffect(() => applyHomeScreenName(homeName), [homeName]);
+  useEffect(() => { applyHomeScreenName(homeName); rememberHomeName(homeName); }, [homeName]);
 
   // With a home server the client hangs off the session there; without one (desktop app) it has a login of its own.
   const homeless = state.homeHost === null;
   // Still finding out what the first screen is (store.ts `starting`): the desktop app's start window covers that time.
   if (state.starting) return <><TitleBar title="Squorli" /><div className="app-starting" role="status"><div className="app-starting-card"><img src="/brand/squorli-icon.svg" alt="" /><span>{t("app.starting")}</span></div></div></>;
+  // Signed in on the own server, but it does not answer (docs/features/offline.md): a notice with retries, never the login.
+  if (!homeless && home && !home.server && home.waiting) return <><TitleBar title={homeName ?? "Squorli"} /><ServerOffline s={home} onRetry={() => store.home?.retryNow()} onLogout={() => store.logout()} /></>;
   if (homeless ? !state.signedIn : !home?.server || !home.me || !home.userId) return <><TitleBar title="Squorli" />{homeless ? <DesktopLogin store={store} state={state} /> : <LoginScreen store={store} state={state} />}</>;
 
   const server = active?.server ?? null;
@@ -663,6 +668,7 @@ export function App() {
     unread: !s.serverMuted && Object.entries(s.unread).some(([id, u]) => u && !s.muted[id]), muted: s.serverMuted, canMute: s.readSync && s.connection === "connected", mentions: Object.values(s.mentions).reduce((n, c) => n + c, 0), voice: k === voiceHost && voice.status !== "disconnected", connection: s.connection,
     people: voiceActivity(s.voice, s.server?.settings.afkChannelId ?? null),
     reports: s.server?.openReports ?? 0,
+    unreachable: s.waiting === "unreachable",
   }]));
   // Rail context menu: delete your account on that server, requested through the directory (own confirmation dialog, no browser dialogs).
   const leaveServer = async (host: string, name: string) => {
@@ -686,7 +692,7 @@ export function App() {
       if (voice.status !== "disconnected" && !await askConfirm({ title: t("update.restartTitle"), text: t("update.restartInVoice"), confirmLabel: t("update.restart") })) return;
       platform.updates?.restartAndInstall();
     })(); }} />
-    <div className={`app ${showRail ? "with-rail" : ""} ${homeOpen ? "home" : ""} ${mobileContent ? "mobile-content" : ""} ${showStage ? "mobile-stage" : ""} ${mobile && mobileMembers && !homeOpen && view ? "mobile-members" : ""}`} style={{ "--left-w": `${layout.left}px`, "--members-w": `${layout.members}px` } as CSSProperties}>
+    <div className={`app ${showRail ? "with-rail" : ""} ${homeOpen ? "home" : ""} ${mobileContent ? "mobile-content" : ""} ${showStage ? "mobile-stage" : ""} ${mobile && mobileMembers && !homeOpen && view ? "mobile-members" : ""} ${!homeOpen && !view ? "no-members" : ""}`} style={{ "--left-w": `${layout.left}px`, "--members-w": `${layout.members}px` } as CSSProperties}>
       <ColumnHandle column="left" width={layout.left} label={t("layout.resizeLeft")} onChange={(w) => resizeColumn("left", w, false)} onCommit={(w) => resizeColumn("left", w, true)} />
       {!homeOpen && view && <ColumnHandle column="members" width={layout.members} label={t("layout.resizeMembers")} onChange={(w) => resizeColumn("members", w, false)} onCommit={(w) => resizeColumn("members", w, true)} />}
       {videoWindows.windows}
@@ -711,7 +717,7 @@ export function App() {
           onJoinVoice={(id) => { if (mobile) setVoicePreview(id); else void joinVoiceAsked(view.active.host, id).catch(reportJoinError); }} onOpenAdmin={() => setShowAdmin(true)} myUserId={view.active.userId ?? ""}
           voteKickAllowed={view.active.voteKickAllowed} onVoteKick={(userId, channelId) => startVoteKick(view.active.host, channelId, userId)}
           onOpenMembers={mobile ? () => setMobileMembers(true) : null}
-        /> : <nav className="sidebar"><header className="server-head"><img className="brand-mark" src="/brand/squorli-icon-small.svg" alt="" width="22" height="22" /><strong>{active?.serverName ?? active?.host ?? "Squorli"}</strong></header></nav>}
+        /> : <nav className="sidebar"><header className="server-head"><img className="brand-mark" src="/brand/squorli-icon-small.svg" alt="" width="22" height="22" /><strong>{active ? active.serverName ?? (state.accountServers ?? []).find((a) => store.hostFor(a.host) === active.host)?.name ?? active.host : "Squorli"}</strong></header></nav>}
         <VoiceDock client={client} voice={voice} channel={voiceChannel} serverName={voiceHost && voiceHost !== activeHost ? voiceServer?.server?.settings.name ?? voiceHost : null}
           displayName={me?.displayName ?? active?.me?.displayName ?? home?.me?.displayName ?? state.directoryAccount?.displayName ?? (active?.me ? handleLabel(active.me) : null) ?? (state.directoryAccount ? `@${state.directoryAccount.handle}` : "…")} avatarUrl={myAvatarUrl} onLeave={leaveVoice} onOpenProfile={setMiniProfile} onOpenSettings={() => setSettingsTab("profile")} pttSuspended={capturingPttKey}
           onOpenStage={stageWindow.popped ? stageWindow.focus : voiceChannel && !showStage && voiceHost ? () => { store.openServer(voiceHost === state.homeHost ? homeDirHost : voiceHost); setStageOpen(true); setMobileContent(true); } : null}
@@ -728,7 +734,8 @@ export function App() {
         ) : !active ? (
           <NoServers directoryUrl={state.directoryUrl} account={state.directoryAccount ?? null} onDiscover={() => setShowBrowser(true)} onAdd={() => { void addServer(); }} onLogout={() => { void client.leave(); store.logout(); }} />
         ) : !view ? (
-          <ServerStatus s={active} store={store} state={state} onRetry={(invite) => store.retryServer(active.host, invite)} onClose={() => store.closeServer(active.host)}
+          <ServerStatus s={active} store={store} state={state} rail={railServers} onRetry={(invite) => store.retryServer(active.host, invite)} onClose={() => store.closeServer(active.host)}
+            onOpen={(key) => { setMobileContent(false); setVoicePreview(null); store.openServer(key === state.homeHost ? homeDirHost : key); }}
             join={homeless && !active.me ? state.joinInvites[active.host] ?? "" : null} />
         ) : showStage && voiceChannel ? (
           stage(false)
@@ -806,34 +813,43 @@ export function App() {
  * `join` (client without a home server, not signed in there): the invite code that came with the address, "" = none. The view
  * then waits for a click before signing in, because that reveals the public key and creates an account on that server.
  */
-function ServerStatus({ s, store, state, onRetry, onClose, join }: { s: ServerConnState; store: Store; state: State; onRetry: (invite?: string) => void; onClose: () => void; join: string | null }) {
+function ServerStatus({ s, store, state, rail, onRetry, onClose, onOpen, join }: { s: ServerConnState; store: Store; state: State; rail: readonly RailServer[]; onRetry: (invite?: string) => void; onClose: () => void; onOpen: (key: string) => void; join: string | null }) {
   const busy = s.connection === "logging-in" || s.connection === "connecting" || s.connection === "reconnecting";
-  const name = s.serverName ?? s.host;
+  // Without an answer from /api/health the directory's list may still know the name (docs/features/offline.md).
+  const name = s.serverName ?? (state.accountServers ?? []).find((a) => store.hostFor(a.host) === s.host)?.name ?? s.host;
   const [invite, setInvite] = useState(join ?? "");
   useEffect(() => setInvite(join ?? ""), [s.host, join]);
   const firstContact = join !== null && !s.error && !s.removed;
   const claim = s.me?.registrationRequired === true;
   // Which account to join with (docs/features/local-accounts.md): the directory account in one click where the server knows
   // that directory, a server account of its own (sign in or create) where the server allows them. Never a bare key.
-  const accountForms = !busy && !claim && !s.removed && (join !== null || s.accountNeeded);
+  // A server this device has been on that does not answer (docs/features/offline.md): the notice and "Erneut versuchen"
+  // only; the join view with its invite field and account forms would offer an account on a server nobody can reach.
+  const offline = s.waiting === "unreachable";
+  const accountForms = !busy && !claim && !s.removed && !offline && (join !== null || s.accountNeeded);
   const directoryHere = !!s.directoryUrl && s.directoryUrl === state.directoryUrl;
   const handle = directoryHere ? state.directoryAccount?.handle ?? null : null;
   const localAccounts = s.localAccounts || (!s.directoryUrl && s.serverVersion !== null);
   const code = () => invite.trim() || undefined;
   const conn = store.connection(s.host);
+  // The centred notice with the countdown and the other servers (ServerUnreachable.tsx) instead of the status page; the
+  // first contact ("Verbinde mit …", the stored session or the health request, a sign-in under way) is centred the same way.
+  if (offline || (busy && !claim)) return <ServerUnreachable s={s} name={name} checking={!offline} others={reachableServers(state.servers, s.host, (key) => rail.find((r) => r.key === key)?.iconUrl ?? null)} onRetry={() => onRetry()} onOpen={onOpen} />;
   return (
     <section className="chat empty server-status">
       <div className="stack">
         <h2>{name}</h2>
         {busy && <p className="muted">{t("status.connecting", { host: s.host })}</p>}
         {s.removed && <p className="error">{s.removed.reason === "banned" ? t("status.banned") : t("status.removed")}{s.removed.message ? `: ${s.removed.message}` : "."}</p>}
-        {!claim && s.error && <p className="error">{s.error}</p>}
+        {/* A server this device has been on that does not answer: the plain notice, the connection tries again by itself (docs/features/offline.md). */}
+        {s.waiting === "unreachable" && <p className="error">{t("status.offline", { name })}</p>}
+        {!claim && s.error && s.waiting !== "unreachable" && <p className="error">{s.error}</p>}
         {claim && <ClaimAccount serverName={name} directoryUrl={directoryHere ? s.directoryUrl : null} localAccounts={localAccounts} emailRequired={state.directoryEmailRequired} error={s.error}
           onClaimLocal={(h, pw) => store.claimLocal(s.host, h, pw)} onClaimDirectory={(h, email, c) => store.claimDirectory(s.host, h, email, c)}
           onLogout={onClose} checkFree={conn ? (h) => conn.api.localHandleFree(h) : null} />}
         {accountForms && firstContact && <p className="muted">{t(handle ? "join.hintAccount" : "join.hintNoAccount", { host: s.host })}</p>}
         {accountForms && s.accountNeeded && <p className="muted">{t("login.accountNeeded")}</p>}
-        {!busy && (join !== null || s.accountNeeded) && !claim && (
+        {!busy && !offline && (join !== null || s.accountNeeded) && !claim && (
           <label className="stack">
             <span>{t("join.invite")}</span>
             <input value={invite} onChange={(e) => setInvite(e.target.value)} placeholder={t("login.invitePlaceholder")} maxLength={32}

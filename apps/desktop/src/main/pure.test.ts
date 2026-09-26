@@ -249,6 +249,7 @@ describe("start window", () => {
     expect(splashView({ step: "downloading", version: "1.2.3", percent: 250 }, false).percent).toBe(100);
     expect(splashView({ step: "installing", version: "1.2.3" }, false)).toEqual({ text: "Installing update 1.2.3. Squorli restarts in a moment.", percent: 100, skip: null });
     expect(splashView({ step: "starting" }, false).text).toBe("Starting Squorli …");
+    expect(splashView({ step: "devServer", url: "http://localhost:5173" }, true)).toEqual({ text: "Der Vite-Dev-Server unter http://localhost:5173 antwortet nicht. `pnpm dev` starten (der Web-Client läuft darin mit); Squorli lädt dann von selbst.", percent: null, skip: null });
   });
   it("is a page without a script, and the shell's writes cannot break out of their strings", () => {
     const html = splashHtml("<svg xmlns='http://www.w3.org/2000/svg'/>");

@@ -3,6 +3,7 @@ import { ServerApi, explainLoginError, type Health } from "./api";
 import type { VoteKickState } from "./voteKick";
 import type { Identity } from "./identity";
 import { t } from "./i18n";
+import { retryDelayFor, sessionRejected } from "./serverRetry";
 import { showNotice } from "./dialogs";
 import { mentionsUser } from "./mentions";
 import { catchUp, loadReadState, markRead, pruneReadState, saveReadState, type ReadState } from "./readState";
@@ -29,6 +30,14 @@ export type ServerConnState = {
   error: string | null;
   /** The server removed us; sign in again only after a user action. */
   removed: { reason: "kicked" | "banned"; message: string | null } | null;
+  /**
+   * This device has a session here, but the server has not answered yet (docs/features/offline.md): "checking" = the
+   * stored session is being tried, "unreachable" = the server did not answer and the next try is scheduled. App.tsx
+   * shows a notice instead of the login as long as this is set; null = nothing pending.
+   */
+  waiting: "checking" | "unreachable" | null;
+  /** When the next automatic try is due (`retryLater`), for the countdown on screen; null = none scheduled (a try runs, or nothing pending). */
+  retryAt: number | null;
   server: ServerState | null;
   voice: Record<string, VoiceMember[]>;
   /**
@@ -116,6 +125,11 @@ export class ServerConnection {
   private ws: WebSocket | null = null;
   private reconnectTimer: number | null = null;
   private reconnectDelay = 1000;
+  /** A try to reach a server that did not answer (`retryLater`): the scheduled step, its timer and the delay of the last one. */
+  private retry: (() => void) | null = null;
+  private retryTimer: number | null = null;
+  /** How many tries have failed since the server last answered: picks the delay before the next one (`retryDelayFor`). */
+  private retryCount = 0;
   private wantConnection = false;
   private pingTimer: number | null = null;
   /** When each channel's history was loaded from scratch (HISTORY_MAX_AGE_MS), and when that was last checked. */
@@ -154,7 +168,7 @@ export class ServerConnection {
   constructor(host: string, base: string, private readonly identity: () => Identity | null, private readonly hooks: ConnectionHooks) {
     this.api = new ServerApi(base);
     this.state = {
-      host, base, me: null, userId: null, connection: "idle", error: null, removed: null, server: null,
+      host, base, me: null, userId: null, connection: "idle", error: null, removed: null, waiting: null, retryAt: null, server: null,
       voice: {}, voteKickAllowed: {}, voteKick: null, voteKickResult: null, radioTitles: {}, clockOffset: 0, messages: {}, typing: {}, currentChannelId: null, unread: {}, mentions: {}, muted: {}, serverMuted: false, readSync: false, log: [],
       serverName: null, iconUrl: null, serverDomain: null, requireAccount: false, localAccounts: false, accountNeeded: false, inviteRequired: false, serverVersion: null, directoryUrl: null,
     };
@@ -162,7 +176,10 @@ export class ServerConnection {
     // Back in front of this tab: another device may have read channels meanwhile (normally `read.update` says so right away).
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && this.serverRead && this.state.connection === "connected" && Date.now() - this.lastReadSync > READ_SYNC_MIN_MS) void this.syncReadState();
+      // A server that did not answer: the wait is over as soon as the user looks again.
+      if (document.visibilityState === "visible") this.retryNow();
     });
+    window.addEventListener("online", () => this.retryNow());
     this.api.onUnauthorized = () => { if (this.state.me) this.sessionLost("Die Sitzung ist abgelaufen oder wurde abgemeldet. Bitte erneut anmelden."); };
   }
 
@@ -178,19 +195,64 @@ export class ServerConnection {
     return health;
   }
 
-  /** Reuse the stored session if it is still valid. */
-  async resume(token: string): Promise<boolean> {
+  /**
+   * Reuse the stored session. "rejected" = the server refused it (dropped; the login follows). "unreachable" = the server
+   * did not answer (docs/features/offline.md): the session stays, `waiting` says so and the next try is scheduled here,
+   * so that a server that is down for a while shows a notice instead of the login and comes back by itself.
+   */
+  async resume(token: string): Promise<"ok" | "rejected" | "unreachable"> {
     this.api.setToken(token);
-    this.set({ connection: "connecting", error: null });
-    const me = await this.api.getMe().catch(() => null);
-    if (!me) { this.api.setToken(null); this.set({ connection: "idle" }); return false; }
-    this.enter(me);
-    return true;
+    // A retry after "unreachable" keeps that notice (and its buttons) on screen while the attempt runs.
+    if (this.state.waiting !== "unreachable") this.set({ connection: "connecting", error: null, waiting: "checking" });
+    try {
+      const me = await this.api.getMe();
+      this.retrySettled();
+      this.enter(me);
+      return "ok";
+    } catch (err) {
+      if (sessionRejected(err)) { this.retrySettled(); this.api.setToken(null); this.set({ connection: "idle", waiting: null }); return "rejected"; }
+      this.set({ connection: "error", error: t("err.serverUnreachable"), waiting: "unreachable" });
+      this.retryLater(() => void this.resume(token));
+      return "unreachable";
+    }
+  }
+
+  /**
+   * The server did not answer: run `step` again after a while (15 s, then 30 s for the 2nd to 5th try, then a minute each),
+   * or at once when the device
+   * comes back online, the tab is shown again or the user asks (`retryNow`). `close()` and `cancelRetry()` drop it; a
+   * step that fails again schedules the next one itself by calling this again.
+   */
+  retryLater(step: () => void) {
+    this.cancelRetry();
+    this.retryCount += 1;
+    const delay = retryDelayFor(this.retryCount);
+    this.retry = step;
+    this.retryTimer = window.setTimeout(() => this.retryNow(), delay);
+    this.set({ retryAt: Date.now() + delay });
+  }
+  /** Run the scheduled try now (nothing scheduled = nothing happens). */
+  retryNow() {
+    const step = this.retry;
+    this.cancelRetry();
+    step?.();
+  }
+  /** Forget the scheduled try (the delay keeps growing until the server answered). */
+  cancelRetry() {
+    if (this.retryTimer !== null) { clearTimeout(this.retryTimer); this.retryTimer = null; }
+    this.retry = null;
+    if (this.state.retryAt !== null) this.set({ retryAt: null });
+  }
+  /** The server answered: no try pending, the next failure starts the cadence over. */
+  retrySettled() {
+    this.cancelRetry();
+    this.retryCount = 0;
   }
 
   /** Signed in: connect, unless the member must register first (a member from before server accounts, docs/features/local-accounts.md). */
   private enter(me: Me) {
-    this.set({ me, userId: me.userId, accountNeeded: false });
+    // A resumed session keeps `waiting` until the welcome, so the notice stands until the client can be shown (never the login in between).
+    this.set({ me, userId: me.userId, accountNeeded: false, waiting: me.registrationRequired ? null : this.state.waiting });
     if (me.registrationRequired) { this.set({ connection: "idle", error: null }); return; }
     this.connect();
   }
@@ -217,8 +279,8 @@ export class ServerConnection {
     } catch (err) {
       const code = err instanceof Error && "code" in err ? (err as { code: string | null }).code : null;
       // No account for this key: not an error the user did, but the next step (the account forms).
-      if (code === "registration_required") this.set({ connection: "idle", error: null, accountNeeded: true });
-      else this.set({ connection: "error", error: await explainLoginError(err, this.api, domain) });
+      if (code === "registration_required") this.set({ connection: "idle", error: null, accountNeeded: true, waiting: null });
+      else this.set({ connection: "error", error: await explainLoginError(err, this.api, domain), waiting: null });
       throw Object.assign(new Error("login failed"), { code });
     }
   }
@@ -248,12 +310,13 @@ export class ServerConnection {
     this.ackTimers.clear(); this.acked = {}; this.liveLatest = {}; this.serverRead = false;
     if (this.recountTimer !== null) { clearTimeout(this.recountTimer); this.recountTimer = null; }
     this.voiceChannelId = null;
-    this.set({ me: null, userId: null, accountNeeded: false, connection: "idle", server: null, messages: {}, voice: {}, currentChannelId: null, unread: {}, mentions: {}, muted: {}, serverMuted: false, readSync: false, removed: null, error });
+    this.set({ me: null, userId: null, accountNeeded: false, connection: "idle", waiting: null, server: null, messages: {}, voice: {}, currentChannelId: null, unread: {}, mentions: {}, muted: {}, serverMuted: false, readSync: false, removed: null, error });
   }
 
   /** Close the connection without forgetting the session (e.g. on an identity switch). */
   close() {
     this.wantConnection = false;
+    this.retrySettled();
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
     this.ws?.close();
@@ -396,7 +459,7 @@ export class ServerConnection {
         const current = this.state.currentChannelId && e.state.channels.some((c) => c.id === this.state.currentChannelId)
           ? this.state.currentChannelId
           : e.state.channels.find((c) => c.kind === "text")?.id ?? null;
-        this.set({ server: e.state, userId: e.userId, connection: "connected", currentChannelId: current, error: null, radioTitles: {}, voteKick: null, voteKickAllowed: {}, clockOffset: Date.parse(e.serverTime) - Date.now() }); // the server sends the known titles after the welcome
+        this.set({ server: e.state, userId: e.userId, connection: "connected", currentChannelId: current, error: null, waiting: null, radioTitles: {}, voteKick: null, voteKickAllowed: {}, clockOffset: Date.parse(e.serverTime) - Date.now() }); // the server sends the known titles after the welcome
         this.read = pruneReadState(loadReadState(this.state.host, e.userId), e.state.channels.map((c) => c.id));
         void this.syncReadState();
         if (this.idle || this.game) this.reportIdle();

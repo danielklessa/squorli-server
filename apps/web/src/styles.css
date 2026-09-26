@@ -186,6 +186,22 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 .server-status .stack .stack:not(.handle-box) { max-width: none; margin: 0; padding: 0; }
 .server-status .handle-box { max-width: none; margin: 0; }
 .server-status h2 { margin: 0; }
+/* A rail server that does not answer (ServerUnreachable.tsx, docs/features/offline.md): the notice centred both ways, countdown above "Erneut versuchen", the reachable servers below. */
+.chat.empty.server-unreachable { justify-content: center; align-items: center; text-align: center; }
+.unreachable-card { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; max-width: 30rem; padding: 1rem; }
+.unreachable-card p { margin: 0; }
+.retry-countdown { font-variant-numeric: tabular-nums; }
+.unreachable-others { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; margin-top: 0.75rem; }
+.unreachable-others ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; width: min(18rem, 100%); }
+/* One reachable server: its icon (or initials) left of the name, both centred on the row. */
+.other-server { display: flex; align-items: center; gap: 0.75rem; width: 100%; padding: 0.4rem 0.75rem; text-align: left; }
+.other-server-icon { flex: none; width: 2rem; height: 2rem; border-radius: 50%; overflow: hidden; background: var(--bg2); display: inline-flex; align-items: center; justify-content: center; }
+.other-server-icon img { width: 100%; height: 100%; object-fit: cover; }
+.other-server-icon .rail-initials { font-size: 0.75rem; }
+.other-server-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The rail entry of such a server: dimmed picture, a red "!" at the bottom right. */
+.rail-item.unreachable img, .rail-item.unreachable .rail-initials { opacity: 0.45; }
+.rail-badge.rail-off { background: var(--danger); }
 /* Right-click menu on a rail entry (positioned at the pointer, above the columns) */
 .rail-menu { position: fixed; z-index: 9; min-width: 14rem; display: flex; flex-direction: column; gap: 0.35rem; background: var(--bg4); border: 1px solid var(--line); border-radius: var(--r); padding: 0.6rem 0.8rem; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
 .rail-menu-head { word-break: break-all; }
@@ -194,6 +210,11 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 .app.home { grid-template-columns: 5rem var(--left-w, 17rem) minmax(0, 1fr); }
 /* Without the member list the main area is the last column: it keeps the gap to the window's edge that the list otherwise provides. */
 .app.home .main { margin-right: var(--gap); }
+/* No server state on screen (connecting, unreachable, join view; docs/features/offline.md, user's wish of 26 September 2026): the main area takes the members' column too, as the home view does. */
+.app.no-members { grid-template-columns: var(--left-w, 17rem) minmax(0, 1fr); }
+.app.with-rail.no-members { grid-template-columns: 5rem var(--left-w, 17rem) minmax(0, 1fr); }
+.app.no-members .main { margin-right: var(--gap); }
+.app.no-members .members-col, .app.no-members .col-handle.members { display: none; }
 .home-side { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .home-search { display: flex; align-items: center; gap: 0.2rem; padding: 0.5rem 0.6rem 0; }
 .home-search input { flex: 1; min-width: 0; }
@@ -1122,6 +1143,11 @@ button.emoji-open[aria-expanded="true"] { color: var(--brand); }
 /* A surface of its own: on a see-through window bare text was hardly readable. It looks like a chat message under the pointer (user's wish, 20 September 2026): the hover surface (--bg2) on top of the main area's (--bg3); both follow the window's opacity. */
 .app-starting-card { display: flex; flex-direction: column; align-items: center; gap: 0.9rem; padding: 2rem 2.75rem; border-radius: var(--r-panel); background: linear-gradient(var(--bg2), var(--bg2)), var(--bg3); color: var(--muted); text-align: center; }
 .app-starting-card img { width: 6rem; height: 6rem; }
+/* The own server does not answer while this device has a session there (ServerOffline.tsx, docs/features/offline.md): the same card, with a heading, the notice and "Erneut versuchen" / "Abmelden". */
+.server-offline .app-starting-card { max-width: 28rem; gap: 0.75rem; }
+.server-offline h2 { margin: 0; font-size: 1.15rem; color: var(--text); }
+.server-offline p { margin: 0; }
+.server-offline .row { justify-content: center; margin-top: 0.5rem; }
 
 /* Einstellungen > Tastenkuerzel (HotkeysTab.tsx, docs/features/hotkeys.md): one row per shortcut, the list of control links with a copy button each. */
 .hotkey-row { margin-top: 0; gap: 0.35rem; }
