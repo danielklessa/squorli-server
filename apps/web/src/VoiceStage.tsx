@@ -149,14 +149,16 @@ export function VoiceStage({ client, voice, channel, members, myPermissions, api
   const gridItems = videoOnly && anyVideo ? items.filter((i) => i.kind !== "camera" || i.participant.cameraOn) : items;
   const grid = useFittedGrid(gridItems.length);
 
-  // A share's audio plays only for who selected that share (clicked it large) or popped it out (VideoWindows.tsx); a share
-  // that merely moved into focus by itself stays silent. Leaving the stage ends the listening.
+  // A share's audio plays for who watches that share (user, 26 September 2026: "sollte da sein sobald ich das Ansehen
+  // starte"): since a share is only received after "Ansehen" (19 September 2026), that click is the choice the rule of
+  // 18 September 2026 asked for, so the stage listens to every share the user watches, pinned or not, in either layout.
+  // Pop-out windows listen on their own (VideoWindows.tsx). Leaving the stage ends the listening.
   const screenIds = voice.tiles.filter((tile) => tile.source === "screen" && !tile.isLocal).map((tile) => tile.id).join(" ");
   useEffect(() => {
     const ids = screenIds ? screenIds.split(" ") : [];
-    for (const id of ids) client.setScreenAudioListening(id, "stage", layout === "focus" && pinned === id);
+    for (const id of ids) client.setScreenAudioListening(id, "stage", true);
     return () => { for (const id of ids) client.setScreenAudioListening(id, "stage", false); };
-  }, [client, screenIds, layout, pinned]);
+  }, [client, screenIds]);
 
   // Click a tile: show it large. Click the large tile: back to the tiles.
   const focusOn = (key: string) => { setPinned(key); setLayout("focus"); };

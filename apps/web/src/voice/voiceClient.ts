@@ -182,7 +182,7 @@ export class VoiceClient {
   private readonly audioHost: HTMLElement;
   private readonly remoteAudio = new Map<RemoteTrack, { element: HTMLMediaElement; identity: string }>();
   private readonly videoAudioHosts = new Map<string, HTMLElement>();
-  /** Screen tiles whose audio the user listens to, with the reasons why (selected in the stage, popped out); see setScreenAudioListening. */
+  /** Screen tiles whose audio the user listens to, with the reasons why (watched in the stage, fullscreen, popped out); see setScreenAudioListening. */
   private readonly screenListening = new Map<string, Set<string>>();
   private readonly listeners = new Set<(s: VoiceState) => void>();
   state: VoiceState = {

@@ -1067,7 +1067,7 @@ export const en: Messages = {
   "stage.unblur": "Sharpen background again",
   "stage.blur": "Blur background",
   "stage.stopShare": "Stop screen share",
-  "stage.audioOnSelect": "With audio: click the share (show it large), show it in fullscreen or pop it out to listen",
+  "stage.audioOnSelect": "With audio: watch the share to listen",
   "stage.shareWithAudio": "Share screen (with audio)",
   "stage.shareNoAudio": "Share screen (without audio in this browser)",
   "stage.backToGrid": "Click: back to the tiles",

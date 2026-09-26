@@ -1068,7 +1068,7 @@ export const de = {
   "stage.unblur": "Hintergrund wieder scharf",
   "stage.blur": "Hintergrund unscharf machen",
   "stage.stopShare": "Bildschirmfreigabe beenden",
-  "stage.audioOnSelect": "Mit Ton: zum Anhören die Übertragung anklicken (groß anzeigen), im Vollbild zeigen oder auspoppen",
+  "stage.audioOnSelect": "Mit Ton: zum Anhören die Übertragung ansehen",
   "stage.shareWithAudio": "Bildschirm teilen (mit Ton)",
   "stage.shareNoAudio": "Bildschirm teilen (ohne Ton in diesem Browser)",
   "stage.backToGrid": "Klick: zurück zu den Kacheln",

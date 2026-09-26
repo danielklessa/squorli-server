@@ -1,5 +1,7 @@
 # Verified state
 
+- **A watched share plays its audio at once (26 September 2026, `docs/features/voice-video.md`):** root typecheck; web tests 439. **Not checked:** on screen; the user tests it with a real share and a separate output device.
+
 - **Reporting a direct message (26 September 2026, `docs/features/reports.md`):** root typecheck (5/5); protocol tests 105 (2 new: the signed payload is the same from the parsed request and from the client's objects, the limits), web tests 439 (`dmReports.test.ts`, 3 new), server 128; `pnpm --filter @squorli/web build`. The directory's smoke test (its repo) signs the same payload the client builds and got 201/409/400/401/400/404. **Not checked:** the flag and the dialog on screen, a report from the real client end to end.
 
 - **Screen audio on its own device (26 September 2026, `docs/features/voice-video.md`):** root typecheck; web tests 436 (7 new in `videoAudio.test.ts`), server 128, desktop 75; headless Chrome loopback check of the Web Audio route (a remote track's RMS 0.71 in a second AudioContext with the element at volume 0 and muted, 0.00 with the gain at 0); `pnpm build`. Not checked: two real output devices (the user's test).
