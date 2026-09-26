@@ -126,9 +126,19 @@ export function playTones(ctx: AudioContext, tones: readonly Tone[], volume: num
   } catch { /* no Web Audio (test environment, blocked context): stay silent */ }
 }
 
+/** Can a context of this browser be given an output device of its own (Chromium's AudioContext.setSinkId)? */
+export function contextSinkSupported(): boolean {
+  return typeof AudioContext !== "undefined" && typeof (AudioContext.prototype as { setSinkId?: unknown }).setSinkId === "function";
+}
+
+/** Give a context its own output device (null = the default). Rejects when the browser refuses the device; resolves at once where it cannot choose. */
+export function setContextSink(ctx: AudioContext, deviceId: string | null): Promise<void> {
+  const withSink = ctx as AudioContext & { setSinkId?: (id: string) => Promise<void> };
+  if (typeof withSink.setSinkId !== "function") return Promise.resolve();
+  return withSink.setSinkId(deviceId ?? "");
+}
+
 /** Route the cues to the selected output device where the browser supports it (Chromium's AudioContext.setSinkId). */
 export function applyCueOutput(ctx: AudioContext, deviceId: string | null): void {
-  const withSink = ctx as AudioContext & { setSinkId?: (id: string) => Promise<void> };
-  if (typeof withSink.setSinkId !== "function") return;
-  void withSink.setSinkId(deviceId ?? "").catch(() => { /* device gone or not permitted: keep the default */ });
+  void setContextSink(ctx, deviceId).catch(() => { /* device gone or not permitted: keep the default */ });
 }

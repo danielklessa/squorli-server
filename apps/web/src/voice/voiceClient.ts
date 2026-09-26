@@ -28,7 +28,7 @@ import { micPermissionState, micRefusal } from "./micPermission";
 import { isCameraBusy, retryCameraBusy } from "./cameraRetry";
 import { cameraSwitch, type CameraRequest } from "./cameraSwitch";
 import type { VoiceSettings } from "./settings";
-import { DEFAULT_SOUND_SETTINGS, FEEDBACK_TONES, applyCueOutput, normalizeSoundSettings, playCue, playTones, shouldPlayCue, type SoundCue, type SoundSettings } from "./sounds";
+import { DEFAULT_SOUND_SETTINGS, FEEDBACK_TONES, applyCueOutput, contextSinkSupported, normalizeSoundSettings, playCue, playTones, setContextSink, shouldPlayCue, type SoundCue, type SoundSettings } from "./sounds";
 import { USER_VOLUME_MAX, clampUserVolume, loadUserVolumes, saveUserVolumes, withUserVolume, type UserVolumes } from "./userVolumes";
 import { screenSharePublish } from "./screenShareOptions";
 import { subscriptionPermissions, type VideoAccess } from "./videoAccess";
@@ -107,8 +107,8 @@ export type VoiceState = {
   tiles: VideoTile[];
   /** Notice from a moderator (moved, camera stopped); the user can dismiss it. */
   notice: string | null;
-  /** Output device for screen audio and how many tracks it carries (debug). */
-  screenSink: { deviceId: string | null; tracks: number; error: string | null };
+  /** Output device for screen audio, how many tracks it carries and which way they play (debug): "webaudio" = through the screen context on the separate device, "element" = LiveKit's element on the voice device (applyShareAudio). */
+  screenSink: { deviceId: string | null; tracks: number; error: string | null; via: "element" | "webaudio" };
   /** Active voice profile of the channel (bitrate in kbit/s, stereo). */
   audioProfile: AudioProfile | null;
   /** Last used LiveKit URL (debug). */
@@ -187,12 +187,24 @@ export class VoiceClient {
   private readonly listeners = new Set<(s: VoiceState) => void>();
   state: VoiceState = {
     status: "disconnected", channelId: null, afkRoom: false, participants: [], micMuted: false, deafened: false, gateOpen: false, level: 0, micBoost: 1, micInput: 0, micSide: "stereo", micTest: false,
-    canPlayback: true, audioContext: "none", inputDeviceId: null, cameraOn: false, cameraBlur: 0, screenOn: false, screenAudio: null, tiles: [], notice: null, screenSink: { deviceId: null, tracks: 0, error: null }, audioProfile: null, rtcUrl: null, events: [], error: null,
+    canPlayback: true, audioContext: "none", inputDeviceId: null, cameraOn: false, cameraBlur: 0, screenOn: false, screenAudio: null, tiles: [], notice: null, screenSink: { deviceId: null, tracks: 0, error: null, via: "element" }, audioProfile: null, rtcUrl: null, events: [], error: null,
   };
   private audioProfile: AudioProfile = DEFAULT_AUDIO_PROFILE;
   private micSettings: VoiceSettings | null = null;
   /** Output device for screen audio (separate from voice); null = default/same as voice. */
   private screenSinkId: string | null = null;
+  /**
+   * The context that plays screen audio on its separate device (Chromium's AudioContext.setSinkId); null where the browser
+   * cannot give a context its own device. Created when a device is chosen, kept across rooms like `audioCtx`. See applyShareAudio().
+   */
+  private screenCtx: AudioContext | null = null;
+  /** The screen context's sink IS the chosen device (setSinkId resolved); until then, and after a refusal, the shares play through their elements. */
+  private screenSinkReady = false;
+  private screenSinkError: string | null = null;
+  /** The Web Audio path of each received share's audio while it plays on the separate device: source -> gain -> screenCtx.destination. */
+  private readonly shareRoutes = new Map<RemoteTrack, { source: MediaStreamAudioSourceNode; gain: GainNode }>();
+  /** Playback volume of each participant's share audio (0..1), in memory only; on the Web Audio path the element cannot hold it (it stays at 0). */
+  private readonly shareVolumes = new Map<string, number>();
   /** Microphone mute set by the user themselves, independent of deafening. */
   private micMutedByUser = false;
   /** Microphone test: the capture opened for it while in no channel (in a channel the test listens to `mic`), and its playback. */
@@ -253,6 +265,7 @@ export class VoiceClient {
   prepareAudio(): void {
     const ctx = this.ensureCtx();
     if (contextNeedsResume(ctx.state)) void ctx.resume().catch(() => {});
+    this.resumeScreenCtx();
     if (!this.unlocked) {
       const el = document.createElement("audio");
       el.src = SILENT_WAV;
@@ -313,9 +326,43 @@ export class VoiceClient {
     return this.audioCtx;
   }
 
+  /** The screen context, made when a separate device is first chosen; null where a context cannot have its own device. */
+  private ensureScreenCtx(): AudioContext | null {
+    if (!contextSinkSupported()) return null;
+    if (!this.screenCtx || this.screenCtx.state === "closed") {
+      const ctx = new AudioContext();
+      this.screenCtx = ctx;
+      // Suspended (no gesture yet) = the shares play through their elements meanwhile; running again = back on the separate device.
+      ctx.onstatechange = () => { if (this.screenCtx === ctx) this.applyShareAudio(); };
+    }
+    return this.screenCtx;
+  }
+
+  private resumeScreenCtx(): void {
+    const ctx = this.screenCtx;
+    if (ctx && contextNeedsResume(ctx.state)) void ctx.resume().catch(() => {});
+  }
+
+  /** Point the screen context at the chosen device; the shares move over once the browser has accepted it, and stay on their elements when it refuses. */
+  private async applyScreenCtxSink(): Promise<void> {
+    const wanted = this.screenSinkId;
+    this.screenSinkReady = false;
+    this.screenSinkError = null;
+    const ctx = wanted !== null ? this.ensureScreenCtx() : null;
+    if (!ctx) { this.applyShareAudio(); return; }
+    try {
+      await setContextSink(ctx, wanted);
+      if (this.screenCtx === ctx && this.screenSinkId === wanted) this.screenSinkReady = true;
+    } catch (err) {
+      if (this.screenCtx === ctx && this.screenSinkId === wanted) this.screenSinkError = errorText(err);
+    }
+    this.applyShareAudio();
+  }
+
   private unlockOnGesture(): void {
     const ctx = this.audioCtx;
     if (ctx && contextNeedsResume(ctx.state)) void ctx.resume().then(() => this.log("audio-kontext freigegeben (klick)")).catch(() => {});
+    this.resumeScreenCtx();
     if (this.room && !this.room.canPlaybackAudio) void this.startAudio();
   }
 
@@ -437,7 +484,7 @@ export class VoiceClient {
       .on(RoomEvent.TrackSubscribed, (track, _pub, p) => { this.attachRemote(track, p.identity); if (track.kind === Track.Kind.Video) this.log(`video von ${p.identity.slice(0, 8)}: ${track.source}`); this.refreshTiles(); })
       // LiveKit emits TrackUnsubscribed before clearing publication.track, so exclude the ended track explicitly;
       // otherwise the tile survives with a stopped track and the viewers keep a black frame.
-      .on(RoomEvent.TrackUnsubscribed, (track, _pub, p) => { if (track.kind === Track.Kind.Audio) { track.detach().forEach((el) => el.remove()); this.remoteAudio.delete(track); this.dropMeter(p.identity); } this.refreshTiles(track); })
+      .on(RoomEvent.TrackUnsubscribed, (track, _pub, p) => { if (track.kind === Track.Kind.Audio) { track.detach().forEach((el) => el.remove()); this.dropShareRoute(track); this.remoteAudio.delete(track); this.dropMeter(p.identity); this.applyShareAudio(); } this.refreshTiles(track); })
       .on(RoomEvent.TrackUnpublished, (pub, p) => {
         this.log(`${p.identity.slice(0, 8)} beendet ${pub.source}`);
         // The choice ends with the feed: a share started again has to be turned on again.
@@ -464,9 +511,9 @@ export class VoiceClient {
         this.refreshTiles();
       })
       .on(RoomEvent.TrackStreamStateChanged, () => this.refreshTiles())
-      // On device changes LiveKit points all audio tracks at the voice output device; separate the screen audio again afterwards.
-      .on(RoomEvent.MediaDevicesChanged, () => { void this.applyScreenSink(); })
-      .on(RoomEvent.ActiveDeviceChanged, (kind) => { if (kind === "audiooutput") void this.applyScreenSink(); })
+      // On device changes LiveKit points every element at the voice output device (right: that is their device); the shares' own route is checked again.
+      .on(RoomEvent.MediaDevicesChanged, () => this.applyShareAudio())
+      .on(RoomEvent.ActiveDeviceChanged, (kind) => { if (kind === "audiooutput") this.applyShareAudio(); })
       .on(RoomEvent.AudioPlaybackStatusChanged, () => this.patch({ canPlayback: room.canPlaybackAudio }))
       .on(RoomEvent.ConnectionStateChanged, (s) => { this.log(`status: ${s}`); this.patch({ status: mapState(s) }); })
       .on(RoomEvent.Disconnected, (reason) => {
@@ -514,8 +561,9 @@ export class VoiceClient {
       if (mic.deviceFallback) this.log("gewaehltes mikrofon nicht gefunden, nutze das standardmikrofon");
       this.publication = await room.localParticipant.publishTrack(track, this.micPublishOptions());
       this.log(`opus ${this.audioProfile.bitrate} kbit/s ${this.audioProfile.stereo ? "stereo" : "mono, dtx+red"}`);
-      if (settings.outputDeviceId) await this.setOutputDevice(settings.outputDeviceId).catch(() => {});
       this.screenSinkId = settings.screenOutputDeviceId;
+      if (settings.outputDeviceId) await this.setOutputDevice(settings.outputDeviceId).catch(() => {});
+      void this.applyScreenCtxSink();
       this.micMutedByUser = false;
       this.patch({ status: mapState(room.state), canPlayback: room.canPlaybackAudio, audioContext: mic.contextState(), inputDeviceId: mic.activeDeviceId(), micMuted: false, deafened: false });
       this.log(`audio-kontext ${mic.contextState()}, wiedergabe ${room.canPlaybackAudio ? "frei" : "blockiert (klicken)"}`);
@@ -556,7 +604,9 @@ export class VoiceClient {
       await room.disconnect().catch(() => {});
     }
     for (const { element } of this.remoteAudio.values()) element.remove();
+    for (const track of [...this.shareRoutes.keys()]) this.dropShareRoute(track);
     this.remoteAudio.clear();
+    this.applyShareAudio();
     this.videoAudioHosts.clear();
     this.screenListening.clear();
     this.videoWatch.clear();
@@ -832,7 +882,7 @@ export class VoiceClient {
   getVideoAudioVolume(tileId: string): number | null {
     const track = this.videoAudioTrack(tileId);
     if (!track) return null;
-    return tileId.endsWith(":screen") ? track.getVolume() : this.userVolumes[this.volumeKey(tileId.slice(0, -":camera".length))] ?? 1;
+    return tileId.endsWith(":screen") ? this.shareVolumes.get(tileId.slice(0, -":screen".length)) ?? 1 : this.userVolumes[this.volumeKey(tileId.slice(0, -":camera".length))] ?? 1;
   }
 
   private readonly videoAudioPreviousVolume = new WeakMap<RemoteAudioTrack, number>();
@@ -851,7 +901,8 @@ export class VoiceClient {
     const before = this.getVideoAudioVolume(tileId);
     if (track && before !== null && before > 0) this.videoAudioPreviousVolume.set(track, before);
     if (!tileId.endsWith(":screen")) { this.setUserVolume(this.volumeKey(tileId.slice(0, -":camera".length)), volume); return; }
-    track?.setVolume(Math.max(0, Math.min(1, volume)));
+    this.shareVolumes.set(tileId.slice(0, -":screen".length), Math.max(0, Math.min(1, volume)));
+    if (track) this.applyShareAudio(track);
     this.patch({});
   }
 
@@ -1070,31 +1121,75 @@ export class VoiceClient {
 
   async setOutputDevice(deviceId: string): Promise<void> {
     applyCueOutput(this.ensureCtx(), deviceId || null);
+    // Every element, the shares' too: in Chromium they all share ONE output sink anyway (applyShareAudio); a share's separate
+    // device is not an element's sink but its own context.
     await this.room?.switchActiveDevice("audiooutput", deviceId);
-    // LiveKit sets the device for all tracks; put the screen audio back on its own device afterwards.
-    await this.applyScreenSink();
+    this.applyShareAudio();
   }
 
   /** Route screen audio to a separate output device (e.g. speakers instead of a headset). Chromium only; no effect elsewhere. */
   async setScreenOutputDevice(deviceId: string | null): Promise<void> {
     this.screenSinkId = deviceId;
-    await this.applyScreenSink();
+    await this.applyScreenCtxSink();
   }
 
-  private async applyScreenSink(): Promise<void> {
-    const room = this.room;
-    if (!room) return;
-    const fallback = room.getActiveDevice("audiooutput") ?? "";
-    const target = this.screenSinkId ?? fallback;
-    let tracks = 0; let error: string | null = null;
-    for (const p of room.remoteParticipants.values()) {
-      const t = p.getTrackPublication(Track.Source.ScreenShareAudio)?.track;
-      if (!(t instanceof RemoteAudioTrack)) continue;
+  /**
+   * Where a received share's audio plays (user's report, 26 September 2026: with a separate device for screen audio every
+   * voice moved to that device too). Chromium plays ALL remote WebRTC tracks of a page through one shared renderer with ONE
+   * output device (`WebRtcAudioRenderer`: `setSinkId` on any of their elements replaces that one sink, the last call wins),
+   * so a share on another device cannot go through its element. It runs through `screenCtx` instead, which has a sink of
+   * its own: the track's source into a gain (the share's volume; 0 for deafen and "not listening", `audioMuted()`) into the
+   * context's destination, while LiveKit's element keeps playing at volume 0, because Chromium feeds a remote track into
+   * Web Audio only while an element plays it (the frame reaches Web Audio before the element's volume is applied, so 0 is
+   * enough; the >100 % boost in applyUserVolume() rests on the same rule). Without a separate device, while the context does
+   * not run (no gesture yet), or where the browser refused the device, the element plays as before, on the voice device.
+   * Never call `setSinkId` on a remote track or its element with anything but the voice device.
+   */
+  private applyShareAudio(only?: RemoteTrack): void {
+    const ctx = this.screenCtx;
+    const separate = this.screenSinkId !== null && !!ctx && ctx.state === "running" && this.screenSinkReady;
+    let tracks = 0;
+    for (const [remote, { identity }] of this.remoteAudio) {
+      if (remote.source !== Track.Source.ScreenShareAudio) continue;
       tracks++;
-      try { await t.setSinkId(target); } catch (err) { error = errorText(err); }
+      if (only && remote !== only) continue;
+      const track = remote as RemoteAudioTrack; // remoteAudio only ever holds audio tracks (attachRemote)
+      const volume = this.shareVolumes.get(identity) ?? 1;
+      if (separate && ctx) {
+        let route = this.shareRoutes.get(remote);
+        if (!route) {
+          try {
+            const source = ctx.createMediaStreamSource(new MediaStream([track.mediaStreamTrack]));
+            const gain = ctx.createGain();
+            source.connect(gain);
+            gain.connect(ctx.destination);
+            route = { source, gain };
+            this.shareRoutes.set(remote, route);
+          } catch (err) {
+            this.log(`bildschirm-ton von ${identity.slice(0, 8)} nicht ueber den eigenen kontext: ${errorText(err)}`);
+          }
+        }
+        if (route) {
+          route.gain.gain.value = this.audioMuted(remote, identity) ? 0 : volume;
+          track.setVolume(0);
+          continue;
+        }
+      }
+      this.dropShareRoute(remote);
+      track.setVolume(volume);
     }
-    this.patch({ screenSink: { deviceId: this.screenSinkId, tracks, error } });
-    if (tracks || error) this.log(`bildschirm-ton -> ${this.screenSinkId ? `geraet ${this.screenSinkId.slice(0, 8)}` : "wie sprache"} (${tracks} spuren${error ? `, fehler: ${error}` : ""})`);
+    const next = { deviceId: this.screenSinkId, tracks, error: this.screenSinkError, via: separate ? "webaudio" as const : "element" as const };
+    const prev = this.state.screenSink;
+    if (prev.deviceId === next.deviceId && prev.tracks === next.tracks && prev.error === next.error && prev.via === next.via) return;
+    this.patch({ screenSink: next });
+    if (tracks || next.error) this.log(`bildschirm-ton -> ${next.deviceId ? `geraet ${next.deviceId.slice(0, 8)} (${next.via === "webaudio" ? "eigener kontext" : "element, kontext nicht bereit"})` : "wie sprache"} (${tracks} spuren${next.error ? `, fehler: ${next.error}` : ""})`);
+  }
+
+  private dropShareRoute(track: RemoteTrack): void {
+    const route = this.shareRoutes.get(track);
+    if (!route) return;
+    try { route.source.disconnect(); route.gain.disconnect(); } catch { /* already gone */ }
+    this.shareRoutes.delete(track);
   }
 
   setNotice(text: string | null) { this.patch({ notice: text }); if (text) this.log(`hinweis: ${text}`); }
@@ -1190,6 +1285,7 @@ export class VoiceClient {
   }
   private applyAudioMuted(): void {
     for (const [track, { element, identity }] of this.remoteAudio) element.muted = this.audioMuted(track, identity);
+    this.applyShareAudio(); // a share on the separate device is silenced in its gain, not in its element
   }
   private applyScreenListening(identity: string): void {
     this.applyAudioMuted();
@@ -1226,7 +1322,7 @@ export class VoiceClient {
     this.remoteAudio.set(track, { element: el, identity });
     if (track.source === Track.Source.ScreenShareAudio) this.applyScreenListening(identity);
     this.routeVideoAudio();
-    if (track.source === Track.Source.ScreenShareAudio) void this.applyScreenSink();
+    if (track.source === Track.Source.ScreenShareAudio) this.applyShareAudio(track);
     if (track.source === Track.Source.Microphone) this.addMeter(identity, track.mediaStreamTrack);
     this.applyUserVolume(track, identity); // after the meter: volumes above 100 % use its source
     this.patch({ canPlayback: this.room?.canPlaybackAudio ?? true });

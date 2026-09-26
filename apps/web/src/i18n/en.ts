@@ -1115,6 +1115,8 @@ export const en: Messages = {
   "debug.closed": "closed",
   "debug.microphone": "Microphone",
   "debug.screenOut": "Screen audio output",
+  "debug.screenViaWebAudio": "own audio context",
+  "debug.screenViaElement": "through the element",
   "debug.device": "device {id}…",
   "debug.sameAsVoice": "same as voice",
   "debug.tracks": "{n} track(s)",

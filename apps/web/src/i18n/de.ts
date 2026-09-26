@@ -1116,6 +1116,8 @@ export const de = {
   "debug.closed": "zu",
   "debug.microphone": "Mikrofon",
   "debug.screenOut": "Bildschirm-Ton Ausgabe",
+  "debug.screenViaWebAudio": "eigener Audiokontext",
+  "debug.screenViaElement": "über das Element",
   "debug.device": "Gerät {id}…",
   "debug.sameAsVoice": "wie Sprache",
   "debug.tracks": "{n} Spur(en)",
