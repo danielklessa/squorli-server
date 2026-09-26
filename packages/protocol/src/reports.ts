@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Iso, Uuid } from "./primitives";
+import { Iso, REPORT_TEXT_MAX, ReportReason, Uuid } from "./primitives";
 
 /**
  * Reports on a chat server and the moderation log (docs/features/reports.md, docs/PLAN-reports.md; 26 September 2026, the
@@ -7,17 +7,14 @@ import { Iso, Uuid } from "./primitives";
  * MANAGE_REPORTS); the server keeps a snapshot of the message (text, author, copies of its attachments, the previews' texts)
  * so the report stays reviewable after the author deleted the message or left. The reported person never learns who
  * reported; when a moderator removes something of theirs after a report they get a short notice without the reporter.
- * Not part of the directory's copy of the protocol: reports to the directory (direct messages, accounts, whole servers)
- * are stage 4 of the plan.
+ * Not part of the directory's copy of the protocol; the reason list and the text limit live in primitives.ts because the
+ * directory's reports (directory.ts: a direct message to the directory's operator, stage 4 of the plan) share them.
  */
 
-export const REPORT_REASONS = ["spam", "harassment", "hate", "sexual", "violence", "illegal", "other"] as const;
-export const ReportReason = z.enum(REPORT_REASONS);
 export const ReportKind = z.enum(["message", "member"]);
 export const ReportStatus = z.enum(["open", "actioned", "dismissed"]);
 /** What a moderator did when closing a report; `delete`/`deleteRecent` the server does itself, kick and ban go through their own routes first. */
 export const ReportAction = z.enum(["delete", "deleteRecent", "kick", "ban", "dismiss", "none"]);
-export const REPORT_TEXT_MAX = 1000;
 export const REPORT_NOTE_MAX = 500;
 /** A member's open reports per hour (the server's rate limit). */
 export const REPORTS_PER_HOUR = 10;
@@ -98,7 +95,6 @@ export const ModLogEntry = z.object({
 });
 export const ModLogResponse = z.object({ entries: z.array(ModLogEntry), hasMore: z.boolean() });
 
-export type ReportReason = z.infer<typeof ReportReason>;
 export type ReportKind = z.infer<typeof ReportKind>;
 export type ReportStatus = z.infer<typeof ReportStatus>;
 export type ReportAction = z.infer<typeof ReportAction>;

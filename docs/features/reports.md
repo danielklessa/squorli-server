@@ -42,4 +42,26 @@ No `PROTOCOL_VERSION` bump: the new events reach only moderators (`reports.count
 - The dialog, the queue, the badges and the notice on screen (typecheck, unit tests and the smoke test only; no screenshot yet).
 - Two real clients: the notice arriving at the reported person, the bulk delete disappearing from an open channel, the badge updating live.
 - The retention sweep with real dates (the SQL only), the log sweep.
-- The website's administrator guide does not describe the queue yet (`../squorli-website/docs/PLAN.md`).
+- The website's guides describe the queue and "Melden" since 26 September 2026 (`../squorli-website`, `/docs/admin/#reports`, `/docs/use/#report`); they go live with the release that carries the feature.
+
+## Built (26 September 2026, later that day): reporting a direct message (stage 4, first part)
+
+The user asked whether reports cover direct messages as well and, as they did not, to build them. Decision 6 of the plan applies (up to 20 preceding messages, checkbox on by default). What the directory does with a report is described in its own repository (`../squorli-directory/docs/features/reports.md`), not here.
+
+- **Why the reporter sends plain text:** a direct message is end-to-end encrypted, the directory holds only ciphertext (`dm.ts`) and cannot read what is reported. So the reporter's client sends the reported message and, unless the reporter unticks the checkbox, the messages before it in plain text, both sides, oldest first (`dmReports.ts` `dmReportContent`: only messages this client could read, no instructions such as a removed preview). Signal and WhatsApp report the same way. The dialog says so ("schickt dein Client die gemeldete Nachricht im Klartext mit").
+- **The flag** on a friend's message in `DmView.tsx` (not on one's own, not on an undecryptable one) opens the same `ReportDialog` addressed to the directory's operator (`report.goesToDirectory` with the directory's host); after the report the dialog offers "Blockieren" (`askBlockFriend`). Only with `features.reports` from the directory's health (`State.dmReports`, set when the socket is opened); a directory without the key that seals the copies takes none, and the flag stays away.
+- **The request:** `api.directoryReportDm` -> signed action `report`, `POST /api/reports`; the payload of the signature is the whole content in a fixed order (`directoryDmReportPayload` in `directory.ts`: kind, reason, text, peer, message, context, each message as id/from/sentAt/text), so nothing can be swapped under the signature. Errors the dialog names: `already_reported` (one open report per reporter and message) and `rate_limited` (10 per hour); everything else as the error's text. `DM_REPORT_CONTEXT_MAX` = 20, `DM_REPORT_MESSAGE_TEXT_MAX` = 16,000 per message.
+- **Protocol:** `REPORT_REASONS`/`ReportReason`/`REPORT_TEXT_MAX` moved from `reports.ts` to `primitives.ts` (one of the six copied files) so the directory's copy knows them; `reports.ts` imports them, `index.ts` re-exports them. `DirectoryAction` gained `report`, `DirectoryHealth.features.reports` (default false). No version bump: a signed REST action and a feature flag.
+- **Store:** `reportDm(peer, messageId, withContext, reason, text)` builds the content from the loaded thread (`state.dms[peer]`); only loaded messages count as context (the thread's older pages are not fetched for a report).
+
+### Decisions made by Claude, not confirmed by the user
+
+- The context is taken from the messages the client has loaded, at most 20 before the reported one, from both sides; nothing older is fetched for the report.
+- A message that could not be decrypted, and an instruction message, cannot be reported and are left out of the context.
+- The dialog offers blocking the friend after the report (plan section 5, "the client offers to block"); it does not block by itself.
+- The flag shows only with `features.reports`; there is no "the directory takes no reports" notice in the conversation.
+
+### Not checked
+
+- The flag and the dialog on screen (typecheck, unit tests `dmReports.test.ts` (3) and the protocol's payload tests only).
+- A real report reaching the directory from the client (the directory's smoke test signs the same payload the client builds).

@@ -1,6 +1,6 @@
 import {
-  DM_MAX_CIPHERTEXT_CHARS, base64ToBytes, deriveDmKey, deriveSettingsKey, directoryServerUrl, openDm, openSettings, sealDm, sealSettings, type DmControl, type DmPreview,
-  type AccountServer, type AccountSettings, type AccountStatus, type DirectoryAccount, type DirectoryServerEvent, type DmConversation, type DmMessage, type Friend, type GamePresence, type ServerLeaveResponse,
+  DM_MAX_CIPHERTEXT_CHARS, DM_REPORT_CONTEXT_MAX, base64ToBytes, deriveDmKey, deriveSettingsKey, directoryServerUrl, openDm, openSettings, sealDm, sealSettings, type DmControl, type DmPreview,
+  type AccountServer, type AccountSettings, type AccountStatus, type DirectoryAccount, type DirectoryServerEvent, type DmConversation, type DmMessage, type Friend, type GamePresence, type ReportReason, type ServerLeaveResponse,
 } from "@squorli/protocol";
 import { buildDmPreviews, type PreviewDeps } from "./dmPreviews";
 import { shrinkPreviewImage } from "./dmPreviewImage";
@@ -9,6 +9,7 @@ import { chooseInitialServer, loadClientData, parseServerAddress, saveClientData
 import * as api from "./api";
 import type { AvatarImage } from "./avatarImage";
 import { DirectoryLink, type LinkStatus } from "./directoryLink";
+import { dmReportContent } from "./dmReports";
 import { forgetServerAccount, loadOrCreateIdentity, loadServerAccounts, newIdentity, storeIdentity, storeServerAccount, type Identity, type ServerAccount } from "./identity";
 import { ServerConnection, type ServerConnState } from "./serverConnection";
 import { applyAccountSettings, sameAccountSettings, sameHiddenGames, toAccountSettings } from "./accountSettings";
@@ -79,6 +80,8 @@ export type State = {
   /** Connection to the directory socket; "idle" also when there is no directory or no account. */
   directoryLink: LinkStatus;
   directoryLinkError: string | null;
+  /** The directory takes reports of direct messages (`features.reports`, docs/features/reports.md): the flag on a friend's message. */
+  dmReports: boolean;
   /** Friends and open requests (from my point of view); null = nothing from the directory yet. */
   friends: Friend[] | null;
   /** Conversations per friend (the friend's key) with unread counts; arrives with the welcome and is kept up to date live. */
@@ -185,7 +188,7 @@ export class Store {
       identity: null, serverAccounts: handlesOf(loadServerAccounts()), homeHost: this.homeHost, activeHost: this.homeHost, servers: home ? { [home.state.host]: home.state } : {},
       signedIn: false, localHosts: [], clientLogin: { busy: false, error: null }, joinInvites: {},
       directoryUrl: null, directoryAccount: undefined, directoryError: null, directoryEmailRequired: false, directoryAvatars: false, directoryGameLibrary: false, accountServers: null, settingsSyncError: null, settingsSealed: false, accountHiddenGames: null, localeReloadPending: false,
-      directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null, friendsError: null, missed: 0, starting: true,
+      directoryLink: "idle", directoryLinkError: null, dmReports: false, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null, friendsError: null, missed: 0, starting: true,
     };
     subscribeVoiceSettings((_s, source) => { if (source === "user") this.scheduleSettingsPush(); });
     // AFK detection: every chat server and the directory hear when the user turns idle or comes back (activity.ts).
@@ -672,12 +675,13 @@ export class Store {
     const id = this.state.identity; const url = this.state.directoryUrl;
     this.link?.close(); this.link = null;
     this.dmKeys.clear();
-    this.set({ directoryLink: "idle", directoryLinkError: null, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null });
+    this.set({ directoryLink: "idle", directoryLinkError: null, dmReports: false, friends: null, conversations: {}, dms: {}, homeOpen: false, currentPeer: null });
     if (!id || !url || !this.state.directoryAccount) return;
     if (this.homeHost === null && !this.state.signedIn) return;
     const health = await api.directoryHealth(url).catch(() => null);
     if (!health?.features.friends) return;
     this.dmPreviewsAtDirectory = health.features.dmPreviews;
+    this.set({ dmReports: health.features.reports });
     const link = new DirectoryLink(url, id, (e) => this.handleDirectory(e), (status, error) => this.set({ directoryLink: status, directoryLinkError: error ?? null }), health.features.afk);
     link.setIdle(activity.idle);
     link.setGame(this.game);
@@ -865,6 +869,17 @@ export class Store {
     return url ? api.directoryDmBlob(url, blobId) : Promise.reject(new Error("no directory"));
   }
   deleteDm(peer: string, id: string) { this.link?.send({ type: "dm.delete", peer, id }); }
+  /**
+   * Report a friend's direct message to the directory's operator (docs/features/reports.md, stage 4): the reported message
+   * in plain text and, with `withContext`, the messages before it (dmReports.ts). Throws with a readable message.
+   */
+  async reportDm(peer: string, messageId: string, withContext: boolean, reason: ReportReason, text: string | undefined): Promise<void> {
+    const id = this.state.identity, url = this.state.directoryUrl;
+    if (!id || !url) throw new Error(t("dir.noLink"));
+    const content = dmReportContent(this.state.dms[peer]?.list ?? [], messageId, withContext ? DM_REPORT_CONTEXT_MAX : 0);
+    if (!content) throw new Error(t("report.dmUnreadable"));
+    await api.directoryReportDm(url, id, { kind: "dm", reason, text, peer, message: content.message, context: content.context });
+  }
   clearDm(peer: string) { this.link?.send({ type: "dm.clear", peer }); }
   /** Handle search at the directory (prefix); errors are no big deal here, they just mean no hits. */
   searchHandles(q: string) { const url = this.state.directoryUrl; return url ? api.directorySearchHandles(url, q).catch(() => []) : Promise.resolve([]); }

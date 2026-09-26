@@ -159,6 +159,9 @@ function SearchRow({ publicKey, title, sub, state, canAdd, store }: { publicKey:
   );
 }
 
+/** The directory's host for texts ("goes to the operator of ..."); the address itself when it is no address. */
+const hostOf = (url: string): string => { try { return new URL(url).host; } catch { return url; } };
+
 export function HomeMain({ state, store }: { state: State; store: Store }) {
   const friend = state.currentPeer ? (state.friends ?? []).find((f) => f.publicKey === state.currentPeer) ?? null : null;
   if (!state.currentPeer || !friend || friend.state !== "accepted") {
@@ -170,5 +173,6 @@ export function HomeMain({ state, store }: { state: State; store: Store }) {
     );
   }
   return <DmView key={friend.publicKey} friend={friend} thread={state.dms[friend.publicKey] ?? { list: [], hasMore: true, loaded: false, loading: false }} myKey={state.identity?.publicKey ?? ""} store={store}
-    avatarUrl={friendAvatar(state.directoryUrl, friend)} myAvatarUrl={state.directoryAccount ? friendAvatar(state.directoryUrl, state.directoryAccount) : null} />;
+    avatarUrl={friendAvatar(state.directoryUrl, friend)} myAvatarUrl={state.directoryAccount ? friendAvatar(state.directoryUrl, state.directoryAccount) : null}
+    reportHost={state.dmReports && state.directoryUrl ? hostOf(state.directoryUrl) : null} />;
 }

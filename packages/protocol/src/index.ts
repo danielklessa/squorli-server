@@ -22,7 +22,7 @@ export * from "./votekick";
 export * from "./channelBlocks";
 export * from "./localAccounts";
 export * from "./reports";
-export { Iso, PublicKey, Signature, Uuid } from "./primitives";
+export { Iso, PublicKey, REPORT_REASONS, REPORT_TEXT_MAX, ReportReason, Signature, Uuid } from "./primitives";
 import { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { DisplayName } from "./directory";
 import { GamePresence } from "./friends";

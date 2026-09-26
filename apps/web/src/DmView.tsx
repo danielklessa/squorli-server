@@ -12,18 +12,21 @@ import { Icon } from "./Icon";
 import { DmPreviews } from "./LinkPreviews";
 import { visibleDms } from "./dmPreviews";
 import { MessageText } from "./MessageText";
+import { ReportDialog, type DmReportTarget } from "./ReportDialog";
 import type { DmThread, Store } from "./store";
 import { fmtDay, fmtTime, t } from "./i18n";
 
 /**
  * Conversation with a friend (M7): history (older messages when scrolling up), grouping as in the channel chat, composer without
- * attachments. Deleting: your own messages within 5 minutes for both sides, otherwise only for me (user decision).
+ * attachments. Deleting: your own messages within 5 minutes for both sides, otherwise only for me (user decision). Reporting a
+ * friend's message goes to the directory's operator (`reportHost`, null where the directory takes none; docs/features/reports.md).
  */
 const GROUP_MS = 5 * 60_000;
 
-export function DmView({ friend, thread, myKey, store, avatarUrl, myAvatarUrl }: { friend: Friend; thread: DmThread; myKey: string; store: Store; avatarUrl: string | null; myAvatarUrl: string | null }) {
+export function DmView({ friend, thread, myKey, store, avatarUrl, myAvatarUrl, reportHost }: { friend: Friend; thread: DmThread; myKey: string; store: Store; avatarUrl: string | null; myAvatarUrl: string | null; reportHost: string | null }) {
   const [draft, setDraft] = useState("");
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
+  const [reportTarget, setReportTarget] = useState<DmReportTarget | null>(null);
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -113,6 +116,7 @@ export function DmView({ friend, thread, myKey, store, avatarUrl, myAvatarUrl }:
                   <DmPreviews messageId={m.id} peer={friend.publicKey} previews={m.shown} mine={mine} store={store} onError={setErr} />
                 </div>
                 <div className="msg-actions">
+                  {!mine && m.text !== null && reportHost && <button className="icon" title={t("report.reportMessage")} onClick={() => setReportTarget({ kind: "dm", peer: friend.publicKey, name, messageId: m.id, excerpt: m.text?.slice(0, 200) ?? "" })}><Icon name="flag" /></button>}
                   <button className="icon" title={both ? t("dm.deleteBoth") : t("dm.deleteMine")} onClick={() => {
                     void askConfirm({ title: both ? t("dm.deleteBothTitle") : t("dm.deleteMineTitle"), text: both ? t("dm.deleteBothText") : t("dm.deleteMineText"), confirmLabel: t("common.delete"), danger: true })
                       .then((ok) => { if (ok) store.deleteDm(friend.publicKey, m.id); });
@@ -124,6 +128,7 @@ export function DmView({ friend, thread, myKey, store, avatarUrl, myAvatarUrl }:
         })}
       </div>
 
+      {reportTarget && reportHost && <ReportDialog target={reportTarget} store={store} directoryHost={reportHost} onClose={() => setReportTarget(null)} />}
       <footer className="composer">
         {err && <p className="error">{err}</p>}
         <div className="typing" />

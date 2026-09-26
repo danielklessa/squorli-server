@@ -694,6 +694,11 @@ export const de = {
   "report.noticeTitle": "Hinweis der Moderation",
   "report.noticeMessage": "Ein Moderator von {server} hat eine Nachricht von dir in #{channel} entfernt, weil sie gemeldet wurde.",
   "report.noticeMessages": "Ein Moderator von {server} hat {n} Nachrichten von dir entfernt, weil sie gemeldet wurden.",
+  "report.titleDm": "Direktnachricht von {name} melden",
+  "report.goesToDirectory": "Die Meldung geht an den Betreiber des Verzeichnisses ({host}). Weil Direktnachrichten verschlüsselt sind, schickt dein Client die gemeldete Nachricht im Klartext mit. {name} erfährt nicht, wer gemeldet hat.",
+  "report.dmContext": "Die vorherigen Nachrichten dieser Unterhaltung mitschicken (bis zu {n}), damit der Zusammenhang erkennbar ist",
+  "report.sentDirectory": "Danke. Der Betreiber des Verzeichnisses sieht die Meldung mit der Kopie der Nachrichten. Wenn du möchtest, kannst du {name} jetzt blockieren.",
+  "report.dmUnreadable": "Diese Nachricht lässt sich nicht melden, weil sie hier nicht lesbar ist.",
   "members.serverActions": "Server",
   "members.serverActionsHint": "Gilt für den ganzen Server, nicht nur für einen Kanal.",
   "members.removeAndBlock": "Entfernen und den Kanal sperren:",
@@ -1211,6 +1216,7 @@ export const de = {
   "dir.zod": "Ungültiges Handle: 3-32 Zeichen, a-z, 0-9, Punkt, Unterstrich; beginnt und endet mit Buchstabe oder Ziffer.",
   "dir.unreachable": "Verzeichnisdienst nicht erreichbar (Netzwerk oder CORS). Läuft der Dienst unter der in /api/health genannten Adresse?",
   "dir.noLink": "Keine Verbindung zum Verzeichnis.",
+  "dir.reports_unsupported": "Dieses Verzeichnis nimmt noch keine Meldungen entgegen.",
   "dir.none": "Kein Verzeichnis.",
 
   // ---- Errors: directory socket (friends, direct messages)

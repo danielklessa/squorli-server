@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { base64ToBytes, hexToBytes, randomHex } from "./backup";
-import { Iso, PublicKey, Signature, Uuid } from "./primitives";
+import { Iso, PublicKey, REPORT_TEXT_MAX, ReportReason, Signature, Uuid } from "./primitives";
 
 // COPY NOTE: this file (like primitives.ts, backup.ts, useragent.ts including their tests) also exists byte-identically in the
 // squorli-directory repo under packages/protocol/src. The source is squorli-server; copy it over after every change (see AGENTS.md).
@@ -130,7 +130,7 @@ export const BackupBlob = z.object({ handle: Handle, publicKey: PublicKey, ciphe
 
 // ---- M6c: signed account actions (authenticator, recovery codes, account status). Same pattern as registration
 // and backup: challenge + signature over host, nonce and payload (for actions with a code, the code is the payload).
-export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends", "server-leave", "sound-settings", "email-set", "email-verify", "email-code", "settings", "avatar-set", "link-lookup", "dm-blob-put", "settings-sealed"]);
+export const DirectoryAction = z.enum(["totp-setup", "totp-enable", "totp-disable", "recovery-regenerate", "account-status", "profile-update", "friends", "server-leave", "sound-settings", "email-set", "email-verify", "email-code", "settings", "avatar-set", "link-lookup", "dm-blob-put", "settings-sealed", "report"]);
 export type DirectoryAction = z.infer<typeof DirectoryAction>;
 export function directoryActionMessage(directoryHost: string, action: DirectoryAction, nonce: string, payload = ""): string {
   return `community-directory-${action}\n${directoryHost}\n${nonce}\n${payload}`;
@@ -191,6 +191,39 @@ export type DmBlobPutRequest = z.infer<typeof DmBlobPutRequest>;
 export const DmBlobPutResponse = z.object({ id: z.string().regex(/^[0-9a-f]{32}$/) });
 export type DmBlobPutResponse = z.infer<typeof DmBlobPutResponse>;
 export const directoryDmBlobUrl = (directoryUrl: string, id: string) => `${directoryUrl.replace(/\/+$/, "")}/api/dm-blobs/${id}`;
+
+// ---- Reports of direct messages (26 September 2026, stage 4 of docs/PLAN-reports.md; docs/features/reports.md). A direct message
+// lives at the directory and is end-to-end encrypted, so the REPORTER's client sends the plain text: the reported message and,
+// unless the reporter unticks it (the user's decision 6: up to 20 preceding messages, opt-out), the preceding messages of that
+// conversation as context, both sides. Signed action `report` (POST /api/reports); the payload is the whole content in one fixed
+// order (directoryDmReportPayload), so nothing can be swapped under the signature. Only offered with `features.reports`: the
+// directory keeps the copy encrypted at rest and needs its key for that. What the directory does with a report is its own business
+// (not described in the public repository); the reported person never learns who reported.
+export const DM_REPORT_CONTEXT_MAX = 20;
+/** One message's text: at most what one encrypted message carries (DM_MAX_CIPHERTEXT_CHARS in friends.ts). */
+export const DM_REPORT_MESSAGE_TEXT_MAX = 16_000;
+export const DmReportMessage = z.object({ id: Uuid, from: PublicKey, sentAt: Iso, text: z.string().max(DM_REPORT_MESSAGE_TEXT_MAX) });
+export type DmReportMessage = z.infer<typeof DmReportMessage>;
+export const DmReportContent = z.object({
+  kind: z.literal("dm"),
+  reason: ReportReason,
+  text: z.string().max(REPORT_TEXT_MAX).optional(),
+  /** The reported account: the other side of the conversation and the author of `message`. */
+  peer: PublicKey,
+  message: DmReportMessage,
+  /** The messages before it, oldest first, from both sides; empty when the reporter unticked it. */
+  context: z.array(DmReportMessage).max(DM_REPORT_CONTEXT_MAX),
+});
+export type DmReportContent = z.infer<typeof DmReportContent>;
+export const DmReportRequest = SignedActionRequest.extend(DmReportContent.shape);
+export type DmReportRequest = z.infer<typeof DmReportRequest>;
+/** What the reporter signs: the content with its fields in one fixed order, so the directory verifies exactly what it stores. */
+export function directoryDmReportPayload(r: DmReportContent): string {
+  const msg = (m: DmReportMessage) => ({ id: m.id, from: m.from, sentAt: m.sentAt, text: m.text });
+  return JSON.stringify({ kind: r.kind, reason: r.reason, text: r.text ?? "", peer: r.peer, message: msg(r.message), context: r.context.map(msg) });
+}
+export const DmReportResponse = z.object({ ok: z.literal(true), id: Uuid });
+export type DmReportResponse = z.infer<typeof DmReportResponse>;
 
 // ---- Avatars (19 September 2026): one image per handle, shown instead of the initials. The clients crop to a square and scale to
 // AVATAR_SIZE before the upload, so the service (which has no image library) only checks type and size. The image is public like the
@@ -534,8 +567,8 @@ export const DirectoryHealth = z.object({
   service: z.literal("directory"),
   /** Host that registration signatures are bound to. */
   host: z.string(),
-  /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. `email`: SMTP configured (address, notices, e-mail code). `settings`: the account stores all client settings (action `settings`). `afk`: the socket takes `activity` and friends carry `afk` (AFK detection). `emailRequired`: new handles need a confirmed e-mail address (REQUIRE_EMAIL; registration in two steps, see DirectoryRegisterRequest). `avatars`: the account stores one avatar image (action `avatar-set`, GET /api/avatars/<key>). `settingsSealed`: the account stores the settings as a blob the client encrypts (action `settings-sealed`). `probe`: POST /api/servers/probe exists (a registered server's setup check from outside, docs/features/doctor.md). */
-  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false), settings: z.boolean().default(false), settingsSealed: z.boolean().default(false), afk: z.boolean().default(false), emailRequired: z.boolean().default(false), avatars: z.boolean().default(false), gameLibrary: z.boolean().default(false), dmPreviews: z.boolean().default(false), probe: z.boolean().default(false) }),
+  /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. `email`: SMTP configured (address, notices, e-mail code). `settings`: the account stores all client settings (action `settings`). `afk`: the socket takes `activity` and friends carry `afk` (AFK detection). `emailRequired`: new handles need a confirmed e-mail address (REQUIRE_EMAIL; registration in two steps, see DirectoryRegisterRequest). `avatars`: the account stores one avatar image (action `avatar-set`, GET /api/avatars/<key>). `settingsSealed`: the account stores the settings as a blob the client encrypts (action `settings-sealed`). `probe`: POST /api/servers/probe exists (a registered server's setup check from outside, docs/features/doctor.md). `reports`: POST /api/reports takes a report of a direct message (action `report`; docs/features/reports.md). */
+  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false), settings: z.boolean().default(false), settingsSealed: z.boolean().default(false), afk: z.boolean().default(false), emailRequired: z.boolean().default(false), avatars: z.boolean().default(false), gameLibrary: z.boolean().default(false), dmPreviews: z.boolean().default(false), probe: z.boolean().default(false), reports: z.boolean().default(false) }),
   time: Iso,
 });
 

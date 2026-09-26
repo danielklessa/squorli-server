@@ -693,6 +693,11 @@ export const en: Messages = {
   "report.noticeTitle": "Notice from the moderators",
   "report.noticeMessage": "A moderator of {server} removed a message of yours in #{channel} because it was reported.",
   "report.noticeMessages": "A moderator of {server} removed {n} messages of yours because they were reported.",
+  "report.titleDm": "Report a direct message by {name}",
+  "report.goesToDirectory": "The report goes to the operator of the directory ({host}). Because direct messages are encrypted, your client sends the reported message along in plain text. {name} does not learn who reported.",
+  "report.dmContext": "Send the preceding messages of this conversation along (up to {n}) so the context is visible",
+  "report.sentDirectory": "Thank you. The directory's operator sees the report with the copy of the messages. If you like, you can block {name} now.",
+  "report.dmUnreadable": "This message cannot be reported because it is not readable here.",
   "members.serverActions": "Server",
   "members.serverActionsHint": "Applies to the whole server, not just one channel.",
   "members.removeAndBlock": "Remove and block the channel:",
@@ -1210,6 +1215,7 @@ export const en: Messages = {
   "dir.zod": "Invalid handle: 3-32 characters, a-z, 0-9, dot, underscore; starts and ends with a letter or digit.",
   "dir.unreachable": "Directory service unreachable (network or CORS). Is the service running at the address named in /api/health?",
   "dir.noLink": "No connection to the directory.",
+  "dir.reports_unsupported": "This directory does not take reports yet.",
   "dir.none": "No directory.",
 
   // ---- Errors: directory socket

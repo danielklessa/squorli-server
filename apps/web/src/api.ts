@@ -1,7 +1,7 @@
 import {
   AccountStatus, Ban, ChallengeResponse, DirectoryAccount, DirectoryHealth, DirectoryRegisterPending, EmailAddress, EmailCode, EmailCodeResponse, FriendSearchResponse, ServerLeaveResponse, ServerListResponse, Handle, Invite, InvitePreview, Me, Message, MessagePage, RtcTokenResponse, ServerState, SessionInfo, VerifyResponse,
   AvatarUpdateResponse, avatarDigest, directoryAvatarPayload,
-  BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryActionMessage, directoryBackupMessage, directoryProfilePayload,
+  BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryActionMessage, directoryBackupMessage, directoryDmReportPayload, DmReportResponse, type DmReportContent, directoryProfilePayload,
   directoryRegisterMessage, directorySoundSettingsPayload, openBackup, type AccountSettings, type SealedSettings, type SoundSettings,
   MuteState, ReadStateResponse, StatusApiKeyResponse, DoctorReport, ReportsResponse, ModLogResponse, type CreateReportRequest, type CloseReportRequest, type DeleteRecentHours, type Attachment, type Category, type Channel, type RadioStation, type Role, type StatusApiMode,
   type DiscordImportRequest, type DiscordImportResult, type ImportPlan,
@@ -399,6 +399,14 @@ export async function directoryLinkLookup(dirUrl: string, id: Identity, request:
   return LinkLookupResponse.parse(await directoryFetch(dirUrl, "POST", "/api/link-lookup", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, ...request }));
 }
 /** Store a picture the client has encrypted (dm.ts `sealDmBlob`) in the directory's blob store; the signature covers the hash of the bytes. */
+/** Report a direct message to the directory's operator (docs/features/reports.md): the plain text travels with the report, signed as a whole. */
+export async function directoryReportDm(dirUrl: string, id: Identity, content: DmReportContent): Promise<DmReportResponse> {
+  const health = await signingHealth(dirUrl);
+  if (!health.features.reports) throw new Error(t("dir.reports_unsupported"));
+  const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));
+  const signature = await sign(id, directoryActionMessage(health.host, "report", ch.nonce, directoryDmReportPayload(content)));
+  return DmReportResponse.parse(await directoryFetch(dirUrl, "POST", "/api/reports", { publicKey: id.publicKey, challengeId: ch.challengeId, signature, ...content }));
+}
 export async function directoryPutDmBlob(dirUrl: string, id: Identity, ciphertext: Uint8Array): Promise<string> {
   const health = await signingHealth(dirUrl);
   const ch = ChallengeResponse.parse(await directoryFetch(dirUrl, "POST", "/api/challenge", { publicKey: id.publicKey }));

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DirectoryGame, LibraryGameId, directoryGameIconUrl, directoryGameUrl, splitGameId } from "./directory";
+import { DM_REPORT_CONTEXT_MAX, DirectoryGame, DmReportRequest, LibraryGameId, directoryDmReportPayload, directoryGameIconUrl, directoryGameUrl, splitGameId } from "./directory";
 import {
   ACCOUNT_SETTINGS_MAX_LENGTH, AVATAR_MAX_BYTES, AccountSettings, AccountSettingsUpdateRequest, AvatarUpdateRequest, DirectoryAccount, DirectoryHealth, avatarDigest, directoryAvatarPayload, directoryAvatarUrl, sniffAvatarMime, DirectoryRegisterRequest, Handle, directoryRegisterMessage, parseAccountSettings,
   HIDDEN_GAMES_MAX, HIDDEN_GAME_ID_MAX, SERVER_HOST_MAX, SEALED_SETTINGS_MAX_LENGTH, SealedSettings, SoundSettings, deriveSettingsKey, openSettings, parseSealedSettings, sealSettings,
@@ -164,5 +164,25 @@ describe("game library", () => {
     expect(directoryGameIconUrl("https://directory.example", { id: "steam:730", iconUpdatedAt: "2026-09-21T10:00:00.000Z" })).toBe(`https://directory.example/api/games/steam%3A730/icon?v=${Date.parse("2026-09-21T10:00:00.000Z")}`);
     expect(directoryGameIconUrl("https://directory.example", { id: "steam:730", iconUpdatedAt: null })).toBeNull();
     expect(DirectoryGame.safeParse({ id: "steam:730", name: "Counter-Strike 2", show: true, iconUpdatedAt: null }).success).toBe(true);
+  });
+});
+
+describe("direct message reports", () => {
+  const key = (c: string) => c.repeat(64);
+  const base = { publicKey: key("a"), challengeId: "6f1c2a4e-1b2c-4d3e-8f90-123456789abc", signature: "b".repeat(128) };
+  const msg = (n: number, from: string) => ({ id: `6f1c2a4e-1b2c-4d3e-8f90-${String(n).padStart(12, "0")}`, from, sentAt: "2026-09-26T10:00:00.000Z", text: `Nachricht ${n}` });
+  it("signs the parsed content exactly as the client built it, whatever else the client's objects carried", () => {
+    const sent = { kind: "dm" as const, reason: "harassment" as const, peer: key("c"), message: { ...msg(2, key("c")), seq: 7, extra: true }, context: [{ ...msg(1, key("a")), seq: 6 }] };
+    const parsed = DmReportRequest.parse({ ...base, ...sent });
+    expect(directoryDmReportPayload(parsed)).toBe(directoryDmReportPayload(sent));
+    expect(directoryDmReportPayload(parsed)).toContain('"text":""');
+    expect(directoryDmReportPayload({ ...sent, text: "Bitte anschauen" })).not.toBe(directoryDmReportPayload(sent));
+  });
+  it("refuses more context than the decision allows and a text that is no text", () => {
+    const ok = { ...base, kind: "dm", reason: "spam", peer: key("c"), message: msg(99, key("c")), context: Array.from({ length: DM_REPORT_CONTEXT_MAX }, (_, i) => msg(i, key("a"))) };
+    expect(DmReportRequest.safeParse(ok).success).toBe(true);
+    expect(DmReportRequest.safeParse({ ...ok, context: [...ok.context, msg(50, key("c"))] }).success).toBe(false);
+    expect(DmReportRequest.safeParse({ ...ok, reason: "rude" }).success).toBe(false);
+    expect(DmReportRequest.safeParse({ ...ok, message: { ...ok.message, text: 5 } }).success).toBe(false);
   });
 });
