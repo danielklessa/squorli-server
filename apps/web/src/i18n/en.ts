@@ -54,6 +54,7 @@ export const en: Messages = {
   "status.offline": "{name} is not answering right now. Squorli keeps trying and connects as soon as the server is back.",
   "status.retryIn": "Next automatic try in {n} s",
   "status.retrying": "Trying right now …",
+  "status.autoStopped": "The automatic tries are used up. \"Try again\" starts them over.",
   "status.otherServers": "Reachable right now:",
   "status.banned": "You have been banned from this server",
   "status.removed": "You have been removed from this server",

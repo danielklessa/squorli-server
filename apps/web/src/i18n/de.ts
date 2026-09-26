@@ -55,6 +55,7 @@ export const de = {
   "status.offline": "{name} antwortet gerade nicht. Squorli versucht es weiter und verbindet, sobald der Server wieder da ist.",
   "status.retryIn": "Nächster automatischer Versuch in {n} s",
   "status.retrying": "Wird gerade versucht …",
+  "status.autoStopped": "Die automatischen Versuche sind aufgebraucht. Mit „Erneut versuchen“ geht es weiter.",
   "status.otherServers": "Gerade erreichbar:",
   "status.banned": "Du wurdest auf diesem Server gebannt",
   "status.removed": "Du wurdest von diesem Server entfernt",

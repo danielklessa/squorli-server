@@ -27,3 +27,30 @@ export const RETRY_DELAYS_MS = { first: 15_000, early: 30_000, later: 60_000 } a
 export function retryDelayFor(attempt: number): number {
   return attempt <= 1 ? RETRY_DELAYS_MS.first : attempt <= 5 ? RETRY_DELAYS_MS.early : RETRY_DELAYS_MS.later;
 }
+
+/**
+ * How many tries run by themselves (user's wish, 26 September 2026): ten after a failure, then the automatic tries stop
+ * until the user presses "Erneut versuchen"; after that press five more, a minute apart, then they stop again.
+ */
+export const AUTO_TRIES = 10;
+export const TRIES_AFTER_USER = 5;
+
+/** The plan of automatic tries for one silent spell: which phase, how many failed so far, how many are left. */
+export type RetryPlan = { phase: "auto" | "user"; failed: number; left: number };
+
+/** The server answered (or nothing went wrong yet): ten automatic tries in the ordinary cadence. */
+export function freshPlan(): RetryPlan {
+  return { phase: "auto", failed: 0, left: AUTO_TRIES };
+}
+
+/** The user pressed "Erneut versuchen": five automatic tries follow, a minute apart. */
+export function planAfterUser(): RetryPlan {
+  return { phase: "user", failed: 0, left: TRIES_AFTER_USER };
+}
+
+/** A try failed: the delay before the next automatic one, or null when the plan is used up (the user has to press). */
+export function nextTry(plan: RetryPlan): { plan: RetryPlan; delay: number | null } {
+  if (plan.left <= 0) return { plan, delay: null };
+  const failed = plan.failed + 1;
+  return { plan: { phase: plan.phase, failed, left: plan.left - 1 }, delay: plan.phase === "user" ? RETRY_DELAYS_MS.later : retryDelayFor(failed) };
+}

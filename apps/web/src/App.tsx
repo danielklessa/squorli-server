@@ -548,7 +548,7 @@ export function App() {
   // Still finding out what the first screen is (store.ts `starting`): the desktop app's start window covers that time.
   if (state.starting) return <><TitleBar title="Squorli" /><div className="app-starting" role="status"><div className="app-starting-card"><img src="/brand/squorli-icon.svg" alt="" /><span>{t("app.starting")}</span></div></div></>;
   // Signed in on the own server, but it does not answer (docs/features/offline.md): a notice with retries, never the login.
-  if (!homeless && home && !home.server && home.waiting) return <><TitleBar title={homeName ?? "Squorli"} /><ServerOffline s={home} onRetry={() => store.home?.retryNow()} onLogout={() => store.logout()} /></>;
+  if (!homeless && home && !home.server && home.waiting) return <><TitleBar title={homeName ?? "Squorli"} /><ServerOffline s={home} onRetry={() => store.home?.retryByUser()} onLogout={() => store.logout()} /></>;
   if (homeless ? !state.signedIn : !home?.server || !home.me || !home.userId) return <><TitleBar title="Squorli" />{homeless ? <DesktopLogin store={store} state={state} /> : <LoginScreen store={store} state={state} />}</>;
 
   const server = active?.server ?? null;

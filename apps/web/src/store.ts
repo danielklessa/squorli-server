@@ -478,6 +478,7 @@ export class Store {
   retryServer(host: string, invite?: string) {
     const conn = this.conns.get(host);
     if (!conn || host === this.homeHost) return;
+    conn.noteUserRetry();
     conn.cancelRetry();
     void this.connectForeign(conn, invite);
   }

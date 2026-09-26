@@ -18,7 +18,7 @@ export function ServerOffline({ s, onRetry, onLogout }: { s: ServerConnState; on
         <img src="/brand/squorli-icon.svg" alt="" />
         <h2>{checking ? t("offline.checking", { name }) : t("offline.title", { name })}</h2>
         {!checking && <p>{t("offline.text")}</p>}
-        {!checking && <RetryCountdown at={s.retryAt} />}
+        {!checking && (s.retryPaused ? <p className="muted retry-countdown">{t("status.autoStopped")}</p> : <RetryCountdown at={s.retryAt} />)}
         {!checking && (
           <div className="row">
             <button onClick={onRetry}>{t("common.retry")}</button>

@@ -21,8 +21,8 @@ export function ServerUnreachable({ s, name, checking, others, onRetry, onOpen }
     lastRetryAt.current = s.retryAt;
   }, [s.retryAt]);
   const now = useNow(startedAt !== null);
-  // A try is under way while nothing is scheduled (`retryAt` null) and the server has not answered.
-  const locked = retryLocked(startedAt, now, s.retryAt === null);
+  // A try is under way while nothing is scheduled (`retryAt` null), the server has not answered and the plan is not used up.
+  const locked = retryLocked(startedAt, now, s.retryAt === null && !s.retryPaused);
   if (checking) {
     return (
       <section className="chat empty server-status server-unreachable">
@@ -35,7 +35,7 @@ export function ServerUnreachable({ s, name, checking, others, onRetry, onOpen }
       <div className="unreachable-card">
         <h2>{t("offline.title", { name })}</h2>
         <p className="muted">{t("status.offline", { name })}</p>
-        <RetryCountdown at={s.retryAt} />
+        {s.retryPaused ? <p className="muted retry-countdown">{t("status.autoStopped")}</p> : <RetryCountdown at={s.retryAt} />}
         <button className="login-primary" disabled={locked} onClick={() => { setStartedAt(Date.now()); onRetry(); }}>{t("common.retry")}</button>
         {others.length > 0 && (
           <div className="unreachable-others">

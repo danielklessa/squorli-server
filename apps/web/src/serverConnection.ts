@@ -3,7 +3,7 @@ import { ServerApi, explainLoginError, type Health } from "./api";
 import type { VoteKickState } from "./voteKick";
 import type { Identity } from "./identity";
 import { t } from "./i18n";
-import { retryDelayFor, sessionRejected } from "./serverRetry";
+import { freshPlan, nextTry, planAfterUser, sessionRejected, type RetryPlan } from "./serverRetry";
 import { showNotice } from "./dialogs";
 import { mentionsUser } from "./mentions";
 import { catchUp, loadReadState, markRead, pruneReadState, saveReadState, type ReadState } from "./readState";
@@ -36,8 +36,10 @@ export type ServerConnState = {
    * shows a notice instead of the login as long as this is set; null = nothing pending.
    */
   waiting: "checking" | "unreachable" | null;
-  /** When the next automatic try is due (`retryLater`), for the countdown on screen; null = none scheduled (a try runs, or nothing pending). */
+  /** When the next automatic try is due (`retryLater`), for the countdown on screen; null = none scheduled (a try runs, nothing pending, or `retryPaused`). */
   retryAt: number | null;
+  /** The automatic tries are used up (ten, or five after the user's press; serverRetry.ts): nothing happens until the user presses "Erneut versuchen". */
+  retryPaused: boolean;
   server: ServerState | null;
   voice: Record<string, VoiceMember[]>;
   /**
@@ -128,8 +130,8 @@ export class ServerConnection {
   /** A try to reach a server that did not answer (`retryLater`): the scheduled step, its timer and the delay of the last one. */
   private retry: (() => void) | null = null;
   private retryTimer: number | null = null;
-  /** How many tries have failed since the server last answered: picks the delay before the next one (`retryDelayFor`). */
-  private retryCount = 0;
+  /** The plan of automatic tries for the current silent spell (serverRetry.ts): phase, failed so far, how many are left. */
+  private retryPlan: RetryPlan = freshPlan();
   private wantConnection = false;
   private pingTimer: number | null = null;
   /** When each channel's history was loaded from scratch (HISTORY_MAX_AGE_MS), and when that was last checked. */
@@ -168,7 +170,7 @@ export class ServerConnection {
   constructor(host: string, base: string, private readonly identity: () => Identity | null, private readonly hooks: ConnectionHooks) {
     this.api = new ServerApi(base);
     this.state = {
-      host, base, me: null, userId: null, connection: "idle", error: null, removed: null, waiting: null, retryAt: null, server: null,
+      host, base, me: null, userId: null, connection: "idle", error: null, removed: null, waiting: null, retryAt: null, retryPaused: false, server: null,
       voice: {}, voteKickAllowed: {}, voteKick: null, voteKickResult: null, radioTitles: {}, clockOffset: 0, messages: {}, typing: {}, currentChannelId: null, unread: {}, mentions: {}, muted: {}, serverMuted: false, readSync: false, log: [],
       serverName: null, iconUrl: null, serverDomain: null, requireAccount: false, localAccounts: false, accountNeeded: false, inviteRequired: false, serverVersion: null, directoryUrl: null,
     };
@@ -218,24 +220,39 @@ export class ServerConnection {
   }
 
   /**
-   * The server did not answer: run `step` again after a while (15 s, then 30 s for the 2nd to 5th try, then a minute each),
-   * or at once when the device
-   * comes back online, the tab is shown again or the user asks (`retryNow`). `close()` and `cancelRetry()` drop it; a
-   * step that fails again schedules the next one itself by calling this again.
+   * The server did not answer: run `step` again after a while (15 s, then 30 s for the 2nd to 5th try, then a minute each;
+   * ten tries in all, after the user's press five a minute apart, serverRetry.ts), or at once when the device comes back
+   * online, the tab is shown again or the user asks (`retryNow`). With the plan used up nothing is scheduled: the step is
+   * kept and `retryPaused` says so until `retryByUser()`. `close()` and `cancelRetry()` drop it; a step that fails again
+   * schedules the next one itself by calling this again.
    */
   retryLater(step: () => void) {
     this.cancelRetry();
-    this.retryCount += 1;
-    const delay = retryDelayFor(this.retryCount);
+    const next = nextTry(this.retryPlan);
+    this.retryPlan = next.plan;
     this.retry = step;
-    this.retryTimer = window.setTimeout(() => this.retryNow(), delay);
-    this.set({ retryAt: Date.now() + delay });
+    if (next.delay === null) { this.set({ retryPaused: true }); return; }
+    this.retryTimer = window.setTimeout(() => this.retryNow(), next.delay);
+    this.set({ retryAt: Date.now() + next.delay });
   }
-  /** Run the scheduled try now (nothing scheduled = nothing happens). */
+  /** Run the scheduled try now (nothing scheduled, or the automatic tries used up = nothing happens). */
   retryNow() {
+    if (this.state.retryPaused) return;
     const step = this.retry;
     this.cancelRetry();
     step?.();
+  }
+  /** The user pressed "Erneut versuchen": the plan becomes five tries a minute apart (used up or not), and the try runs now. */
+  retryByUser() {
+    this.noteUserRetry();
+    const step = this.retry;
+    this.cancelRetry();
+    step?.();
+  }
+  /** The user asked for a try that the store runs itself (a foreign server): only the plan changes. */
+  noteUserRetry() {
+    this.retryPlan = planAfterUser();
+    if (this.state.retryPaused) this.set({ retryPaused: false });
   }
   /** Forget the scheduled try (the delay keeps growing until the server answered). */
   cancelRetry() {
@@ -243,10 +260,11 @@ export class ServerConnection {
     this.retry = null;
     if (this.state.retryAt !== null) this.set({ retryAt: null });
   }
-  /** The server answered: no try pending, the next failure starts the cadence over. */
+  /** The server answered: no try pending, the next failure starts the plan over. */
   retrySettled() {
     this.cancelRetry();
-    this.retryCount = 0;
+    this.retryPlan = freshPlan();
+    if (this.state.retryPaused) this.set({ retryPaused: false });
   }
 
   /** Signed in: connect, unless the member must register first (a member from before server accounts, docs/features/local-accounts.md). */

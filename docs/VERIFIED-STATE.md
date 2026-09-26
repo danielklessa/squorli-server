@@ -1,5 +1,7 @@
 # Verified state
 
+- **Unreachable servers, seventh step (26 September 2026, `docs/features/offline.md`):** root typecheck; web tests 429 (`nextTry` for both plans); headless Chrome against a stopped server for 9.5 min: eleven health requests (the first plus ten tries) in the cadence 15/30/30/30/30/60/60/60/60/60 s, paused at 436 s with the text and a free button, the press ran a try and the countdown said 59 s, the first minute-apart try 60 s later. Not checked: the pause after the five (unit test only), the own server's notice on screen
+
 - **Unreachable servers, sixth step (26 September 2026, `docs/features/offline.md`):** root typecheck; web tests 427 (`retryDelayFor`, `retryLocked` with a running try); headless Chrome: the first automatic try 15 s after the failure, the next 30 s later, the button locked through the whole running try (27 s and 31.5 s) and free once it was through (37 s), locked after a click and free 5.5 s later. Not checked: the minute cadence after the fifth try on screen (only in the unit test), the Electron shell
 
 - **Unreachable servers, fifth step (26 September 2026, `docs/features/offline.md`):** root typecheck; web tests 427 (`retryLocked`, icons in `reachableServers`); headless Chrome: centred "Verbinde mit …" against a silent server, the button locked while the automatic try ran (14 s) and free at 19 s, locked right after a click and free 5.5 s later, the reachable server as a row with initials left of the name. Not checked: a real directory icon in the row, the Electron shell
