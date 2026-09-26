@@ -16,6 +16,8 @@ import { voteKicks } from "../voice/votekick";
 import { channelBlockStore } from "../voice/channelBlocks";
 import type { VoicePresence } from "../voice/presence";
 import { setHold } from "../voice/sticky";
+import { recordModLog, userNameOf } from "../modLog";
+import { deleteRecentMessagesOf } from "../moderation";
 
 const Params = { type: "object", properties: { id: { type: "string", format: "uuid" } }, required: ["id"] } as const;
 
@@ -168,8 +170,10 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     const target = await targetOf(req.params.id);
     if (!target) return reply.code(404).send({ error: "not_found" });
     if (!outranks(m.actor, target)) return reply.code(403).send({ error: "target_above_you" });
+    const kickedName = await userNameOf(db, target.userId);
     await removeMember(target.userId, "kicked", null);
     req.log.info({ by: m.userId, target: target.userId }, "Mitglied gekickt");
+    await recordModLog(db, { actorId: m.userId, actorName: displayNameOf(m), targetUserId: target.userId, targetName: kickedName, action: "kick" }, req.log);
     await broadcastStructure(db, hub, ["members"]);
     return { ok: true };
   });
@@ -198,13 +202,17 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     const target = await targetOf(user.id);
     // Non-members (already kicked) may be banned afterwards; members only below your own position.
     if (target && !outranks(m.actor, target)) return reply.code(403).send({ error: "target_above_you" });
+    const bannedName = await userNameOf(db, user.id);
     await db.insert(bans).values({ userId: user.id, bannedBy: m.userId, reason: body.data.reason ?? null }).onConflictDoNothing();
     await removeMember(user.id, "banned", body.data.reason ?? null);
+    // "Delete messages of the last ..." (docs/features/reports.md): their messages of that window in every channel, one bulk event per channel.
+    const wiped = body.data.deleteMessagesHours ? await deleteRecentMessagesOf(app, db, hub, user.id, body.data.deleteMessagesHours * 3_600_000) : null;
     // A ban ends every session here (security review, 25 September 2026); a kicked member keeps theirs to come back with an invite.
     await db.delete(sessions).where(eq(sessions.userId, user.id));
-    req.log.info({ by: m.userId, target: user.id }, "Mitglied gebannt");
+    req.log.info({ by: m.userId, target: user.id, deleted: wiped?.count ?? 0 }, "Mitglied gebannt");
+    await recordModLog(db, { actorId: m.userId, actorName: displayNameOf(m), targetUserId: user.id, targetName: bannedName, action: "ban", detail: { ...(body.data.reason ? { reason: body.data.reason } : {}), ...(body.data.deleteMessagesHours ? { hours: body.data.deleteMessagesHours, deleted: wiped?.count ?? 0 } : {}) } }, req.log);
     await broadcastStructure(db, hub, ["members"]);
-    return { ok: true };
+    return { ok: true, deleted: wiped?.count ?? 0 };
   });
 
   app.delete<{ Params: { id: string } }>("/api/bans/:id", { schema: { params: Params } }, async (req, reply) => {
@@ -213,6 +221,7 @@ export async function registerMemberRoutes(app: FastifyInstance, db: Db, hub: Hu
     if (!can(m.actor, Permission.BAN_MEMBERS)) return reply.code(403).send({ error: "forbidden" });
     const gone = await db.delete(bans).where(eq(bans.userId, req.params.id)).returning({ userId: bans.userId });
     if (!gone.length) return reply.code(404).send({ error: "not_found" });
+    await recordModLog(db, { actorId: m.userId, actorName: displayNameOf(m), targetUserId: req.params.id, targetName: await userNameOf(db, req.params.id), action: "unban" }, req.log);
     return { ok: true };
   });
 }

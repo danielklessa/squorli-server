@@ -3,6 +3,7 @@ import { ServerApi, explainLoginError, type Health } from "./api";
 import type { VoteKickState } from "./voteKick";
 import type { Identity } from "./identity";
 import { t } from "./i18n";
+import { showNotice } from "./dialogs";
 import { mentionsUser } from "./mentions";
 import { catchUp, loadReadState, markRead, pruneReadState, saveReadState, type ReadState } from "./readState";
 
@@ -492,6 +493,24 @@ export class ServerConnection {
         const ch = this.state.messages[e.channelId];
         if (ch) this.set({ messages: { ...this.state.messages, [e.channelId]: { ...ch, list: ch.list.filter((m) => m.id !== e.id) } } });
         this.recountMarks(e.channelId, true);
+        break;
+      }
+      // Reports (docs/features/reports.md): many messages of one channel at once (a ban with "delete messages of the last ...").
+      case "message.bulkDelete": {
+        const ch = this.state.messages[e.channelId];
+        const gone = new Set(e.ids);
+        if (ch) this.set({ messages: { ...this.state.messages, [e.channelId]: { ...ch, list: ch.list.filter((m) => !gone.has(m.id)) } } });
+        this.recountMarks(e.channelId, true);
+        break;
+      }
+      // The open reports for a moderator (a count only); the rail and Verwaltung > Meldungen show it.
+      case "reports.count": {
+        if (this.state.server) this.set({ server: { ...this.state.server, openReports: e.open } });
+        break;
+      }
+      // A moderator removed something of mine after a report (decision 4 of 25 September 2026): the reason, never the reporter.
+      case "moderation.notice": {
+        void showNotice({ title: t("report.noticeTitle"), text: e.kind === "message_removed" ? t("report.noticeMessage", { channel: e.channelName ?? "?", server: this.state.server?.settings.name ?? this.state.host }) : t("report.noticeMessages", { n: e.count, server: this.state.server?.settings.name ?? this.state.host }) });
         break;
       }
       case "read.update": {

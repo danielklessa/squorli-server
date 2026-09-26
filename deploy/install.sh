@@ -8,7 +8,7 @@
 # downloads the deploy files, writes .env with fresh secrets, starts the stack and checks it. Running it again on an
 # existing installation updates it or changes its settings; secrets and data are kept.
 # It also writes <dir>/squorli, a small wrapper around docker compose with the right profile and overlays
-# (squorli update | status | logs | backup | restore | restart | down | <any compose command>).
+# (squorli update | status | logs | backup | restore | doctor | restart | down | <any compose command>).
 #
 # Environment: SQUORLI_DIR (installation directory, default /opt/squorli), SQUORLI_LANG (de/en),
 # SQUORLI_REF (git ref of the deploy files, default main), SQUORLI_RAW_BASE (base URL of the files; tests use file://).
@@ -579,6 +579,7 @@ write_helper() {
     printf '# Written by the Squorli installer (deploy/install.sh); running the installer again rewrites it.\n'
     printf '# Runs docker compose for this installation with the right profile and overlays.\n'
     printf '# setup: %s\n' "$SETUP"
+    printf '# lang: %s\n' "$L"
     printf 'ARGS=(%s)\n' "${CARGS[*]}"
     cat <<'EOF'
 set -euo pipefail
@@ -614,8 +615,39 @@ case "${1:-help}" in
     dc run --rm --no-deps -T --entrypoint sh app -c 'find /app/data -mindepth 1 -delete && tar xzf - -C /app/data' < "$src/squorli-files.tar.gz"
     dc up -d --no-build
     echo "Restored from $src. The .env was left as it is; the backup's copy is $src/env (PUBLIC_DOMAIN, OWNER_PUBLIC_KEY and DIRECTORY_URL should match it)." ;;
+  doctor)
+    # Setup check (docs/features/doctor.md): containers, DNS from this machine, then the app server's own report (it reaches its
+    # public address, LiveKit and the directory; a directory repeats the address checks from outside). Exit 1 when a check fails.
+    lang="$(sed -n 's/^# lang: \([a-z]*\)$/\1/p' "$0" | head -n1 || true)"; lang="${lang:-en}"
+    domain="$(sed -n 's/^PUBLIC_DOMAIN=//p' ../.env | tail -n1 | tr -d "'\"" || true)"
+    if [ "$lang" = de ]; then echo "Container:"; else echo "Containers:"; fi
+    dc ps
+    if [ -n "$domain" ] && [ "$domain" != localhost ]; then
+      ips="$(getent ahosts "$domain" 2>/dev/null | awk '{ print $1 }' | sort -u | tr '\n' ' ' || true)"
+      echo
+      if [ -n "$ips" ]; then echo "DNS: $domain -> $ips"
+      elif [ "$lang" = de ]; then echo "DNS: $domain löst auf diesem Rechner nicht auf."
+      else echo "DNS: $domain does not resolve on this machine."; fi
+    fi
+    echo
+    if [ "$lang" = de ]; then echo "Prüfungen des App-Servers (aus dem Container heraus; ein Verzeichnis prüft zusätzlich von außen):"
+    else echo "Checks of the app server (from inside the container; a directory also checks from outside):"; fi
+    rc=0
+    dc exec -T app node -e '
+      const lang = process.argv[1]; const mark = { ok: "  ok  ", warn: "  !   ", fail: "  x   ", skip: "  -   " };
+      fetch("http://127.0.0.1:3000/api/doctor").then(async (r) => {
+        if (!r.ok) { console.log("  x   /api/doctor -> HTTP " + r.status); process.exit(1); }
+        const d = await r.json();
+        for (const c of d.checks) console.log(mark[c.status] + c.text[lang] + (c.detail ? "  (" + c.detail + ")" : ""));
+        process.exit(d.checks.some((c) => c.status === "fail") ? 1 : 0);
+      }).catch((e) => { console.log("  x   " + e.message); process.exit(1); });
+    ' "$lang" || rc=$?
+    echo
+    if [ "$lang" = de ]; then echo "Ob Sprache und Video (UDP) ankommen, prüft nur ein Browser: Verwaltung > Server > Verbindung prüfen."
+    else echo "Whether voice and video (UDP) arrive can only be checked from a browser: Verwaltung > Server > Check the connection."; fi
+    exit $rc ;;
   help|-h|--help)
-    echo "squorli update | status | logs [service] | restart [service] | down | backup [dir] | restore <dir> | <docker compose command>" ;;
+    echo "squorli update | status | logs [service] | restart [service] | down | backup [dir] | restore <dir> | doctor | <docker compose command>" ;;
   *) dc "$@" ;;
 esac
 EOF
@@ -703,6 +735,7 @@ finish() {
     "  $HELPER update      $(t "neues Image holen und neu starten (vorher Backup)" "pull the new image and restart (back up first)")" \
     "  $HELPER backup      $(t "Datenbank, Dateien und .env nach $DIR/backups sichern" "back up database, files and .env to $DIR/backups")" \
     "  $HELPER restore <$(t "Ordner" "dir")>  $(t "eine Sicherung zurückspielen (ersetzt Datenbank und Dateien)" "restore a backup (replaces database and files)")" \
+    "  $HELPER doctor      $(t "prüfen, was bei der Einrichtung am häufigsten schiefgeht (Domain, Proxy, LiveKit, Ports, Verzeichnis)" "check what goes wrong most often in a setup (domain, proxy, LiveKit, ports, directory)")" \
     "$(t "Einstellungen ändern: dieses Skript erneut ausführen, oder $DIR/.env bearbeiten und $HELPER up -d" \
       "Change settings: run this script again, or edit $DIR/.env and run $HELPER up -d")"
 }

@@ -21,12 +21,14 @@ export * from "./channels";
 export * from "./votekick";
 export * from "./channelBlocks";
 export * from "./localAccounts";
+export * from "./reports";
 export { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { Iso, PublicKey, Signature, Uuid } from "./primitives";
 import { DisplayName } from "./directory";
 import { GamePresence } from "./friends";
 import { ChannelNotification, SlowmodeSeconds, UserLimit, VoiceLock } from "./channels";
 import { VoteKick, VoteKickResult } from "./votekick";
+import { DeleteRecentHours } from "./reports";
 
 /** Increment on incompatible changes. The server rejects older clients. */
 export const PROTOCOL_VERSION = 4; // v4: voice.moved/voice.stop, Member.streamBlocked, MODERATE_VOICE
@@ -161,10 +163,34 @@ export const ServerSettings = z.object({
    * back to null. Optional = feature flag, like `statusApi` itself.
    */
   statusApiRoleId: Uuid.nullable().optional(),
+  /** The setup check exists (GET /api/doctor, POST /api/doctor/rtc-token; docs/features/doctor.md). Optional = feature flag. */
+  doctor: z.boolean().optional(),
 });
 export const UpdateSettingsRequest = ServerSettings.pick({ name: true, openJoin: true, localAccounts: true, listed: true, description: true, radioAutoStop: true, afkChannelId: true, statusApi: true, statusApiRoleId: true }).partial();
 /** The key of the status API in mode "key" (MANAGE_SERVER only); null = none yet (made when the mode is switched to "key"). */
 export const StatusApiKeyResponse = z.object({ key: z.string().nullable() });
+// ---- Setup self-diagnosis (docs/features/doctor.md, 25 September 2026): GET /api/doctor (MANAGE_SERVER, or from the
+// machine itself for `squorli doctor`) runs the checks an operator gets wrong most often and names the likely fault.
+// The texts come in both languages from the server, so the wrapper on the host and the admin panel say the same thing;
+// `id` is stable for scripts. The client's own media connection is checked in the browser (DoctorRtcToken below).
+export const DoctorStatus = z.enum(["ok", "warn", "fail", "skip"]);
+export const DoctorCheck = z.object({
+  id: z.string().min(1).max(64),
+  status: DoctorStatus,
+  text: z.object({ de: z.string(), en: z.string() }),
+  /** The technical detail behind the text (status code, error code), for the operator who wants it. */
+  detail: z.string().nullable().default(null),
+});
+export const DoctorReport = z.object({
+  time: Iso,
+  domain: z.string(),
+  proxyMode: z.enum(["bundled", "external"]),
+  /** LiveKit's media ports as the server knows them (LIVEKIT_TCP_PORT/LIVEKIT_UDP_PORT). */
+  mediaPorts: z.object({ tcp: z.number().int(), udp: z.number().int() }),
+  livekitPublicUrl: z.string(),
+  directoryUrl: z.string().nullable(),
+  checks: z.array(DoctorCheck),
+});
 /** How long a voice channel may stay empty before its radio is turned off (ServerSettings.radioAutoStop). */
 export const RADIO_IDLE_STOP_MS = 2 * 60_000;
 
@@ -426,7 +452,8 @@ export const MoveMemberRequest = z.object({ channelId: Uuid.nullable() });
 /** Stop a member's camera and/or screen. */
 export const StopStreamRequest = z.object({ camera: z.boolean().default(true), screen: z.boolean().default(true) });
 export const SetStreamBlockedRequest = z.object({ blocked: z.boolean() });
-export const BanRequest = z.object({ userId: Uuid, reason: z.string().max(256).nullable().optional() });
+/** `deleteMessagesHours` (docs/features/reports.md): also delete the member's messages of the last hour, day or week. */
+export const BanRequest = z.object({ userId: Uuid, reason: z.string().max(256).nullable().optional(), deleteMessagesHours: DeleteRecentHours.optional() });
 export const Ban = z.object({ userId: Uuid, displayName: z.string(), reason: z.string().nullable(), bannedBy: Uuid.nullable(), createdAt: Iso });
 
 export const Invite = z.object({
@@ -545,6 +572,11 @@ export const ServerState = z.object({
   myChannelPermissions: z.record(Uuid, z.number().int()).optional(),
   /** Where a sticky voice channel holds the user right now; null = nowhere (missing = a server from before). */
   myVoiceLock: VoiceLock.nullable().optional(),
+  /**
+   * Reports (docs/features/reports.md): the number of open reports for a member with MANAGE_REPORTS, 0 for everybody else.
+   * Present = the server takes reports (the client offers "Melden" only then); missing = a server from before.
+   */
+  openReports: z.number().int().nonnegative().optional(),
 });
 
 // ---------- REST: status API (docs/features/status-api.md) ----------
@@ -660,6 +692,12 @@ export const ServerMe = z.object({
 export const ServerMessageCreate = z.object({ type: z.literal("message.create"), message: Message });
 export const ServerMessageUpdate = z.object({ type: z.literal("message.update"), message: Message });
 export const ServerMessageDelete = z.object({ type: z.literal("message.delete"), channelId: Uuid, id: Uuid });
+/** Many messages of one channel at once (a ban with "delete messages of the last ...", a report closed that way); older clients drop the event and catch up on reload. */
+export const ServerMessageBulkDelete = z.object({ type: z.literal("message.bulkDelete"), channelId: Uuid, ids: z.array(Uuid) });
+/** The open reports changed; only members with MANAGE_REPORTS get it (a count, never content). */
+export const ServerReportsCount = z.object({ type: z.literal("reports.count"), open: z.number().int().nonnegative() });
+/** A moderator removed something of the recipient's after a report (decision 4): the reason, never the reporter. */
+export const ServerModerationNotice = z.object({ type: z.literal("moderation.notice"), kind: z.enum(["message_removed", "messages_removed"]), channelName: z.string().nullable(), count: z.number().int().nonnegative().default(1) });
 export const ServerTyping = z.object({ type: z.literal("typing"), channelId: Uuid, userId: Uuid });
 /**
  * You have read a channel on one of your devices (sent only to your own connections, so the others drop their marks).
@@ -714,7 +752,7 @@ export const ServerError = z.object({
 
 export const ServerEvent = z.discriminatedUnion("type", [
   ServerWelcome, ServerPong, ServerVoiceState, ServerStructure, ServerMe,
-  ServerMessageCreate, ServerMessageUpdate, ServerMessageDelete, ServerTyping, ServerReadUpdate, ServerMuteUpdate, ServerRadioMeta, ServerRadioPlayback, ServerVoiceMoved, ServerVoiceStop, ServerVoteKick, ServerVoteKickResult, ServerRemoved, ServerError,
+  ServerMessageCreate, ServerMessageUpdate, ServerMessageDelete, ServerMessageBulkDelete, ServerTyping, ServerReadUpdate, ServerMuteUpdate, ServerRadioMeta, ServerRadioPlayback, ServerVoiceMoved, ServerVoiceStop, ServerVoteKick, ServerVoteKickResult, ServerReportsCount, ServerModerationNotice, ServerRemoved, ServerError,
 ]);
 
 export type ClientEvent = z.infer<typeof ClientEvent>;
@@ -725,6 +763,9 @@ export type Me = z.infer<typeof Me>;
 export type ServerSettings = z.infer<typeof ServerSettings>;
 export type StatusApiMode = z.infer<typeof StatusApiMode>;
 export type StatusApiKeyResponse = z.infer<typeof StatusApiKeyResponse>;
+export type DoctorStatus = z.infer<typeof DoctorStatus>;
+export type DoctorCheck = z.infer<typeof DoctorCheck>;
+export type DoctorReport = z.infer<typeof DoctorReport>;
 export type VoiceStatus = z.infer<typeof VoiceStatus>;
 export type ServerStatus = z.infer<typeof ServerStatus>;
 export type StatusMember = z.infer<typeof StatusMember>;

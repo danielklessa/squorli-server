@@ -25,6 +25,9 @@ services:
       # Server accounts (~name): true/false fixes the admin panel's switch; empty = the admin panel decides. Always on without a directory.
       LOCAL_ACCOUNTS: ${LOCAL_ACCOUNTS:-}
       RATE_LIMIT_FACTOR: ${RATE_LIMIT_FACTOR:-1}
+      # The media ports, so the setup check (Verwaltung > Server, `squorli doctor`) can name and probe them; LiveKit gets the same values below.
+      LIVEKIT_TCP_PORT: ${LIVEKIT_TCP_PORT:-7881}
+      LIVEKIT_UDP_PORT: ${LIVEKIT_UDP_PORT:-7882}
     volumes: [appdata:/app/data]   # attachments, pictures of link previews
     depends_on:
       postgres: { condition: service_healthy }

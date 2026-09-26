@@ -1,6 +1,6 @@
 import { bigint, bigserial, boolean, check, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import type { LinkPreview } from "@squorli/protocol";
+import type { LinkPreview, ReportSnapshot } from "@squorli/protocol";
 
 const ts = (name: string) => timestamp(name, { withTimezone: true });
 
@@ -303,6 +303,60 @@ export const channelMutes = pgTable(
     createdAt: ts("created_at").notNull().defaultNow(),
   },
   (t) => ({ pk: primaryKey({ columns: [t.userId, t.channelId] }) }),
+);
+
+/**
+ * Reports (docs/features/reports.md, 26 September 2026): a member's report of a message or a member to the server's moderators.
+ * `snapshot` = the message or member at that moment (protocol `ReportSnapshot`; attachment copies under DATA_DIR/reports/<id>/),
+ * set null by the retention sweep (closed + 30 days, 90 at the latest) while the row stays, so repeats can be counted.
+ * `message_id` carries no FK on purpose: the report outlives the message. The reporter's account deletion takes their
+ * reports along (cascade); the reported person's leaves the snapshot (it is evidence about them) with the user reference null.
+ */
+export const reports = pgTable(
+  "reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind", { enum: ["message", "member"] }).notNull(),
+    reason: text("reason").notNull(),
+    text: text("text"),
+    status: text("status", { enum: ["open", "actioned", "dismissed"] }).notNull().default("open"),
+    reporterId: uuid("reporter_id").references(() => users.id, { onDelete: "cascade" }),
+    reporterName: text("reporter_name").notNull(),
+    reportedUserId: uuid("reported_user_id").references(() => users.id, { onDelete: "set null" }),
+    reportedName: text("reported_name").notNull(),
+    channelId: uuid("channel_id").references(() => channels.id, { onDelete: "set null" }),
+    channelName: text("channel_name"),
+    messageId: uuid("message_id"),
+    snapshot: jsonb("snapshot").$type<Omit<ReportSnapshot, "attachments"> & { attachments: { n: number; name: string; size: number; mimeType: string }[] }>(),
+    createdAt: ts("created_at").notNull().defaultNow(),
+    closedAt: ts("closed_at"),
+    closedBy: uuid("closed_by").references(() => users.id, { onDelete: "set null" }),
+    closedByName: text("closed_by_name"),
+    action: text("action"),
+    note: text("note"),
+  },
+  (t) => ({ byStatus: index("reports_status_created_idx").on(t.status, t.createdAt), byMessage: index("reports_message_idx").on(t.messageId), byReported: index("reports_reported_idx").on(t.reportedUserId) }),
+);
+
+/**
+ * The moderation log (docs/features/reports.md, decision 2 of 25 September 2026): who did what to whom, when, where; never
+ * message contents. Names are kept as text so the line stays readable after an account is gone. Rows older than 180 days go.
+ */
+export const modLog = pgTable(
+  "mod_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    at: ts("at").notNull().defaultNow(),
+    actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorName: text("actor_name").notNull(),
+    targetUserId: uuid("target_user_id").references(() => users.id, { onDelete: "set null" }),
+    targetName: text("target_name"),
+    action: text("action").notNull(),
+    channelId: uuid("channel_id").references(() => channels.id, { onDelete: "set null" }),
+    channelName: text("channel_name"),
+    detail: jsonb("detail").$type<Record<string, unknown>>().notNull().default({}),
+  },
+  (t) => ({ byAt: index("mod_log_at_idx").on(t.at) }),
 );
 
 /** The file lives under DATA_DIR/attachments/<id>; messageId is set when the message is sent. */

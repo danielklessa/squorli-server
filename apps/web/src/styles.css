@@ -234,6 +234,28 @@ button.rail-item { padding: 0; border: 0; cursor: pointer; font: inherit; positi
 .brand-mark.server-icon, .server-icon-preview { border-radius: 6px; object-fit: cover; background: var(--bg); }
 .server-icon-preview { width: 48px; height: 48px; border-radius: var(--r); }
 /* Status API (Verwaltung > Server): the address and the key as selectable chips that wrap instead of widening the panel. */
+/* Reports (docs/features/reports.md): the queue's cards, the snapshot, the log, the rail's amber badge */
+.rail-badge.rail-reports { top: -4px; bottom: auto; right: auto; left: -4px; background: var(--warn); color: #1b1b1b; }
+.nav-badge { margin-left: auto; min-width: 1.3rem; padding: 0 0.35rem; border-radius: 999px; background: var(--warn); color: #1b1b1b; font-size: 0.7rem; font-weight: 700; text-align: center; }
+.report-card { border: 1px solid var(--line); border-radius: var(--r); padding: calc(var(--u) * 1.5); display: flex; flex-direction: column; gap: var(--u); }
+.report-card.report-actioned, .report-card.report-dismissed { opacity: 0.8; }
+.report-head { display: flex; gap: 0.6rem; align-items: baseline; flex-wrap: wrap; }
+.report-snapshot { background: var(--bg); border-radius: var(--r); padding: calc(var(--u) * 1.25); display: flex; flex-direction: column; gap: 0.4rem; }
+.report-content { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.report-actions { margin-top: 0; }
+.report-excerpt { margin: 0; padding: 0.4rem 0.8rem; border-left: 3px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
+.report-dialog.modal { width: min(34rem, 100%); }
+.report-dialog .dialog-body { padding: 0.9rem; overflow-y: auto; }
+.mod-log-line { margin-top: 0; gap: 0.6rem; }
+/* Setup check (docs/features/doctor.md): one line per check, the mark in the state's colour */
+.doctor-sub { margin: calc(var(--u) * 2) 0 0; font-size: 0.95rem; }
+.doctor-list { list-style: none; margin: var(--u) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--u); }
+.doctor-list li { display: flex; gap: 0.6rem; align-items: flex-start; line-height: 1.4; overflow-wrap: anywhere; }
+.doctor-list li > .ic { flex: none; margin-top: 0.2em; }
+.doctor-ok > .ic { color: var(--ok); }
+.doctor-warn > .ic { color: var(--warn); }
+.doctor-fail > .ic { color: var(--danger); }
+.doctor-skip { color: var(--muted); }
 .status-api-url, .status-api-key { display: inline-block; padding: calc(var(--u) * 0.75) var(--u); background: var(--bg); border-radius: var(--r); word-break: break-all; user-select: all; max-width: 100%; }
 .channel-list { padding: 1rem 0.75rem; }
 .channel-list section { margin-bottom: 1.5rem; }

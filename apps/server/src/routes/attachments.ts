@@ -21,7 +21,7 @@ import { verifyAttachment } from "../attachmentLinks";
  * (never attached to a message) are deleted after an hour.
  */
 /** Types a browser may show in place: raster pictures, video, audio, plain text, PDF. */
-const INLINE_TYPES = /^(image\/(png|jpeg|gif|webp|avif)|video\/[a-z0-9.+-]+|audio\/[a-z0-9.+-]+|text\/plain|application\/pdf)$/;
+export const INLINE_TYPES = /^(image\/(png|jpeg|gif|webp|avif)|video\/[a-z0-9.+-]+|audio\/[a-z0-9.+-]+|text\/plain|application\/pdf)$/;
 
 export async function registerAttachmentRoutes(app: FastifyInstance, db: Db, config: Config) {
   const dir = join(config.DATA_DIR, "attachments");
@@ -87,6 +87,7 @@ export async function registerAttachmentRoutes(app: FastifyInstance, db: Db, con
   const timer = setInterval(() => { void sweep().catch((err) => app.log.warn({ err }, "attachment sweep")); }, 15 * 60_000);
   app.addHook("onClose", async () => clearInterval(timer));
 
+  app.decorate("attachmentsDir", dir);
   /** Called by messages.ts after a deletion so files do not linger. */
   app.decorate("removeAttachmentFiles", async (ids: string[]) => {
     for (const id of ids) await rm(join(dir, id), { force: true });
@@ -96,5 +97,7 @@ export async function registerAttachmentRoutes(app: FastifyInstance, db: Db, con
 declare module "fastify" {
   interface FastifyInstance {
     removeAttachmentFiles: (ids: string[]) => Promise<void>;
+    /** DATA_DIR/attachments (the reports copy files out of it, reports.ts). */
+    attachmentsDir: string;
   }
 }

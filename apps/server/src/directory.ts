@@ -1,4 +1,4 @@
-import { ChallengeResponse, DirectoryAccount, ServerLeavesResponse, ServerRegisterResponse, ServerResolveResponse, directoryAvatarUrl, directoryServerRegisterMessage } from "@squorli/protocol";
+import { ChallengeResponse, DirectoryAccount, ServerLeavesResponse, ServerProbeResponse, ServerRegisterResponse, ServerResolveResponse, directoryAvatarUrl, directoryServerRegisterMessage } from "@squorli/protocol";
 import * as ed from "@noble/ed25519";
 import { count, eq, inArray } from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
@@ -36,6 +36,10 @@ export class DirectoryClient {
   private registering: Promise<boolean> | null = null;
   /** After a failed registration, lookups do not try again before this time (see ensureToken). */
   private registerRetryAt = 0;
+  /** Why the last registration failed (the setup check shows it, docs/features/doctor.md); null after a success. */
+  lastRegisterProblem: { kind: "unreachable" | "refused" | "challenge"; status: number | null; error: string | null; detail: string | null } | null = null;
+  /** When the last registration succeeded (null = never since the start). */
+  registeredAt: Date | null = null;
 
   constructor(private readonly db: Db, private readonly config: Config, private readonly log: FastifyBaseLogger) {}
 
@@ -77,7 +81,7 @@ export class DirectoryClient {
     if (!url || !this.privateKey || !this.serverKey) return false;
     try {
       const chRes = await fetch(`${url}/api/challenge`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ publicKey: this.serverKey }), signal: AbortSignal.timeout(TIMEOUT_MS) });
-      if (!chRes.ok) { this.log.warn({ status: chRes.status }, "Verzeichnis: Challenge fuer die Server-Registrierung fehlgeschlagen"); return false; }
+      if (!chRes.ok) { this.lastRegisterProblem = { kind: "challenge", status: chRes.status, error: null, detail: null }; this.log.warn({ status: chRes.status }, "Verzeichnis: Challenge fuer die Server-Registrierung fehlgeschlagen"); return false; }
       const ch = ChallengeResponse.parse(await chRes.json());
       const health = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(TIMEOUT_MS) }).then((r) => r.json()) as { host?: string };
       if (!health.host) return false;
@@ -95,16 +99,21 @@ export class DirectoryClient {
       const res = await fetch(`${url}/api/servers/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) });
       if (!res.ok) {
         const err = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+        this.lastRegisterProblem = { kind: "refused", status: res.status, error: err.error ?? null, detail: err.detail ?? null };
         this.log.warn({ status: res.status, error: err.error, detail: err.detail, proofUrl: this.config.directoryProofUrl },
           "Verzeichnis: Server-Registrierung abgelehnt; Anzeigenamen werden nicht uebernommen (DIRECTORY_PROOF_URL muss vom Verzeichnis aus erreichbar sein und serverKey liefern)");
         return false;
       }
       const reg = ServerRegisterResponse.parse(await res.json());
       this.token = reg.token;
+      this.lastRegisterProblem = null;
+      this.registeredAt = new Date();
       this.log.info({ host: reg.host, expiresAt: reg.expiresAt }, "beim Verzeichnis als Server registriert");
       return true;
     } catch (err) {
-      this.log.warn({ err: err instanceof Error ? err.message : String(err) }, "Verzeichnis fuer die Server-Registrierung nicht erreichbar");
+      const message = err instanceof Error ? (err.cause as { code?: string } | undefined)?.code ?? err.message : String(err);
+      this.lastRegisterProblem = { kind: "unreachable", status: null, error: null, detail: message };
+      this.log.warn({ err: message }, "Verzeichnis fuer die Server-Registrierung nicht erreichbar");
       return false;
     }
   }
@@ -246,6 +255,29 @@ export class DirectoryClient {
       if (!res.ok) return [];
       return ServerLeavesResponse.parse(await res.json()).publicKeys;
     } catch { return []; }
+  }
+  /**
+   * The setup check from outside (docs/features/doctor.md): the directory tries our public address from where it stands.
+   * "unsupported" = the directory has no such route (older directory), null = no token or the directory did not answer.
+   */
+  async probe(tcpPort: number): Promise<ServerProbeResponse | "unsupported" | null> {
+    const url = this.config.DIRECTORY_URL;
+    if (!url) return null;
+    try {
+      if (!(await this.ensureToken())) return null;
+      const post = () => fetch(`${url}/api/servers/probe`, {
+        method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${this.token}` },
+        body: JSON.stringify({ tcpPort }), signal: AbortSignal.timeout(20_000),
+      });
+      let res = await post();
+      if (res.status === 401) { this.token = null; if (!(await this.register())) return null; res = await post(); }
+      if (res.status === 404) return "unsupported";
+      if (!res.ok) { this.log.warn({ status: res.status }, "Verzeichnis: Pruefung von aussen fehlgeschlagen"); return null; }
+      return ServerProbeResponse.parse(await res.json());
+    } catch (err) {
+      this.log.warn({ err: err instanceof Error ? err.message : String(err) }, "Verzeichnis: Pruefung von aussen nicht moeglich");
+      return null;
+    }
   }
   private postConfirm(url: string, publicKey: string): Promise<Response> {
     return fetch(`${url}/api/servers/leave/confirm`, {

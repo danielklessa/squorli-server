@@ -413,6 +413,31 @@ export const ServerLeaveResponse = z.object({ ok: z.literal(true), server: Serve
 export const DirectoryLeaveRequest = z.object({ publicKey: PublicKey });
 export const ServerLeaveConfirmRequest = z.object({ publicKey: PublicKey });
 export const ServerLeavesResponse = z.object({ publicKeys: z.array(PublicKey) });
+
+// ---- Outside probe of a registered chat server (docs/features/doctor.md, 25 September 2026): POST /api/servers/probe with the
+// server's token. The directory tries the server's public address from where it stands (the operator's own machine cannot
+// tell whether its own ports are open from outside): the health route with the certificate, the WebSocket upgrade, /rtc
+// through the proxy and one TCP connect to the media port. UDP cannot be probed this way (nothing answers a bare packet);
+// the client's own media connection is the UDP check.
+export const ServerProbeRequest = z.object({
+  /** LiveKit's TCP media port (LIVEKIT_TCP_PORT, default 7881); empty = no TCP probe. */
+  tcpPort: z.number().int().min(1).max(65535).optional(),
+});
+/** One probe: `error` is a short code or message when it failed (ENOTFOUND, CERT_HAS_EXPIRED, "timeout", "status 502"). */
+export const ProbeResult = z.object({ ok: z.boolean(), status: z.number().int().nullable().default(null), error: z.string().nullable().default(null), ms: z.number().int().nonnegative().nullable().default(null) });
+export const ServerProbeResponse = z.object({
+  host: ServerHost,
+  /** The address the host resolved to at the directory (null = did not resolve). */
+  address: z.string().nullable(),
+  /** GET /api/health: `keyMatches` = the answer carried this server's key (null when there was no JSON answer). */
+  health: ProbeResult.extend({ keyMatches: z.boolean().nullable().default(null) }),
+  /** A WebSocket to /api/ws opened (the proxy passes the upgrade). */
+  websocket: ProbeResult,
+  /** GET /rtc/validate answered 401 (the proxy forwards /rtc to LiveKit). */
+  rtc: ProbeResult,
+  /** One TCP connect to the media port; null when none was asked for or the address is not public. */
+  tcp: ProbeResult.extend({ port: z.number().int() }).nullable(),
+});
 export type ServerLeaveRequest = z.infer<typeof ServerLeaveRequest>;
 export type ServerLeaveResponse = z.infer<typeof ServerLeaveResponse>;
 export type ServerLeavesResponse = z.infer<typeof ServerLeavesResponse>;
@@ -509,8 +534,8 @@ export const DirectoryHealth = z.object({
   service: z.literal("directory"),
   /** Host that registration signatures are bound to. */
   host: z.string(),
-  /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. `email`: SMTP configured (address, notices, e-mail code). `settings`: the account stores all client settings (action `settings`). `afk`: the socket takes `activity` and friends carry `afk` (AFK detection). `emailRequired`: new handles need a confirmed e-mail address (REQUIRE_EMAIL; registration in two steps, see DirectoryRegisterRequest). `avatars`: the account stores one avatar image (action `avatar-set`, GET /api/avatars/<key>). `settingsSealed`: the account stores the settings as a blob the client encrypts (action `settings-sealed`). */
-  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false), settings: z.boolean().default(false), settingsSealed: z.boolean().default(false), afk: z.boolean().default(false), emailRequired: z.boolean().default(false), avatars: z.boolean().default(false), gameLibrary: z.boolean().default(false), dmPreviews: z.boolean().default(false) }),
+  /** `friends` (M7): friends and direct messages over the WebSocket /api/ws. `email`: SMTP configured (address, notices, e-mail code). `settings`: the account stores all client settings (action `settings`). `afk`: the socket takes `activity` and friends carry `afk` (AFK detection). `emailRequired`: new handles need a confirmed e-mail address (REQUIRE_EMAIL; registration in two steps, see DirectoryRegisterRequest). `avatars`: the account stores one avatar image (action `avatar-set`, GET /api/avatars/<key>). `settingsSealed`: the account stores the settings as a blob the client encrypts (action `settings-sealed`). `probe`: POST /api/servers/probe exists (a registered server's setup check from outside, docs/features/doctor.md). */
+  features: z.object({ backup: z.boolean(), totp: z.boolean(), email: z.boolean(), friends: z.boolean().default(false), settings: z.boolean().default(false), settingsSealed: z.boolean().default(false), afk: z.boolean().default(false), emailRequired: z.boolean().default(false), avatars: z.boolean().default(false), gameLibrary: z.boolean().default(false), dmPreviews: z.boolean().default(false), probe: z.boolean().default(false) }),
   time: Iso,
 });
 
@@ -525,6 +550,9 @@ export type RecoveryCodesResponse = z.infer<typeof RecoveryCodesResponse>;
 export type KeyFetch = z.infer<typeof KeyFetch>;
 export type AccountStatus = z.infer<typeof AccountStatus>;
 export type AccountServer = z.infer<typeof AccountServer>;
+export type ServerProbeRequest = z.infer<typeof ServerProbeRequest>;
+export type ServerProbeResponse = z.infer<typeof ServerProbeResponse>;
+export type ProbeResult = z.infer<typeof ProbeResult>;
 
 /**
  * The chat server's sign-in message (index.ts `challengeMessage` is this): what a user signs for a server's domain when

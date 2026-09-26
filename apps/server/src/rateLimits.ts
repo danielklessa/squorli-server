@@ -62,12 +62,16 @@ export const LIMITS = {
   ipInvite: { limit: 30, windowMs: 60_000 },
   /** The status API per IP (it caches for a second anyway). */
   ipStatus: { limit: 60, windowMs: 60_000 },
+  /** The setup check per IP (GET /api/doctor): every run opens connections to the server's own address and the directory. */
+  ipDoctor: { limit: 10, windowMs: 60_000 },
   /** The directory's pushes (notify, leave) per IP: they carry no proof and each one makes this server ask the directory. */
   ipDirectoryPush: { limit: 120, windowMs: 60_000 },
   /** Every writing request per session. */
   tokenWrite: { limit: 180, windowMs: 60_000 },
   /** Messages per session, over all channels. */
   tokenMessages: { limit: 15, windowMs: 10_000 },
+  /** Reports per session (docs/features/reports.md): a person reports a few things, a script would flood the queue. */
+  tokenReports: { limit: 10, windowMs: 3_600_000 },
   /** Uploads per session (attachments and the server account's avatar). */
   tokenUploads: { limit: 30, windowMs: 60_000 },
   /** Events on one WebSocket (typing, activity, voice state, ping). */
@@ -92,9 +96,11 @@ export function buildRules(factor: number): Rule[] {
     r("ipWs", "ip", (m, p) => m === "GET" && p === "/api/ws"),
     r("ipInvite", "ip", (m, p) => m === "GET" && p.startsWith("/api/invites/")),
     r("ipStatus", "ip", (m, p) => m === "GET" && p === "/api/status"),
+    r("ipDoctor", "ip", (m, p) => m === "GET" && p === "/api/doctor"),
     r("ipDirectoryPush", "ip", (m, p) => m === "POST" && (p === "/api/directory/notify" || p === "/api/directory/leave")),
     r("tokenWrite", "token", (m) => isWrite(m)),
     r("tokenMessages", "token", (m, p) => m === "POST" && /^\/api\/channels\/[^/]+\/messages$/.test(p)),
+    r("tokenReports", "token", (m, p) => m === "POST" && p === "/api/reports"),
     r("tokenUploads", "token", (m, p) => (m === "POST" && p === "/api/attachments") || (m === "PUT" && p === "/api/me/avatar")),
   ];
 }

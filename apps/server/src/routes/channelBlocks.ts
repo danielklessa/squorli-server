@@ -1,4 +1,5 @@
 import { Permission, SetChannelBlockRequest, displayNameOf, type ChannelBlock } from "@squorli/protocol";
+import { recordModLog, userNameOf } from "../modLog";
 import { inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { requireMember } from "../auth/session";
@@ -69,6 +70,7 @@ export async function registerChannelBlockRoutes(app: FastifyInstance, db: Db, h
       await releaseOnLeave(db, hub, presence, targetId).catch((err: unknown) => req.log.warn({ err }, "channel block release"));
     }
     req.log.info({ by: c.userId, target: targetId, channelId: c.channel.id, minutes: body.data.minutes }, "Kanalsperre gesetzt");
+    await recordModLog(db, { actorId: c.userId, actorName: displayNameOf(c), targetUserId: targetId, targetName: await userNameOf(db, targetId), action: "channel_block", channelId: c.channel.id, channelName: c.channel.name, detail: { minutes: body.data.minutes } }, req.log);
     return (await onWire([block]))[0];
   });
 
@@ -79,6 +81,7 @@ export async function registerChannelBlockRoutes(app: FastifyInstance, db: Db, h
     if (!canIn(c.perms, Permission.MOVE_MEMBERS)) return reply.code(403).send({ error: "forbidden" });
     if (!(await channelBlockStore.lift(c.channel.id, req.params.userId))) return reply.code(404).send({ error: "not_found" });
     req.log.info({ by: c.userId, target: req.params.userId, channelId: c.channel.id }, "Kanalsperre aufgehoben");
+    await recordModLog(db, { actorId: c.userId, actorName: displayNameOf(c), targetUserId: req.params.userId, targetName: await userNameOf(db, req.params.userId), action: "channel_unblock", channelId: c.channel.id, channelName: c.channel.name }, req.log);
     return { ok: true };
   });
 }

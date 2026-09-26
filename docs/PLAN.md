@@ -40,10 +40,10 @@ Recording, end-to-end encryption of media, a bot API, threads, federation betwee
 
 | Risk | Handling | State |
 |---|---|---|
-| NAT/TURN does not work for some operators or users | Self-diagnosis (2.2), TCP fallback 7881, docs on what a host must offer | TCP fallback built; TURN off; self-diagnosis open |
+| NAT/TURN does not work for some operators or users | Self-diagnosis (`squorli doctor`, Verwaltung > Server; `docs/features/doctor.md`), TCP fallback 7881, docs on what a host must offer | TCP fallback and self-diagnosis built (26 September 2026); TURN off |
 | Key loss | Password-encrypted key backup at the directory and on the server (server accounts), authenticator, recovery codes | built; the mnemonic recovery code was dropped by the user on 25 September 2026 |
 | Audio quality below Discord level | Browser echo/noise suppression, speech gate, per-device settings | built; real-world measurement with users ongoing |
-| The operator's proxy breaks WebSockets or headers | Reference configurations, self-diagnosis naming the proxy fault, subdomain only | configs exist, untested against real installations (2.3) |
+| The operator's proxy breaks WebSockets or headers | Reference configurations, self-diagnosis naming the proxy fault (`docs/features/doctor.md`), subdomain only | self-diagnosis built; configs exist, untested against real installations (2.1) |
 | Screen share audio outside Chromium/Windows | Matrix, notices in the UI, the desktop app as the way out | matrix rows open (3.2) |
 | LiveKit dependency (Go, third party) | **Pinned version** (`livekit/livekit-server:v1.13.7` since 25 September 2026, `deploy/AGENTS.md`), raise it on purpose with a server release; keep the server's LiveKit layer thin | pinned; no upgrade test in CI |
 | Scope creep towards Discord's feature list | Section 1.2, section 1.3 | ongoing |
@@ -53,30 +53,11 @@ Recording, end-to-end encryption of media, a bot API, threads, federation betwee
 
 ## 2. Priority 1: security and operation
 
-### 2.0 Rollout of the security fixes of 25 September 2026
-
-Released: server 0.1.1 (`squorli restore`, the LiveKit pin), then server 0.2.0 and desktop app 0.6.1 with the rest of that day's fixes (rate limits, signed attachment links, `VIEW_VIDEO` per channel, radio playlists, `safeStorage`, security review groups A and B; their release notes).
-Waiting for the next releases:
-- security review group C: server (password attempts, IPv6 limits, the owner claim, the web client's CSP) and client (`safeHref`; the desktop app already had a CSP, so for it only the link guard). Release notes: an operator whose browser client loads something from a host outside the policy (none known) would see it blocked; households on IPv6 now share their limits as on IPv4.
-- security review group D: server (sessions and sockets, log redaction, the directory answers and pushes; **migration 0034** hashes the session tokens: back up first, and an older image afterwards finds no session, so everybody signs in again) and client (the directory signatures bound to the connected host, other devices signed out at a password change; the desktop app: control links need the installation's key, so links for mic-on, mic-toggle, deafen-toggle and deafen-off must be copied again). The website's use page already says the links carry a key: push squorli-website after the app release.
-
-The directory's open rollout: its `docs/PLAN.md`, 1.1.
-
-### 2.1 Security review of the sign-in path
-
-Challenge-response and the domain binding, session tokens (lifetime, revocation, the directory's remote sign-out), server accounts (key backup, password change, deletion), the directory token and host proof, CORS for all origins with bearer tokens, the upload and attachment routes. Result as a dated entry in `docs/VERIFIED-STATE.md`, findings as items here.
-
-The four known gaps of the plan cleanup are closed (25 September 2026: signed attachment links, `VIEW_VIDEO` per channel, radio playlists against DNS rebinding, the desktop app's keys in `safeStorage`; each in its feature note). The systematic pass ran on 25 September 2026 (four reviewers: sign-in and sessions, server accounts, chat server and directory, browser surface and files). The user's decision: fix everything, in four groups. All four groups are done (A: the login relay through a foreign server's own domain, SVG attachments on the server's origin, the directory's host proof; B: the server list only with the user's proof, the claim on a fresh key, backups bound to the server; C: password attempts, IPv6 limits, the owner claim, the web client's CSP, `javascript:` link targets; D: sessions and sockets, control links with a key, log redaction, the directory signatures and answers, hashed session tokens, other devices signed out at a password change; each in its feature note or AGENTS.md). Accepted and documented: handles of server accounts can be found out (`docs/features/local-accounts.md`); a browser page cannot encrypt its key (`docs/features/desktop.md`).
-
-### 2.2 Setup self-diagnosis
-
-User's decision of 25 September 2026: yes. A `squorli doctor` in the installer's wrapper and a check in Verwaltung > Server that test from outside what fails most often: domain and certificate, WebSocket upgrade through the proxy, `X-Forwarded-Proto`/`-For` from a trusted proxy, `/rtc/validate`, the media ports 7881/tcp and the UDP port from outside (needs a reachable echo: the directory could offer one to registered servers, to decide when building), `LIVEKIT_NODE_IP`. Error messages name the likely fault ("the proxy does not pass the WebSocket upgrade", "participant drops after 15 s: UDP 7882 not forwarded"). The known faults are listed in `deploy/AGENTS.md`, "Known pitfalls: LiveKit connectivity".
-
-### 2.3 Operator path
+### 2.1 Operator path
 
 - **Reference proxy configurations tested for real:** nginx, Traefik, Nginx Proxy Manager exist in `deploy/proxies/` but were never run against real installations; a config for an external Caddy is missing; a CI job for nginx and Traefik at least.
 - **Logging concept:** what the server logs (Fastify's default request log carries IP addresses), levels, and what an operator should set for retention (the directory's example: journald with 14 days, `../squorli-directory/deploy/README.md`, "Logs").
-- **The "stranger in 15 minutes" test:** somebody who has never seen Squorli installs it from the website on a fresh VPS, standalone and behind an existing proxy (test campaign T6).
+- **The "stranger in 15 minutes" test:** somebody who has never seen Squorli installs it from the website on a fresh VPS, standalone and behind an existing proxy (test campaign T6); `squorli doctor` and the admin panel's check against that real installation and a real proxy (`docs/features/doctor.md`, "Not checked").
 
 ---
 
@@ -84,7 +65,7 @@ User's decision of 25 September 2026: yes. A `squorli doctor` in the installer's
 
 ### 3.1 Reporting, blocking, deleting with evidence
 
-All seven decisions made by the user on 25 September 2026 (as proposed): `docs/PLAN-reports.md`. Stages 1 (server reports) to 4 (reports to the directory). Also the EU notice path an operator needs, and a precondition of the mobile app.
+All seven decisions made by the user on 25 September 2026 (as proposed): `docs/PLAN-reports.md`. Stages 1 (server reports) and 2 (delete on ban, the moderation log) are built (26 September 2026, `docs/features/reports.md`). Open: stage 3 (blocking members, in the sealed settings), stage 4 (reports to the directory: direct messages, accounts, whole servers, passed-on reports; together with the directory's side, `../squorli-directory/docs/PLAN.md` 2.1), stage 5 (push while offline). The mobile app's store submission needs 3 and 4. Also open from stage 1: the notice to the reported person only while they are online, the website's administrator guide.
 
 ### 3.2 Acceptance of the media promise
 
@@ -141,7 +122,7 @@ Most features were checked with typecheck, unit tests, smoke tests and headless 
 | T3 | **Firefox and Safari** | emoji font, camera and pop-out, viewing H.264/H.265 shares, WebP-to-JPEG fallback, the settings dialogs |
 | T4 | **The packaged desktop app on Windows** | update at start end to end, tray, deep links from a browser, hotkeys with a Stream Deck or G Hub, window audio heard by a listener, AMD and Intel graphics |
 | T5 | **The desktop app on Linux** (AppImage, deb) | install, update, tray, hotkeys on X11 |
-| T6 | **Operators** | the installer's bundled mode up to a real certificate, nginx/Traefik/NPM in front, restore on a new host, a fresh VPS by a stranger (2.3) |
+| T6 | **Operators** | the installer's bundled mode up to a real certificate, nginx/Traefik/NPM in front, restore on a new host, a fresh VPS by a stranger (2.1) |
 
 ---
 

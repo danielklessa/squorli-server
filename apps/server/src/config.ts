@@ -14,6 +14,12 @@ const Env = z.object({
    * Default: wss://PUBLIC_DOMAIN, i.e. through the proxy. In dev without a proxy: ws://localhost:7880.
    */
   LIVEKIT_PUBLIC_URL: z.string().url().optional(),
+  /**
+   * LiveKit's media ports as published on the host (compose.yml passes the same values to LiveKit). The app server never
+   * touches them; the setup check names and probes them (docs/features/doctor.md).
+   */
+  LIVEKIT_TCP_PORT: z.coerce.number().int().min(1).max(65535).default(7881),
+  LIVEKIT_UDP_PORT: z.coerce.number().int().min(1).max(65535).default(7882),
   LIVEKIT_API_KEY: z.string().min(1),
   LIVEKIT_API_SECRET: z.string().min(16),
   STATIC_DIR: z.string().optional(),

@@ -21,6 +21,8 @@ export const Permission = {
   CONTROL_RADIO: 1 << 15,
   MOVE_MEMBERS: 1 << 16,
   BYPASS_STICKY: 1 << 17,
+  /** Reports (docs/features/reports.md, 26 September 2026): read the queue, close reports, read the moderation log. Server-wide. */
+  MANAGE_REPORTS: 1 << 18,
 } as const;
 
 export type PermissionName = keyof typeof Permission;
@@ -44,6 +46,7 @@ export const PERMISSION_LABELS: Record<PermissionName, string> = {
   CONTROL_RADIO: "Webradio in Sprachkanälen starten und stoppen",
   MOVE_MEMBERS: "Mitglieder in andere Sprachkanäle verschieben",
   BYPASS_STICKY: "Von festsetzenden Sprachkanälen nicht gehalten werden",
+  MANAGE_REPORTS: "Meldungen bearbeiten",
 };
 
 /**
@@ -57,7 +60,7 @@ export const PERMISSION_GROUPS = [
   { id: "admin", permissions: ["ADMINISTRATOR", "MANAGE_CHANNELS", "MANAGE_ROLES", "MANAGE_SERVER"] },
   { id: "text", permissions: ["VIEW_CHANNELS", "SEND_MESSAGES", "ATTACH_FILES", "MANAGE_MESSAGES"] },
   { id: "voice", permissions: ["CONNECT_VOICE", "VIEW_VIDEO", "STREAM_VIDEO", "CONTROL_RADIO", "MOVE_MEMBERS", "MODERATE_VOICE", "BYPASS_STICKY"] },
-  { id: "members", permissions: ["CREATE_INVITES", "KICK_MEMBERS", "BAN_MEMBERS"] },
+  { id: "members", permissions: ["CREATE_INVITES", "KICK_MEMBERS", "BAN_MEMBERS", "MANAGE_REPORTS"] },
 ] as const satisfies readonly { id: string; permissions: readonly PermissionName[] }[];
 
 export type PermissionGroupId = (typeof PERMISSION_GROUPS)[number]["id"];

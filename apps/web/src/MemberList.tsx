@@ -10,6 +10,8 @@ import { t } from "./i18n";
 import { assignableRoles, canSetRolesOf, topRoleOf } from "./memberRank";
 import { VoiceMemberActions } from "./VoiceMemberActions";
 import { MemberProfile, type ProfileFriends } from "./MemberProfile";
+import { ReportDialog, type ReportTarget } from "./ReportDialog";
+import { askDeleteRecentHours } from "./ReportsTab";
 import { platform } from "./platform";
 
 type Props = {
@@ -20,6 +22,8 @@ type Props = {
   channelPermissions?: Record<string, number> | undefined;
   /** Voice channel presence (channelId -> members) and channels for moderation (moving). */
   voice: Record<string, VoiceMember[]>; channels: Channel[];
+  /** The server takes reports (docs/features/reports.md): "Melden" in the member menu. */
+  canReport?: boolean; serverName?: string;
   /** M7: friends via the directory; null = no directory socket (then no entries in the menu). */
   friends: (ProfileFriends & { onMessage: (publicKey: string) => void; onRemove: (publicKey: string, name: string) => void }) | null;
   /** Phone: the list is a panel slid in from the right; a header with this close button sits on top. null = the desktop column. */
@@ -32,7 +36,8 @@ type Props = {
 };
 
 /** Right column: owners at the very top, then members grouped by highest role, online first. Context actions depending on permissions. */
-export function MemberList({ api, members, roles, myUserId, myPermissions, ownerId, channelPermissions, voice, channels, friends, onClose = null, voteKickAllowed, onVoteKick, voteKickBox }: Props) {
+export function MemberList({ api, members, roles, myUserId, myPermissions, ownerId, channelPermissions, voice, channels, friends, onClose = null, voteKickAllowed, onVoteKick, voteKickBox, canReport = false, serverName = "" }: Props) {
+  const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
   const [open, setOpen] = useState<({ userId: string } & MenuAnchor) | null>(null);
   const openMenu = (event: MouseEvent<HTMLButtonElement>, userId: string) => {
     event.preventDefault();
@@ -149,7 +154,8 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
               const canRolesOf = !!meMember && !isMe && myRoles.length > 0 && canSetRolesOf(meMember, m, roles, ownerId);
               const canOwnerOf = iAmOwner && !isMe && (!m.isOwner || m.userId !== ownerId);
               const canRemove = !isMe && !m.isOwner && (canKick || canBan);
-              return (canRolesOf || canOwnerOf || canRemove) && (
+              const canReportThis = canReport && !isMe;
+              return (canRolesOf || canOwnerOf || canRemove || canReportThis) && (
                 <div className="stack server-actions">
                   <span className="muted small menu-section-title" title={t("members.serverActionsHint")}><Icon name="server" /> {t("members.serverActions")}</span>
                   {canRolesOf && (
@@ -170,14 +176,16 @@ export function MemberList({ api, members, roles, myUserId, myPermissions, owner
                   })}><Icon name="crown" /> {m.isOwner ? t("members.revokeOwner") : t("members.makeOwner")}</button>}
                   {canRemove && <>
                     {canKick && <button role="menuitem" className="secondary small" onClick={() => run(async () => { if (await askConfirm({ title: t("members.kickTitle", { name: m.displayName }), text: t("members.kickText"), confirmLabel: t("members.kick"), danger: true })) await api.kickMember(m.userId); })}><Icon name="user-x" /> {t("members.kick")}</button>}
-                    {canBan && <button role="menuitem" className="danger small" onClick={() => run(async () => { const reason = await askInput({ title: t("members.banTitle", { name: m.displayName }), text: t("members.banText"), label: t("members.reason"), placeholder: t("members.reasonPlaceholder"), optional: true, confirmLabel: t("members.ban"), danger: true }); if (reason !== null) await api.banMember(m.userId, reason || null); })}><Icon name="ban" /> {t("members.ban")}</button>}
+                    {canBan && <button role="menuitem" className="danger small" onClick={() => run(async () => { const reason = await askInput({ title: t("members.banTitle", { name: m.displayName }), text: t("members.banText"), label: t("members.reason"), placeholder: t("members.reasonPlaceholder"), optional: true, confirmLabel: t("members.ban"), danger: true }); if (reason === null) return; const h = await askDeleteRecentHours(t("report.deleteRecentTitle", { name: m.displayName })); if (h === null) return; await api.banMember(m.userId, reason || null, h === "none" ? undefined : h); })}><Icon name="ban" /> {t("members.ban")}</button>}
                   </>}
+                  {canReportThis && <button role="menuitem" className="secondary small" onClick={() => { closeMenu(); setReportTarget({ kind: "member", userId: m.userId, name: m.displayName }); }}><Icon name="flag" /> {t("report.reportMember")}</button>}
                 </div>
               );
             })()}
           </ContextMenu>
         );
       })()}
+      {reportTarget && <ReportDialog api={api} target={reportTarget} serverName={serverName} onClose={() => setReportTarget(null)} />}
     </aside>
   );
 }

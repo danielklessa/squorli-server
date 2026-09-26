@@ -9,7 +9,8 @@ export type RailServer = { key: string; host: string; name: string; sub: string 
 /** Live state per server from the store: unread items, running voice connection, connection state. */
 /** `muted`: I have muted this server (no unread mark); `canMute`: the server is connected and keeps mutes. */
 /** `people`: how many sit in its voice channels right now, AFK channel left out (railServers.ts `voiceActivity`). */
-export type RailState = Record<string, { unread: boolean; mentions: number; voice: boolean; people: number; connection: string; muted: boolean; canMute: boolean }>;
+/** `reports`: open reports on that server for me as a moderator (0 for everybody else; docs/features/reports.md). */
+export type RailState = Record<string, { unread: boolean; mentions: number; voice: boolean; people: number; connection: string; muted: boolean; canMute: boolean; reports: number }>;
 
 type Menu = { key: string; host: string; name: string; index: number; x: number; y: number };
 
@@ -153,7 +154,7 @@ export function ServerRail({ servers, serverState, activeKey, onSelect, onDiscov
       {servers.map((s, index) => {
         const st = serverState[s.key];
         return <RailEntry key={s.key} host={s.host} name={s.name} sub={s.sub} iconUrl={s.iconUrl} current={s.key === activeKey}
-          voice={st?.voice ?? false} people={st?.people ?? 0} unread={st?.unread ?? false} mentions={st?.mentions ?? 0} muted={st?.muted ?? false}
+          voice={st?.voice ?? false} people={st?.people ?? 0} unread={st?.unread ?? false} mentions={st?.mentions ?? 0} muted={st?.muted ?? false} reports={st?.reports ?? 0}
           onOpen={() => { if (swallowClick.current) return; onSelect(s.key, s.host); }} onMenu={openMenu(s, index)} drop={dropOf(index)}
           attrs={sortable ? { "data-rail-index": index, onPointerDown: onPointerDown(index, s.key), onPointerMove, onPointerUp: (e) => endDrag(e, true), onPointerCancel: (e) => endDrag(e, false), onKeyDown: onKeyDown(index) } : { "data-rail-index": index }} />;
       })}
@@ -193,10 +194,12 @@ export function initials(name: string): string {
 export type DropMark = "source" | "before" | "after" | null;
 
 /** Round server entry: icon from the directory or initials. With `onOpen` a button (switch within the client), otherwise a link to the server. */
-export function RailEntry({ host, name, sub, iconUrl, current, voice = false, people = 0, unread = false, mentions = 0, muted = false, onOpen = null, onMenu, drop = null, attrs }: {
+export function RailEntry({ host, name, sub, iconUrl, current, voice = false, people = 0, unread = false, mentions = 0, muted = false, reports = 0, onOpen = null, onMenu, drop = null, attrs }: {
   host: string; name: string; sub: string | null; iconUrl: string | null; current: boolean; voice?: boolean;
   /** People in the server's voice channels: a speaker at the bottom left (the number only in the tooltip), so the rail shows where something is going on; not where my own voice connection runs. */
   people?: number; unread?: boolean; mentions?: number; muted?: boolean; onOpen?: (() => void) | null;
+  /** Open reports for me as a moderator of that server (docs/features/reports.md): an amber badge at the top left, on the current server too. */
+  reports?: number;
   /** Right-click: context menu (rail only). */
   onMenu?: (e: MouseEvent) => void;
   /** Drag and drop mark (rail only). */
@@ -214,6 +217,7 @@ export function RailEntry({ host, name, sub, iconUrl, current, voice = false, pe
       {voice && <span className="rail-voice" aria-label={t("rail.voiceConnected")}><Icon name="volume-2" /></span>}
       {unread && !current && <span className="rail-unread" aria-label={t("rail.unread")} />}
       {mentions > 0 && !current && <span className="rail-badge rail-mentions" aria-label={t("sidebar.mentions", { n: mentions })}>{mentions > 99 ? "99+" : mentions}</span>}
+      {reports > 0 && <span className="rail-badge rail-reports" aria-label={t("report.railOpen", { n: reports })} title={t("report.railOpen", { n: reports })}>{reports > 99 ? "99+" : reports}</span>}
     </>
   );
   const cls = `rail-item ${current ? "current" : ""} ${muted ? "muted" : ""} ${drop ? `drop-${drop}` : ""}`;

@@ -133,6 +133,8 @@ describe("permissions", () => {
     // MODERATE_VOICE), and BYPASS_STICKY frees a member from sticky voice channels.
     expect(Permission.MOVE_MEMBERS).toBe(65536);
     expect(Permission.BYPASS_STICKY).toBe(131072);
+    // Reports (26 September 2026): migration 0036 gives MANAGE_REPORTS to every role with MANAGE_MESSAGES.
+    expect(Permission.MANAGE_REPORTS).toBe(262144);
     expect(DEFAULT_EVERYONE_PERMISSIONS).toBe(1152);
     expect(DEFAULT_MEMBER_PERMISSIONS).toBe(7616 | 16384);
     expect(permissionNames(Permission.KICK_MEMBERS | Permission.BAN_MEMBERS)).toEqual(["KICK_MEMBERS", "BAN_MEMBERS"]);

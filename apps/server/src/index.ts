@@ -37,10 +37,15 @@ import { RadioMetadata } from "./radio/metadata";
 import { registerRoleRoutes } from "./routes/roles";
 import { registerSettingsRoutes } from "./routes/settings";
 import { registerStatusRoutes } from "./routes/status";
+import { registerDoctorRoutes } from "./routes/doctor";
+import { registerReportRoutes } from "./routes/reports";
+import { ReportsService } from "./reports";
+import { sweepModLog } from "./modLog";
+import { Doctor } from "./doctor";
 import { deleteUserAccount, type DeleteUserResult } from "./users/deleteUser";
 import { registerUserRoutes } from "./users/routes";
 import { DirectoryClient, SYNC_INTERVAL_MS } from "./directory";
-import { broadcastStructure, loadChannels, loadSettings, setLocalAccountsConfig } from "./state";
+import { broadcastStructure, loadChannels, loadSettings, setLocalAccountsConfig, setOpenReportCount } from "./state";
 import { setPublicOrigin } from "./names";
 import { visibility } from "./visibility";
 import { AfkMover } from "./voice/afk";
@@ -215,6 +220,8 @@ async function main() {
   await registerUserRoutes(app, db, directory, hub, presence);
   await registerSettingsRoutes(app, db, hub, config, directory, { presence, lk, onRadioChange: syncRadioMeta });
   await registerStatusRoutes(app, db, hub, presence, config);
+  // Setup self-diagnosis (docs/features/doctor.md): GET /api/doctor with MANAGE_SERVER or from the machine itself (`squorli doctor`).
+  await registerDoctorRoutes(app, db, config, new Doctor(config, directory, lk, VERSION, app.log));
   await registerChannelRoutes(app, db, hub, presence, lk);
   await registerOverwriteRoutes(app, db, hub, presence, lk);
   await registerRoleRoutes(app, db, hub, presence, lk);
@@ -236,6 +243,15 @@ async function main() {
   await registerReadStateRoutes(app, db, hub);
   await registerRadioRoutes(app, db, hub, presence, syncRadioMeta);
   await registerAttachmentRoutes(app, db, config);
+  // Reports and the moderation log (docs/features/reports.md): after the attachments (the snapshot copies their files).
+  const reportsService = new ReportsService(app, db, hub, config, app.log);
+  await reportsService.init();
+  setOpenReportCount(() => reportsService.openCount());
+  app.addHook("onClose", async () => reportsService.dispose());
+  await registerReportRoutes(app, db, hub, reportsService);
+  const modLogTimer = setInterval(() => { void sweepModLog(db).catch((err) => app.log.warn({ err }, "mod log sweep")); }, 6 * 60 * 60_000);
+  modLogTimer.unref();
+  app.addHook("onClose", async () => clearInterval(modLogTimer));
   await registerLivekitRoutes(app, db, config, presence);
   await registerWs(app, db, hub, presence, radioMeta, lk, wsLimit);
 

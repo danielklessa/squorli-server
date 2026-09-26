@@ -662,6 +662,7 @@ export function App() {
     // Muted channels and a muted server give no unread mark; mentions always count.
     unread: !s.serverMuted && Object.entries(s.unread).some(([id, u]) => u && !s.muted[id]), muted: s.serverMuted, canMute: s.readSync && s.connection === "connected", mentions: Object.values(s.mentions).reduce((n, c) => n + c, 0), voice: k === voiceHost && voice.status !== "disconnected", connection: s.connection,
     people: voiceActivity(s.voice, s.server?.settings.afkChannelId ?? null),
+    reports: s.server?.openReports ?? 0,
   }]));
   // Rail context menu: delete your account on that server, requested through the directory (own confirmation dialog, no browser dialogs).
   const leaveServer = async (host: string, name: string) => {
@@ -736,6 +737,7 @@ export function App() {
             channel={current} messages={view.active.messages[current.id] ?? { list: [], hasMore: true, loaded: false, loading: false }}
             members={view.server.members} myUserId={view.active.userId!} myPermissions={permsIn(view.server, current.id)}
             typing={view.active.typing[current.id] ?? {}} conn={view.conn}
+            canReport={view.server.openReports !== undefined} serverName={view.server.settings.name}
           />
         ) : (
           <section className="chat empty"><p className="muted">{t("app.noTextChannel")}</p></section>
@@ -765,7 +767,7 @@ export function App() {
           setStageOpen(true); setMobileContent(true); setVoicePreview(null);
         }} />}
       {voteKick && votePerson && voteKick.canVote && voteAsked !== voteKick.vote.id && <VoteKickModal state={voteKick} person={votePerson} onVote={castVote} onClose={() => setVoteAsked(voteKick.vote.id)} />}
-      {!homeOpen && view && <MemberList api={view.conn.api} members={view.server.members} roles={view.server.roles} myUserId={view.active.userId!} myPermissions={view.server.myPermissions} channelPermissions={view.server.myChannelPermissions} ownerId={view.server.settings.ownerId}
+      {!homeOpen && view && <MemberList api={view.conn.api} members={view.server.members} roles={view.server.roles} myUserId={view.active.userId!} myPermissions={view.server.myPermissions} channelPermissions={view.server.myChannelPermissions} ownerId={view.server.settings.ownerId} canReport={view.server.openReports !== undefined} serverName={view.server.settings.name}
         voice={view.active.voice} channels={view.server.channels} friends={state.serverAccounts[view.active.host] ? null : friendsMenu} onClose={mobile ? () => setMobileMembers(false) : null}
         voteKickAllowed={view.active.voteKickAllowed} onVoteKick={(userId, channelId) => startVoteKick(view.active.host, channelId, userId)}
         voteKickBox={voiceHost === activeHost ? <VoteKickPanel state={voteKick} result={voteKickResult} person={votePerson} onVote={castVote} /> : null} />}

@@ -17,7 +17,7 @@ const OWNER_FILE = join(dirname(fileURLToPath(import.meta.url)), ".smoke-owner.j
 const hex = (b) => Buffer.from(b).toString("hex");
 let failures = 0;
 const check = (label, ok, detail = "") => { console.log(`${ok ? "ok  " : "FAIL"} ${label}${detail ? " " + detail : ""}`); if (!ok) failures++; };
-const P = { ADMINISTRATOR: 1, MANAGE_CHANNELS: 4, KICK_MEMBERS: 16, VIEW_CHANNELS: 128, SEND_MESSAGES: 256, MANAGE_MESSAGES: 512, CONNECT_VOICE: 1024, ATTACH_FILES: 2048, STREAM_VIDEO: 4096, MODERATE_VOICE: 8192, VIEW_VIDEO: 16384, CONTROL_RADIO: 32768, MOVE_MEMBERS: 65536, BYPASS_STICKY: 131072 };
+const P = { ADMINISTRATOR: 1, MANAGE_CHANNELS: 4, KICK_MEMBERS: 16, VIEW_CHANNELS: 128, SEND_MESSAGES: 256, MANAGE_MESSAGES: 512, CONNECT_VOICE: 1024, ATTACH_FILES: 2048, STREAM_VIDEO: 4096, MODERATE_VOICE: 8192, VIEW_VIDEO: 16384, CONTROL_RADIO: 32768, MOVE_MEMBERS: 65536, BYPASS_STICKY: 131072, MANAGE_REPORTS: 262144 };
 
 async function api(method, path, body, token, raw = false, extraHeaders = {}) {
   const headers = { ...extraHeaders };
@@ -412,6 +412,24 @@ check("listing: description too long -> 400", sldBad === 400);
   const [sOld] = await api("GET", `/api/status?key=${keyRes.key}`);
   const [sNew] = await api("GET", `/api/status?key=${reKey.key}`);
   check("status api: regenerate replaces the key", reKey.key !== keyRes.key && sOld === 401 && sNew === 200);
+
+  // ---------- Setup check (docs/features/doctor.md): the report for MANAGE_SERVER and for the machine itself, the media test token
+  const [dcB] = await api("GET", "/api/doctor", undefined, B.token);
+  check("doctor: the report needs MANAGE_SERVER", dcB === 403);
+  const [dcOwner, docRep] = await api("GET", "/api/doctor", undefined, owner.token);
+  const statuses = ["ok", "warn", "fail", "skip"];
+  check("doctor: the owner gets the report, first the request's own view, every check with both texts",
+    dcOwner === 200 && Array.isArray(docRep.checks) && docRep.checks.length >= 6 && docRep.checks[0].id === "request"
+      && docRep.checks.every((c) => typeof c.text?.de === "string" && typeof c.text?.en === "string" && statuses.includes(c.status)) && typeof docRep.mediaPorts?.tcp === "number");
+  check("doctor: the server reaches its own address and LiveKit (dev: the self check and the internal ping)",
+    ["self", "websocket", "rtc", "livekit"].every((id) => docRep.checks.find((c) => c.id === id)?.status === "ok"), JSON.stringify(docRep.checks.filter((c) => c.status !== "ok").map((c) => [c.id, c.status, c.detail])));
+  const [dcLoop, loopRep] = await api("GET", "/api/doctor");
+  check("doctor: from the machine itself without a session (squorli doctor), without the request view", dcLoop === 200 && Array.isArray(loopRep.checks) && loopRep.checks[0].id !== "request");
+  const [dcFwd] = await api("GET", "/api/doctor", undefined, undefined, false, { "x-forwarded-for": "203.0.113.5" });
+  check("doctor: a forwarded request without a session is refused", dcFwd === 401);
+  const [dtB] = await api("POST", "/api/doctor/rtc-token", undefined, B.token);
+  const [dtO, dtok] = await api("POST", "/api/doctor/rtc-token", undefined, owner.token);
+  check("doctor: the media test token only with MANAGE_SERVER", dtB === 403 && dtO === 200 && typeof dtok.token === "string" && typeof dtok.url === "string");
   await api("PATCH", "/api/settings", { statusApi: "public" }, owner.token);
   const [sPub, stPub] = await api("GET", "/api/status");
   check("status api: public -> 200 without a key", sPub === 200 && Array.isArray(stPub.members));
@@ -480,6 +498,65 @@ await api("PUT", `/api/members/${B.userId}/roles`, { roleIds: [memberRole.id, mo
 const [so3] = await api("PUT", `/api/members/${B.userId}/owner`, { owner: false }, owner.token);
 const [, stOwn2] = await api("GET", "/api/state", undefined, B.token);
 check("revoke owner -> back to role permissions", so3 === 200 && stOwn2.members.find((m) => m.userId === B.userId)?.isOwner === false && (stOwn2.myPermissions & P.ADMINISTRATOR) === 0 && stOwn2.members.find((m) => m.userId === owner.userId)?.isOwner === true);
+  // ---------- Reports and the moderation log (docs/features/reports.md)
+  {
+    const textCh = ownerState.channels.find((c) => c.kind === "text");
+    const [, stR] = await api("GET", "/api/state", undefined, B.token);
+    check("reports: the state carries the open count (0 for a member without MANAGE_REPORTS)", stR.openReports === 0);
+    const [, stO] = await api("GET", "/api/state", undefined, owner.token);
+    const openBefore = stO.openReports;
+    check("reports: the owner sees the open count", typeof openBefore === "number");
+    // B writes a message with an attachment, the owner reports it (B cannot report their own).
+    const form = new FormData(); form.append("file", new Blob([Buffer.from("evidence")], { type: "text/plain" }), "beweis.txt");
+    const [, upR] = await api("POST", "/api/attachments", form, B.token);
+    const [, repMsg] = await api("POST", `/api/channels/${textCh.id}/messages`, { content: "gemeldet wird das hier", attachmentIds: [upR.id] }, B.token);
+    const [rOwn] = await api("POST", "/api/reports", { kind: "message", messageId: repMsg.id, reason: "spam" }, B.token);
+    check("reports: one's own message cannot be reported", rOwn === 400);
+    const [rBad] = await api("POST", "/api/reports", { kind: "message", messageId: repMsg.id, reason: "nope" }, owner.token);
+    check("reports: an unknown reason is refused", rBad === 400);
+    const [r1, rep1] = await api("POST", "/api/reports", { kind: "message", messageId: repMsg.id, reason: "harassment", text: "siehe Anhang" }, owner.token);
+    check("reports: a message report is accepted", r1 === 200 && typeof rep1.id === "string", `${r1}`);
+    const [r2] = await api("POST", "/api/reports", { kind: "message", messageId: repMsg.id, reason: "spam" }, owner.token);
+    check("reports: the same reporter and message only once while open", r2 === 409);
+    const [r3, rep3] = await api("POST", "/api/reports", { kind: "member", userId: B.userId, reason: "other", text: "allgemein" }, owner.token);
+    check("reports: a member report is accepted", r3 === 200 && typeof rep3.id === "string");
+    const [qB] = await api("GET", "/api/reports", undefined, B.token);
+    check("reports: the queue needs MANAGE_REPORTS", qB === 403);
+    const [qS, queue] = await api("GET", "/api/reports?status=open", undefined, owner.token);
+    const mine = queue.reports?.find((r) => r.id === rep1.id);
+    check("reports: the queue lists the report with the snapshot (text, author, attachment copy, channel)", qS === 200 && queue.open === openBefore + 2 && !!mine && mine.snapshot?.content === "gemeldet wird das hier"
+      && mine.reportedUserId === B.userId && mine.channelName === textCh.name && mine.messageExists === true && mine.snapshot.attachments.length === 1 && mine.text === "siehe Anhang", JSON.stringify(mine));
+    const fileRes = await fetch(BASE + mine.snapshot.attachments[0].url);
+    check("reports: the attachment copy is served with its signed link", fileRes.status === 200 && (await fileRes.text()) === "evidence", `${fileRes.status}`);
+    const fileBad = await fetch(BASE + mine.snapshot.attachments[0].url.replace(/s=[^&]+/, "s=forged"));
+    check("reports: a forged link is a 404", fileBad.status === 404);
+    // Deleting the reported message through the queue: the message goes, B gets the notice, the report is closed, the log has it.
+    const wsB2 = await connectWs(B.token);
+    const noticeP = wsB2.waitFor((e) => e.type === "moderation.notice");
+    const delP = wsB2.waitFor((e) => e.type === "message.delete" && e.id === repMsg.id);
+    const [cS, cR] = await api("POST", `/api/reports/${rep1.id}/close`, { action: "delete", note: "weg damit" }, owner.token);
+    const notice = await noticeP; const delEv = await delP;
+    check("reports: closing with delete removes the message, tells the author (no reporter) and counts", cS === 200 && cR.deleted === 1 && notice.kind === "message_removed" && notice.channelName === textCh.name && !("reporter" in notice) && !!delEv);
+    const [cAgain] = await api("POST", `/api/reports/${rep1.id}/close`, { action: "dismiss" }, owner.token);
+    check("reports: a closed report cannot be closed again", cAgain === 409);
+    const [, closedQ] = await api("GET", "/api/reports?status=closed", undefined, owner.token);
+    const closed = closedQ.reports?.find((r) => r.id === rep1.id);
+    check("reports: the closed list shows result, note and that the message is gone; the snapshot stays", !!closed && closed.status === "actioned" && closed.action === "delete" && closed.note === "weg damit" && closed.messageExists === false && closed.snapshot?.content === "gemeldet wird das hier");
+    // Delete recent messages of the reported member through the member report, then the log.
+    await api("POST", `/api/channels/${textCh.id}/messages`, { content: "noch eine" }, B.token);
+    await api("POST", `/api/channels/${textCh.id}/messages`, { content: "und noch eine" }, B.token);
+    const bulkP = wsB2.waitFor((e) => e.type === "message.bulkDelete" && e.channelId === textCh.id);
+    const [c3S, c3R] = await api("POST", `/api/reports/${rep3.id}/close`, { action: "deleteRecent", hours: 1 }, owner.token);
+    const bulk = await bulkP;
+    check("reports: deleteRecent removes the member's recent messages with one bulk event per channel", c3S === 200 && c3R.deleted >= 2 && bulk.ids.length >= 2, `${c3S} ${c3R.deleted}`);
+    const [lgB] = await api("GET", "/api/mod-log", undefined, B.token);
+    const [lgS, lg] = await api("GET", "/api/mod-log", undefined, owner.token);
+    const closedEntries = lg.entries?.filter((e) => e.action === "report_closed") ?? [];
+    check("reports: the moderation log needs MANAGE_REPORTS and holds the closings without message contents", lgB === 403 && lgS === 200 && closedEntries.length >= 2 && closedEntries.every((e) => JSON.stringify(e).indexOf("gemeldet wird das hier") === -1) && closedEntries.some((e) => e.detail.result === "delete" && e.targetUserId === B.userId));
+    const [, stO2] = await api("GET", "/api/state", undefined, owner.token);
+    check("reports: the open count is back where it was", stO2.openReports === openBefore);
+    await wsB2.close();
+  }
 
 // ---------- Server icon (admin): upload, serving, favicon URL in /api/health, rejections, removal
 const PNG1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");

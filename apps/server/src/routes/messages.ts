@@ -8,6 +8,8 @@ import type { Db } from "../db";
 import { attachments, channels, messages } from "../db/schema";
 import type { Hub } from "../hub";
 import { visiblePreviews, type LinkPreviews } from "../previews/service";
+import { recordModLog, userNameOf } from "../modLog";
+import { displayNameOf } from "@squorli/protocol";
 
 const PAGE = 50;
 const Params = { type: "object", properties: { id: { type: "string", format: "uuid" } }, required: ["id"] } as const;
@@ -126,6 +128,8 @@ export async function registerMessageRoutes(app: FastifyInstance, db: Db, hub: H
     await db.delete(messages).where(eq(messages.id, row.id)); // Attachments cascade in the DB
     await app.removeAttachmentFiles(files.map((f) => f.id));
     hub.broadcastToChannel(row.channelId, { type: "message.delete", channelId: row.channelId, id: row.id });
+    // Somebody else's message: a moderation action, into the log (docs/features/reports.md); one's own is nobody's business.
+    if (row.authorId !== m.userId) await recordModLog(db, { actorId: m.userId, actorName: displayNameOf(m), targetUserId: row.authorId, targetName: await userNameOf(db, row.authorId), action: "message_delete", channelId: row.channelId, channelName: r.channel.name, detail: { attachments: files.length } }, req.log);
     return { ok: true };
   });
 }

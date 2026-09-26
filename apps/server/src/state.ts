@@ -30,6 +30,7 @@ export async function loadSettings(db: Db): Promise<ServerSettings> {
     afkChannelId: row.afkChannelId,
     iconUrl: row.iconMime && row.iconUpdatedAt ? `/api/server-icon?v=${row.iconUpdatedAt.getTime()}` : null,
     statusApi: row.statusApi, statusApiRoleId: row.statusApiRoleId,
+    doctor: true, // the setup check exists (docs/features/doctor.md)
   };
 }
 
@@ -138,6 +139,10 @@ export function visibleChannels(all: Channel[], masks: Map<string, number>, ctx:
   return all.filter((c) => hasPermission(masks.get(c.id) ?? 0, Permission.VIEW_CHANNELS)).map((c) => ({ ...c, private: ctx.markedPrivate.has(c.id) }));
 }
 
+/** Set by index.ts once the reports service exists (state.ts must not import it: reports.ts imports the visibility, which state.ts feeds). */
+export let openReportCount: (db: Db) => Promise<number> = async () => 0;
+export function setOpenReportCount(fn: (db: Db) => Promise<number>): void { openReportCount = fn; }
+
 /** A category is left out when the user may not see the category itself, whatever it holds (predictable, the admin's explicit choice). */
 export function visibleCategories(all: Category[], masks: Map<string, number>): Category[] {
   return all.filter((k) => hasPermission(masks.get(k.id) ?? 0, Permission.VIEW_CHANNELS));
@@ -155,6 +160,8 @@ export async function loadState(db: Db, hub: Hub, userId: string): Promise<Serve
     settings, categories: visibleCategories(cats, masks), channels: visibleChannels(chans, masks, ctx), roles: rs, members: mems, radioStations: stations,
     importSources: ["discord-template"], myPermissions: actor?.permissions ?? 0,
     myChannelPermissions: visibleMasks(masks), myVoiceLock: visibility.voiceLockOf(userId),
+    // Reports (docs/features/reports.md): the open count only for whoever handles them; the field's presence tells the client the server takes reports.
+    openReports: actor && hasPermission(actor.permissions, Permission.MANAGE_REPORTS) ? await openReportCount(db) : 0,
   };
 }
 

@@ -3,7 +3,7 @@ import {
   AvatarUpdateResponse, avatarDigest, directoryAvatarPayload,
   BackupBlob, BackupParamsResponse, challengeMessage, createBackup, deriveBackupKeys, directoryActionMessage, directoryBackupMessage, directoryProfilePayload,
   directoryRegisterMessage, directorySoundSettingsPayload, openBackup, type AccountSettings, type SealedSettings, type SoundSettings,
-  MuteState, ReadStateResponse, StatusApiKeyResponse, type Attachment, type Category, type Channel, type RadioStation, type Role, type StatusApiMode,
+  MuteState, ReadStateResponse, StatusApiKeyResponse, DoctorReport, ReportsResponse, ModLogResponse, type CreateReportRequest, type CloseReportRequest, type DeleteRecentHours, type Attachment, type Category, type Channel, type RadioStation, type Role, type StatusApiMode,
   type DiscordImportRequest, type DiscordImportResult, type ImportPlan,
   LocalBackupBlob, LocalBackupParamsResponse, LocalHandle, LocalHandleResponse, localRegisterMessage,
   DmBlobPutResponse, LinkLookupResponse, directoryDmBlobUrl, directoryLinkLookupPayload, OverwritesResponse, type PermissionOverwrite, type ChannelNotification, type ChannelBlock, type ChannelBlockMinutes,
@@ -182,6 +182,9 @@ export class ServerApi {
   /** Status API (docs/features/status-api.md): the key for mode "key" (MANAGE_SERVER), and a fresh one that replaces it. */
   getStatusApiKey() { return this.request<StatusApiKeyResponse>("GET", "/api/settings/status-api-key").then((r) => StatusApiKeyResponse.parse(r)); }
   regenerateStatusApiKey() { return this.request<StatusApiKeyResponse>("POST", "/api/settings/status-api-key").then((r) => StatusApiKeyResponse.parse(r)); }
+  /** Setup check (docs/features/doctor.md, MANAGE_SERVER): the server's report, and a token for the browser's media test. */
+  doctor() { return this.request<DoctorReport>("GET", "/api/doctor").then((r) => DoctorReport.parse(r)); }
+  doctorRtcToken() { return this.request<RtcTokenResponse>("POST", "/api/doctor/rtc-token").then((r) => RtcTokenResponse.parse(r)); }
   /** Server icon (PNG/JPEG/WebP/GIF, 2 MB); appears in the sidebar and as the favicon. */
   async uploadServerIcon(file: File): Promise<{ ok: true; iconUrl: string | null }> {
     const form = new FormData();
@@ -233,7 +236,13 @@ export class ServerApi {
   /** Vote kick (docs/features/votekick.md): start a vote about somebody in the voice channel one sits in; the result arrives over the WebSocket. */
   startVoteKick(channelId: string, targetId: string) { return this.request("POST", `/api/channels/${channelId}/votekick`, { targetId }); }
   castVoteKick(channelId: string, yes: boolean) { return this.request("POST", `/api/channels/${channelId}/votekick/vote`, { yes }); }
-  banMember(userId: string, reason: string | null) { return this.request("POST", "/api/bans", { userId, reason }); }
+  /** `deleteMessagesHours` (docs/features/reports.md): also delete the member's messages of the last hour, day or week. */
+  banMember(userId: string, reason: string | null, deleteMessagesHours?: DeleteRecentHours) { return this.request<{ ok: true; deleted?: number }>("POST", "/api/bans", { userId, reason, ...(deleteMessagesHours ? { deleteMessagesHours } : {}) }); }
+  // ---------- Reports (docs/features/reports.md)
+  createReport(body: CreateReportRequest) { return this.request<{ id: string }>("POST", "/api/reports", body); }
+  listReports(status: "open" | "closed") { return this.request<ReportsResponse>("GET", `/api/reports?status=${status}`).then((r) => ReportsResponse.parse(r)); }
+  closeReport(id: string, body: CloseReportRequest) { return this.request<{ ok: true; deleted: number }>("POST", `/api/reports/${id}/close`, body); }
+  listModLog(before: string | null) { return this.request<ModLogResponse>("GET", `/api/mod-log${before ? `?before=${encodeURIComponent(before)}` : ""}`).then((r) => ModLogResponse.parse(r)); }
   unban(userId: string) { return this.request("DELETE", `/api/bans/${userId}`); }
   listBans() { return this.request<Ban[]>("GET", "/api/bans").then((b) => z.array(Ban).parse(b)); }
   createInvite(data: { expiresInHours?: number | null; maxUses?: number | null }) { return this.request<Invite>("POST", "/api/invites", data).then((i) => Invite.parse(i)); }

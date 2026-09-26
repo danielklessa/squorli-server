@@ -2,7 +2,7 @@
 
 Part of the project description. The entry point is the root [AGENTS.md](../../AGENTS.md) (commands, definition of done, cross-cutting conventions, the map of all documentation in its section 0). Whoever adds, removes or repurposes a file of the client, or changes a convention or pitfall, updates this file in the same step.
 
-**After every client change:** `pnpm build` from the repo root and tell the user to reload (root `AGENTS.md` section 4, item 7); after a new `<Icon name>` run `pnpm icons`; after a dependency change `pnpm run licenses`.
+**After every client change:** `pnpm build` from the repo root and tell the user to reload (root `AGENTS.md` section 4, item 7); after a new `<Icon name>` run `pnpm icons`; after a dependency change `pnpm run licenses`. `tools/icons.mjs` collects only literal `<Icon name="...">` occurrences: an icon name kept in a record or variable never reaches the font subset and renders as nothing (found 26 September 2026 with the setup check's warning triangle); write the JSX literally per case.
 
 ## Feature notes: read before touching these files
 
@@ -20,6 +20,8 @@ Part of the project description. The entry point is the root [AGENTS.md](../../A
 | `markdown.ts`, `MessageText.tsx`, `AutoGrowTextarea.tsx`, `autoGrow.ts`, the composers in `ChatView.tsx` / `DmView.tsx` | `docs/features/markdown-input.md` |
 | `emoji/`, `EmojiPicker.tsx` | `docs/features/emoji.md` |
 | `SettingsDialog.tsx`, `MiniProfile.tsx`, `accountSettings.ts`, `voice/settings.ts` | `docs/features/settings.md` |
+| `ReportDialog.tsx` (reason list, free text, whom it goes to), `ReportsTab.tsx` (Verwaltung > Meldungen: the queue with snapshots and actions, the closed list, the moderation log; `askDeleteRecentHours`), `askSelect` in `dialogs.tsx`, the flag in `ChatView.tsx`'s message actions (`canReport`), "Melden" and the ban's delete choice in `MemberList.tsx`, the amber `reports` badge in `ServerRail.tsx` (`RailState.reports`, fed by App.tsx from `openReports`), the events `message.bulkDelete`, `reports.count`, `moderation.notice` in `serverConnection.ts`, the `report.*` texts | `docs/features/reports.md` |
+| `DoctorSection` in `AdminPanel.tsx`, `doctorMedia.ts` (the browser's media test: `runMediaCheck` connects a LiveKit room `doctor-<userId>` and reads the selected ICE pair, `selectedPath`/`classifyMedia`/`isPrivateAddress` pure and tested), `api.doctor()`/`api.doctorRtcToken()`, the `admin.doctor*` texts, `.doctor-*` in `styles.css` | `docs/features/doctor.md` (the server's texts come in both languages inside the report; the client shows `text[locale]`) |
 | `StatusApiSection` in `AdminPanel.tsx`, the mute icons in `Sidebar.tsx`, the `voice.status` effect in `App.tsx`, `voiceStatus` in `serverConnection.ts` | `docs/features/status-api.md` |
 | `AdminPanel.tsx`, `ChannelsTab.tsx`, `roleOrder.ts`, `channelOrder.ts`, `ContextMenu.tsx`, `Avatar.tsx`, general look | `docs/features/ui-admin.md`, brand: `docs/brand/AGENTS.md` |
 | `memberRank.ts` (the server's rank rules for the member menu: which members' roles I may change, which roles I may give; tested), the "Rollen" submenu in `MemberList.tsx`; header controls' common height (`--head-control-h` in `styles.css`) | `docs/features/ui-admin.md` (entries of 19 September 2026) |

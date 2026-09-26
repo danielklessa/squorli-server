@@ -17,10 +17,12 @@ Code: `apps/server/src/rateLimits.ts` (the limits, the `onRequest` hook, `Window
 | opening `/api/ws` | IP | 60 / minute |
 | `GET /api/invites/:code` (public preview) | IP | 30 / minute |
 | `GET /api/status` | IP | 60 / minute |
+| `GET /api/doctor` (the setup check, 26 September 2026: every run opens connections outward and re-registers at the directory) | IP | 10 / minute |
 | `POST /api/directory/notify` and `/leave` (no proof; each makes the server ask the directory) | IP | 120 / minute |
 | every `POST`/`PUT`/`PATCH`/`DELETE` | session | 180 / minute |
 | `POST /api/channels/:id/messages` | session | 15 / 10 seconds (over all channels; slowmode stays per channel) |
 | `POST /api/attachments` | session | 30 / minute |
+| `POST /api/reports` (docs/features/reports.md, 26 September 2026) | session | 10 / hour |
 | events on one WebSocket (before and after `hello`) | connection | 60 / 10 seconds, then close **4008** `rate limited` |
 
 - *WebSocket:* the close code only, no `error` event: the protocol's `ServerEvent` error codes have no `rate_limited`, and an older client would fail to parse a new one. The client reconnects with its usual backoff (a code it does not know).

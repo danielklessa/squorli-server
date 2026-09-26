@@ -8,6 +8,9 @@ import type { Config } from "../config";
  * follows along; enforcement happens here, though, regardless of whether the client cooperates.
  * All calls are best effort: if the participant is not (or no longer) in the room, nothing happens.
  */
+/** Rooms of the setup check's media test (docs/features/doctor.md): `doctor-<userId>`, never a channel. */
+export const DOCTOR_ROOM_PREFIX = "doctor-";
+
 export class LivekitAdmin {
   private readonly svc: RoomServiceClient;
   private snapshot: { at: number; rooms: Promise<Map<string, string> | null> } | null = null;
@@ -26,7 +29,7 @@ export class LivekitAdmin {
       try {
         const out = new Map<string, string>();
         for (const room of await this.svc.listRooms()) {
-          if (room.numParticipants === 0) continue;
+          if (room.numParticipants === 0 || room.name.startsWith(DOCTOR_ROOM_PREFIX)) continue; // the setup check's rooms are no channels
           for (const p of await this.svc.listParticipants(room.name)) out.set(p.identity, room.name);
         }
         return out;
@@ -37,6 +40,24 @@ export class LivekitAdmin {
     })();
     this.snapshot = { at: Date.now(), rooms };
     return rooms;
+  }
+
+  /**
+   * Is LiveKit reachable with our key and secret (the setup check, docs/features/doctor.md)? "auth" = it answered but refused
+   * the key (LIVEKIT_API_KEY/SECRET differ from the container's LIVEKIT_KEYS), "unreachable" = no answer at LIVEKIT_URL.
+   */
+  async ping(): Promise<{ ok: true } | { ok: false; kind: "auth" | "unreachable"; detail: string }> {
+    try {
+      await this.svc.listRooms();
+      return { ok: true };
+    } catch (err) {
+      const e = err as { code?: unknown; status?: unknown; message?: unknown; cause?: { code?: unknown } };
+      const status = typeof e.status === "number" ? e.status : null;
+      const code = typeof e.code === "string" ? e.code : typeof e.cause?.code === "string" ? e.cause.code : null;
+      const detail = status ? `status ${status}` : code ?? (typeof e.message === "string" ? e.message : String(err));
+      const auth = status === 401 || status === 403 || code === "unauthenticated" || code === "permission_denied" || /unauth|permission|invalid api key/i.test(detail);
+      return { ok: false, kind: auth ? "auth" : "unreachable", detail };
+    }
   }
 
   /** Mute a participant's camera and/or screen tracks (including screen audio). */

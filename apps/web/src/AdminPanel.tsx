@@ -1,4 +1,4 @@
-import { PERMISSION_GROUPS, Permission, hasPermission, type Ban, type Invite, type PermissionName, type Role, type ServerState, type StatusApiMode } from "@squorli/protocol";
+import { PERMISSION_GROUPS, Permission, hasPermission, type Ban, type DoctorReport, type DoctorStatus, type Invite, type PermissionName, type Role, type ServerState, type StatusApiMode } from "@squorli/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { ServerApi } from "./api";
 import { askConfirm } from "./dialogs";
@@ -11,10 +11,12 @@ import { SaveButton } from "./SaveButton";
 import { formatDeepLink, parseDeepLink } from "./platform/deepLink";
 import { RadioTab } from "./RadioTab";
 import { ImportTab } from "./ImportTab";
+import { ReportsTab } from "./ReportsTab";
 import { Icon } from "./Icon";
-import { fmtDateTime, t } from "./i18n";
+import { fmtDateTime, locale, t } from "./i18n";
+import { runMediaCheck, type MediaCheckResult } from "./doctorMedia";
 
-type Tab = "server" | "channels" | "radio" | "roles" | "invites" | "bans" | "import";
+type Tab = "server" | "channels" | "radio" | "roles" | "invites" | "bans" | "reports" | "import";
 
 /** Admin area: server, categories/channels, radio stations, roles, invites, bans. Changes come back via the structure event. */
 export function AdminPanel({ api, server, myUserId, directoryUrl, onClose, onEditChannel }: { api: ServerApi; server: ServerState; myUserId: string; directoryUrl: string | null; onClose: () => void; onEditChannel: (target: ChannelDialogTarget) => void }) {
@@ -28,6 +30,8 @@ export function AdminPanel({ api, server, myUserId, directoryUrl, onClose, onEdi
     { id: "roles", label: t("admin.tab.roles"), icon: "shield", ok: hasPermission(p, Permission.MANAGE_ROLES) },
     { id: "invites", label: t("admin.tab.invites"), icon: "link", ok: hasPermission(p, Permission.CREATE_INVITES) },
     { id: "bans", label: t("admin.tab.bans"), icon: "ban", ok: hasPermission(p, Permission.BAN_MEMBERS) },
+    // Reports (docs/features/reports.md): only against a server that takes them (the count field is the flag).
+    { id: "reports", label: t("admin.tab.reports"), icon: "flag", ok: hasPermission(p, Permission.MANAGE_REPORTS) && server.openReports !== undefined },
     // Import of a Discord template: creates channels and roles, so both rights; only against a server that offers the source.
     { id: "import", label: t("admin.tab.import"), icon: "import", ok: hasPermission(p, Permission.MANAGE_CHANNELS) && hasPermission(p, Permission.MANAGE_ROLES) && (server.importSources?.includes("discord-template") ?? false) },
   ];
@@ -49,7 +53,7 @@ export function AdminPanel({ api, server, myUserId, directoryUrl, onClose, onEdi
         {/* categories always on the left (as the user specified for all categorized modals) */}
         <div className="settings-layout">
           <nav className="settings-nav">
-            {tabs.map((t) => <button key={t.id} className={tab === t.id ? "active" : ""} aria-current={tab === t.id ? "page" : undefined} onClick={() => { setTab(t.id); setErr(null); }}><Icon name={t.icon} /> <span>{t.label}</span></button>)}
+            {tabs.map((t) => <button key={t.id} className={tab === t.id ? "active" : ""} aria-current={tab === t.id ? "page" : undefined} onClick={() => { setTab(t.id); setErr(null); }}><Icon name={t.icon} /> <span>{t.label}</span>{t.id === "reports" && (server.openReports ?? 0) > 0 && <span className="nav-badge">{server.openReports}</span>}</button>)}
           </nav>
           <div className="settings-body">
             {err && <p className="error">{err}</p>}
@@ -59,6 +63,7 @@ export function AdminPanel({ api, server, myUserId, directoryUrl, onClose, onEdi
             {tab === "roles" && <RolesTab api={api} server={server} myUserId={myUserId} run={run} save={save} />}
             {tab === "invites" && <InvitesTab api={api} run={run} canManage={hasPermission(p, Permission.MANAGE_SERVER)} />}
             {tab === "bans" && <BansTab api={api} run={run} />}
+            {tab === "reports" && <ReportsTab api={api} myPermissions={p} run={run} openCount={server.openReports ?? 0} />}
             {tab === "import" && <ImportTab api={api} server={server} run={run} />}
           </div>
         </div>
@@ -108,6 +113,7 @@ function ServerTab({ api, server, directoryUrl, run, save }: { api: ServerApi; s
       </div>
       <span className="muted small">{t("admin.iconHint")}</span>
       {server.settings.statusApi !== undefined && <StatusApiSection api={api} mode={server.settings.statusApi} roleId={server.settings.statusApiRoleId ?? null} roles={server.roles} run={run} />}
+      {server.settings.doctor && <DoctorSection api={api} run={run} />}
       <h3>{t("admin.ownersHeading")}</h3>
       <p className="muted small">{owners.map((o) => o.displayName).join(", ") || "–"}. {t("admin.ownersHint")}</p>
     </div>
@@ -169,6 +175,67 @@ function StatusApiSection({ api, mode, roleId, roles, run }: { api: ServerApi; m
         </>
       )}
       {mode === "public" && <span className="muted small">{t("admin.statusApiPublicHint")}</span>}
+    </>
+  );
+}
+
+/**
+ * Setup check (docs/features/doctor.md): the server's report (its own address, LiveKit, the directory, and the directory's view
+ * from outside) with texts in the client's language, plus the browser's own media connection, which is the UDP check.
+ */
+function DoctorSection({ api, run }: { api: ServerApi; run: RunFn }) {
+  const [report, setReport] = useState<DoctorReport | null>(null);
+  const [media, setMedia] = useState<MediaCheckResult | "running" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const start = () => run(async () => {
+    setBusy(true); setReport(null); setMedia("running");
+    try {
+      const [r, m] = await Promise.all([api.doctor(), runMediaCheck(api).catch((e): MediaCheckResult => ({ kind: "signal-failed", error: String(e), ms: 0 }))]);
+      setReport(r); setMedia(m);
+    } catch (e) { setMedia(null); throw e; } finally { setBusy(false); }
+  });
+  // Literal <Icon name> per state: tools/icons.mjs collects the names it finds in the source, a name inside a record stays out of the font.
+  const statusIcon = (s: DoctorStatus) => s === "ok" ? <Icon name="check" /> : s === "warn" ? <Icon name="triangle-alert" /> : s === "fail" ? <Icon name="x" /> : <Icon name="minus" />;
+  const mediaLine = (m: MediaCheckResult, r: DoctorReport | null): { status: DoctorStatus; text: string } => {
+    const ports = { tcp: r?.mediaPorts.tcp ?? 7881, udp: r?.mediaPorts.udp ?? 7882 };
+    switch (m.kind) {
+      case "ok": return { status: "ok", text: t("admin.doctorMedia.ok", { address: m.path.address, port: m.path.port ?? "?", ms: m.ms }) };
+      case "tcp-only": return { status: "warn", text: t("admin.doctorMedia.tcpOnly", { address: m.path.address, port: m.path.port ?? "?", ms: m.ms, udp: ports.udp }) };
+      case "relay": return { status: "warn", text: t("admin.doctorMedia.relay", { address: m.path.address, ms: m.ms }) };
+      case "private-address": return { status: "warn", text: t("admin.doctorMedia.private", { address: m.path.address }) };
+      case "connected-unknown": return { status: "ok", text: t("admin.doctorMedia.unknown", { ms: m.ms }) };
+      case "media-failed": return { status: "fail", text: t("admin.doctorMedia.mediaFailed", { ...ports, error: m.error }) };
+      case "not-allowed": return { status: "fail", text: t("admin.doctorMedia.notAllowed", { error: m.error }) };
+      case "signal-failed": return { status: "fail", text: t("admin.doctorMedia.signalFailed", { url: r?.livekitPublicUrl ?? "LiveKit", error: m.error }) };
+    }
+  };
+  const ml = media && media !== "running" ? mediaLine(media, report) : null;
+  return (
+    <>
+      <h3>{t("admin.doctorHeading")}</h3>
+      <span className="muted small">{t("admin.doctorHint")}</span>
+      <div className="row"><button className="secondary" disabled={busy} onClick={start}>{busy ? t("admin.doctorRunning") : t("admin.doctorRun")}</button></div>
+      {report && (
+        <>
+          <h4 className="doctor-sub">{t("admin.doctorServerHeading")}</h4>
+          <ul className="doctor-list" role="status">
+            {report.checks.map((c) => (
+              <li key={c.id} className={`doctor-${c.status}`}>{statusIcon(c.status)}<span>{c.text[locale]}{c.detail && <span className="muted small"> ({c.detail})</span>}</span></li>
+            ))}
+          </ul>
+        </>
+      )}
+      {media && (
+        <>
+          <h4 className="doctor-sub">{t("admin.doctorBrowserHeading")}</h4>
+          <ul className="doctor-list" role="status">
+            {media === "running"
+              ? <li className="doctor-skip"><Icon name="minus" /><span>{t("admin.doctorMedia.running")}</span></li>
+              : <li className={`doctor-${ml!.status}`}>{statusIcon(ml!.status)}<span>{ml!.text}</span></li>}
+          </ul>
+        </>
+      )}
+      {report && <span className="muted small">{t("admin.doctorFooter", { tcp: report.mediaPorts.tcp, udp: report.mediaPorts.udp, url: report.livekitPublicUrl })}</span>}
     </>
   );
 }

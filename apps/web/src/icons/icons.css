@@ -78,6 +78,7 @@
 .ic-thumbs-up::before { content: "\e18a"; }
 .ic-timer::before { content: "\e1e0"; }
 .ic-trash-2::before { content: "\e18e"; }
+.ic-triangle-alert::before { content: "\e193"; }
 .ic-trophy::before { content: "\e377"; }
 .ic-undo-2::before { content: "\e2a1"; }
 .ic-user::before { content: "\e19f"; }

@@ -246,6 +246,20 @@
       "when": 1790364751118,
       "tag": "0034_hash_session_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1790374719316,
+      "tag": "0035_big_wolfpack",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1790374768885,
+      "tag": "0036_reports_permission",
+      "breakpoints": true
     }
   ]
 }
